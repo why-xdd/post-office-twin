@@ -149,3 +149,32 @@ def test_check_ids_endpoint(client: TestClient, document: dict) -> None:
     duplicated["equipment"][1]["id"] = duplicated["equipment"][0]["id"]
     body = client.post("/api/plans/check-ids", json={"document": duplicated}).json()
     assert body["уникальны"] is False
+
+
+def test_dictionaries_merge_plan_types(client: TestClient, document: dict) -> None:
+    custom = json.loads(json.dumps(document))
+    custom["dictionaries"] = {"equipment_types": [{"code": "coffee_machine", "label": "Кофемашина"}]}
+    body = client.post("/api/dictionaries", json={"document": custom}).json()
+    codes = {t["code"] for t in body["equipment_types"]}
+    assert {"cashier_window", "coffee_machine"} <= codes
+
+
+def test_capacity_endpoint(client: TestClient, document: dict) -> None:
+    body = client.post("/api/capacity", json={"document": document}).json()
+    assert body["groups"]
+
+
+def test_assistant_place_rejects_unknown_type(client: TestClient, document: dict) -> None:
+    response = client.post(
+        "/api/assistant/place", json={"document": document, "equipment_type": "нет_такого"}
+    )
+    assert response.status_code == 422
+    assert "отсутствует в справочнике" in response.json()["detail"]
+
+
+def test_assistant_place_returns_explained_recommendation(client: TestClient, document: dict) -> None:
+    body = client.post(
+        "/api/assistant/place", json={"document": document, "equipment_type": "storage_rack"}
+    ).json()
+    assert body["reasons"]
+    assert body["effects"]

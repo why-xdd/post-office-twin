@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from shapely.geometry import LineString, Point, Polygon
 from shapely.ops import unary_union
 
+from app.dictionaries import is_floor_object
 from app.models import Equipment, Plan, Wall, Zone
 
 # Точность округления линейных величин при выводе, метры.
@@ -53,6 +54,11 @@ def equipment_polygon(item: Equipment) -> Polygon:
         (cx + x * cos_a - y * sin_a, cy + x * sin_a + y * cos_a) for x, y in corners
     ]
     return Polygon(rotated)
+
+
+def floor_equipment(plan: Plan) -> list[Equipment]:
+    """Оборудование, занимающее площадь пола. Настенные и настольные объекты исключены."""
+    return [item for item in plan.equipment if is_floor_object(plan, item.type)]
 
 
 def zone_polygon(zone: Zone) -> Polygon:
@@ -97,7 +103,7 @@ def total_area(plan: Plan) -> float | None:
 
 def occupied_area(plan: Plan) -> float:
     """Площадь пола, занятая оборудованием, без двойного счёта при пересечениях."""
-    shapes = [equipment_polygon(item) for item in plan.equipment]
+    shapes = [equipment_polygon(item) for item in floor_equipment(plan)]
     if not shapes:
         return 0.0
     return round(unary_union(shapes).area, PRECISION)
@@ -129,7 +135,7 @@ def overlaps(plan: Plan, tolerance_sqm: float = 0.001) -> list[Overlap]:
     Допуск отсекает касания по общей грани: два стеллажа впритык — это не ошибка планировки.
     """
     result: list[Overlap] = []
-    items = plan.equipment
+    items = floor_equipment(plan)
     polygons = [equipment_polygon(item) for item in items]
     for i in range(len(items)):
         for j in range(i + 1, len(items)):
@@ -146,11 +152,16 @@ def overlaps(plan: Plan, tolerance_sqm: float = 0.001) -> list[Overlap]:
 
 
 def zone_of_point(plan: Plan, point: tuple[float, float]) -> str | None:
+    """Самая точная зона, содержащая точку.
+
+    Функциональные зоны вкладываются друг в друга (зона ожидания лежит внутри клиентской),
+    поэтому из подходящих выбирается наименьшая по площади.
+    """
     probe = Point(point)
-    for zone in plan.zones:
-        if zone_polygon(zone).contains(probe):
-            return zone.id
-    return None
+    containing = [z for z in plan.zones if zone_polygon(z).contains(probe)]
+    if not containing:
+        return None
+    return min(containing, key=lambda z: zone_polygon(z).area).id
 
 
 def mismatched_zone_links(plan: Plan) -> list[dict[str, str | None]]:
@@ -175,7 +186,7 @@ def clearances(plan: Plan, limit_m: float) -> list[Clearance]:
     рабочими местами и между оборудованием.
     """
     tight: list[Clearance] = []
-    items = plan.equipment
+    items = floor_equipment(plan)
     polygons = [equipment_polygon(item) for item in items]
     for i in range(len(items)):
         for j in range(i + 1, len(items)):
@@ -195,7 +206,7 @@ def wall_clearances(plan: Plan, limit_m: float) -> list[Clearance]:
     """Объекты, стоящие к стене ближе допустимого."""
     tight: list[Clearance] = []
     walls = [(w.id, LineString([w.from_, w.to])) for w in plan.walls]
-    for item in plan.equipment:
+    for item in floor_equipment(plan):
         poly = equipment_polygon(item)
         for wall_id, line in walls:
             distance = poly.distance(line)

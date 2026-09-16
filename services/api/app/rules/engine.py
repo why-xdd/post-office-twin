@@ -233,8 +233,12 @@ def _check_coverage(plan: Plan, rule: Rule) -> list[Finding]:
     return [_finding(rule, message, [item.id for item in windows], capacity)]
 
 
-def _check_path_width(plan: Plan, rule: Rule) -> list[Finding]:
-    """Фактическая ширина пути от входа до мест обслуживания посетителей."""
+def _check_path_width(plan: Plan, rule: Rule, explain: bool = True) -> list[Finding]:
+    """Фактическая ширина пути от входа до мест обслуживания посетителей.
+
+    explain=False пропускает поиск виновников сужения: он нужен человеку, а не счётчику ошибок
+    при переборе кандидатов в поиске мест.
+    """
     if rule.value is None:
         return []
     unreachable: list[str] = []
@@ -258,22 +262,34 @@ def _check_path_width(plan: Plan, rule: Rule) -> list[Finding]:
                 severity=Severity.ERROR,
             )
         )
+    # Находка ссылается на объекты, создающие сужение: переставлять нужно их, а не цели маршрута.
+    blockers = (
+        passability.bottleneck_blockers(plan, VISITOR_TARGET_TYPES, MIN_PATH_WITH_POCKETS_M)
+        if narrow and explain
+        else {}
+    )
     for width, targets in sorted(narrow.items()):
         names = ", ".join(f"«{t}»" for t in targets)
+        culprits = blockers.get(width, [])
+        cause = (
+            f" Сужение создают: {', '.join(f'«{c}»' for c in culprits)}."
+            if culprits
+            else ""
+        )
         if width < MIN_PATH_WITH_POCKETS_M:
             message = (
                 f"Путь от входа сужается до {width} м — к {names}. Норма {rule.value} м, даже с "
                 f"карманами для разъезда — не менее {MIN_PATH_WITH_POCKETS_M} м: посетитель на "
-                f"кресле-коляске не пройдёт."
+                f"кресле-коляске не пройдёт.{cause}"
             )
             severity = Severity.ERROR
         else:
             message = (
                 f"Путь от входа сужается до {width} м — к {names}. Это допустимо только при "
-                f"карманах для разъезда длиной не менее 2 м."
+                f"карманах для разъезда длиной не менее 2 м.{cause}"
             )
             severity = Severity.WARNING
-        findings.append(_finding(rule, message, targets, width, severity=severity))
+        findings.append(_finding(rule, message, culprits or targets, width, severity=severity))
     return findings
 
 
@@ -465,8 +481,13 @@ def structural_findings(plan: Plan) -> list[Finding]:
     return findings
 
 
-def validate(plan: Plan, overrides: dict[str, bool] | None = None) -> ValidationReport:
-    """Полная проверка плана: целостность плюс нормативные правила."""
+def validate(
+    plan: Plan, overrides: dict[str, bool] | None = None, explain: bool = True
+) -> ValidationReport:
+    """Полная проверка плана: целостность плюс нормативные правила.
+
+    explain=False отключает дорогие поясняющие расчёты, не влияющие на число находок.
+    """
     findings = structural_findings(plan)
     active = _enabled(DEFAULT_RULES, overrides)
     checked: list[str] = []
@@ -480,7 +501,10 @@ def validate(plan: Plan, overrides: dict[str, bool] | None = None) -> Validation
             reasons[rule.id] = SKIP_REASONS.get(rule.id, "Проверка для правила не реализована.")
             continue
         checked.append(rule.id)
-        findings.extend(check(plan, rule))
+        if check is _check_path_width:
+            findings.extend(_check_path_width(plan, rule, explain=explain))
+        else:
+            findings.extend(check(plan, rule))
 
     return ValidationReport(
         findings=findings,

@@ -42,6 +42,15 @@ class OpsMeta(Base):
         ge=0,
         description="Население населённого пункта, тыс. чел. — для проверки по Приказу № 538",
     )
+    working_hours: float | None = Field(
+        default=None, gt=0, le=24, description="Часов работы в день — для расчёта потока"
+    )
+    peak_to_average: float | None = Field(
+        default=None, ge=1, description="Во сколько раз поток в час пик выше среднего за день"
+    )
+    service_time_min: float | None = Field(
+        default=None, gt=0, description="Среднее время обслуживания у окна, если нет в карточках"
+    )
 
 
 class Wall(Base):

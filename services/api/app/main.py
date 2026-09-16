@@ -11,6 +11,11 @@ from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, ValidationError
 
+from app.assistant import capacity as capacity_model
+from app.assistant import recommend
+from app.assistant.capacity import CapacityReport
+from app.assistant.recommend import AssistantReport, ImprovementReport, Recommendation
+from app.dictionaries import equipment_types, zone_types
 from app.geometry import core
 from app.models import Plan, duplicate_ids
 from app.rules.catalog import DEFAULT_RULES, Rule, rules_by_id
@@ -205,3 +210,55 @@ def plan_metrics(payload: SaveVersionRequest) -> dict[str, Any]:
         "оборудование_по_типам": by_type,
         "оборудование_по_зонам": by_zone,
     }
+
+
+class PlaceRequest(BaseModel):
+    document: dict[str, Any]
+    equipment_type: str = Field(min_length=1, description="Код типа оборудования из справочника")
+    zone_id: str | None = Field(default=None, description="Ограничить поиск зоной")
+
+
+@app.post("/api/dictionaries", summary="Справочники зон и типов оборудования")
+def get_dictionaries(payload: SaveVersionRequest | None = None) -> dict[str, Any]:
+    """Встроенные справочники, дополненные и переопределённые справочником из плана."""
+    plan = _parse_plan(payload.document) if payload is not None else None
+    return {
+        "zone_types": [z.model_dump() for z in zone_types(plan).values()],
+        "equipment_types": [t.model_dump() for t in equipment_types(plan).values()],
+    }
+
+
+@app.post("/api/capacity", response_model=CapacityReport, summary="Пропускная способность в час пик")
+def plan_capacity(payload: SaveVersionRequest) -> CapacityReport:
+    return capacity_model.analyze(_parse_plan(payload.document))
+
+
+@app.post("/api/assistant", response_model=AssistantReport, summary="Рекомендации ассистента")
+def assistant_advise(payload: SaveVersionRequest) -> AssistantReport:
+    """Все рекомендации для текущего плана: исправления, пропускная способность, комплектность.
+
+    Каждая содержит изменения для редактора, причины со ссылкой на норму, допущения и эффект.
+    """
+    return recommend.advise(_parse_plan(payload.document))
+
+
+@app.post(
+    "/api/assistant/improve",
+    response_model=ImprovementReport,
+    summary="Пошаговое улучшение плана",
+)
+def assistant_improve(payload: SaveVersionRequest) -> ImprovementReport:
+    return recommend.improve(_parse_plan(payload.document))
+
+
+@app.post("/api/assistant/place", response_model=Recommendation, summary="Найти место для объекта")
+def assistant_place(payload: PlaceRequest) -> Recommendation:
+    plan = _parse_plan(payload.document)
+    if payload.equipment_type not in equipment_types(plan):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Тип оборудования «{payload.equipment_type}» отсутствует в справочнике плана.",
+        )
+    if payload.zone_id is not None and payload.zone_id not in {z.id for z in plan.zones}:
+        raise HTTPException(status_code=422, detail=f"Зона «{payload.zone_id}» на плане не найдена.")
+    return recommend.place_equipment(plan, payload.equipment_type, payload.zone_id)

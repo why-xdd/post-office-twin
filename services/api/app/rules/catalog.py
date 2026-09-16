@@ -67,28 +67,17 @@ DEFAULT_RULES: list[Rule] = [
         rationale="От стены до границы рабочей зоны и до торца оборудования требуется 800 мм.",
     ),
     Rule(
-        id="parcel_workplace_area",
-        title="Площадь рабочего места приёма и выдачи посылок",
+        id="workplace_area",
+        title="Площадь операционных рабочих мест",
         category=Category.TECHNOLOGY,
         severity=Severity.WARNING,
         source=VNTP,
         clause="п. 3.9",
-        value=7.5,
+        value=None,
         unit="м²",
-        rationale="На рабочее место приёма и выдачи посылок отводится 7,5 м², "
-        "расстояние от стены до барьера — 3,0 м.",
-    ),
-    Rule(
-        id="correspondence_workplace_area",
-        title="Площадь рабочего места письменной корреспонденции и подписки",
-        category=Category.TECHNOLOGY,
-        severity=Severity.WARNING,
-        source=VNTP,
-        clause="п. 3.9",
-        value=6.0,
-        unit="м²",
-        rationale="На рабочее место приёма письменной корреспонденции, бандеролей и подписки "
-        "отводится 6,0 м², расстояние от стены до барьера — 2,0 м.",
+        rationale="На рабочее место приёма и выдачи посылок отводится 7,5 м², на место приёма "
+        "письменной корреспонденции, бандеролей и подписки — 6,0 м². Допущение: суммарная "
+        "потребность сравнивается с площадью служебных зон плана.",
     ),
     Rule(
         id="client_area_per_workplace",
@@ -196,6 +185,10 @@ DEFAULT_RULES: list[Rule] = [
         "100–250 — 6–10, до 100 — до 6, сельские поселения — 5.",
     ),
 ]
+
+PARCEL_WORKPLACE_SQM = 7.5
+CORRESPONDENCE_WORKPLACE_SQM = 6.0
+MIN_PATH_WITH_POCKETS_M = 1.2
 
 COVERAGE_PER_WINDOW: list[tuple[float, float, float]] = [
     # (нижняя граница населения пункта в тыс., охват на окно от, охват на окно до)

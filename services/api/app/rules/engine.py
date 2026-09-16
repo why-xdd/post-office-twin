@@ -8,11 +8,17 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from app.geometry import core
+from shapely.geometry import Point as ShapelyPoint
+from shapely.geometry import box
+
+from app.geometry import core, passability
 from app.models import Plan
 from app.rules.catalog import (
+    CORRESPONDENCE_WORKPLACE_SQM,
     COVERAGE_PER_WINDOW,
     DEFAULT_RULES,
+    MIN_PATH_WITH_POCKETS_M,
+    PARCEL_WORKPLACE_SQM,
     RURAL_COVERAGE_PER_WINDOW,
     Category,
     Rule,
@@ -22,6 +28,9 @@ from app.rules.catalog import (
 SERVICE_WINDOW_TYPES = ("cashier_window", "pvz_counter")
 WAITING_ZONE_TYPES = ("waiting", "queue_accumulator")
 CLIENT_ZONE_TYPES = ("client_area",)
+STAFF_ZONE_TYPES = ("back_office",)
+# Объекты, к которым посетитель должен иметь возможность подойти.
+VISITOR_TARGET_TYPES = (*SERVICE_WINDOW_TYPES, "self_service_kiosk", "atm", "package_drop_box")
 
 
 class Finding(BaseModel):
@@ -47,6 +56,9 @@ class ValidationReport(BaseModel):
     infos: int
     checked_rules: list[str]
     skipped_rules: list[str] = Field(default_factory=list)
+    skipped_reasons: dict[str, str] = Field(
+        default_factory=dict, description="Почему правило не удалось применить к этому плану"
+    )
 
 
 def _enabled(rules: list[Rule], overrides: dict[str, bool] | None) -> list[Rule]:
@@ -54,18 +66,25 @@ def _enabled(rules: list[Rule], overrides: dict[str, bool] | None) -> list[Rule]
     return [r for r in rules if overrides.get(r.id, r.enabled)]
 
 
-def _finding(rule: Rule, message: str, objects: list[str], measured: float | None) -> Finding:
+def _finding(
+    rule: Rule,
+    message: str,
+    objects: list[str],
+    measured: float | None,
+    severity: Severity | None = None,
+    required: float | None = None,
+) -> Finding:
     return Finding(
         rule_id=rule.id,
         title=rule.title,
-        severity=rule.severity,
+        severity=severity or rule.severity,
         category=rule.category,
         source=rule.source,
         clause=rule.clause,
         message=message,
         objects=objects,
         measured=measured,
-        required=rule.value,
+        required=required if required is not None else rule.value,
         unit=rule.unit,
     )
 
@@ -214,6 +233,148 @@ def _check_coverage(plan: Plan, rule: Rule) -> list[Finding]:
     return [_finding(rule, message, [item.id for item in windows], capacity)]
 
 
+def _check_path_width(plan: Plan, rule: Rule) -> list[Finding]:
+    """Фактическая ширина пути от входа до мест обслуживания посетителей."""
+    if rule.value is None:
+        return []
+    unreachable: list[str] = []
+    # Маршруты с одинаковой шириной узкого места почти всегда упираются в одно и то же
+    # сужение, поэтому они объединяются в одну находку, а не повторяются по каждому объекту.
+    narrow: dict[float, list[str]] = {}
+    for route in passability.client_route_widths(plan, VISITOR_TARGET_TYPES):
+        if not route.reachable:
+            unreachable.append(route.target_id)
+        elif route.width_m < rule.value:
+            narrow.setdefault(route.width_m, []).append(route.target_id)
+
+    findings: list[Finding] = []
+    if unreachable:
+        findings.append(
+            _finding(
+                rule,
+                f"От входа нельзя дойти до: {', '.join(unreachable)} — путь перекрыт оборудованием.",
+                unreachable,
+                0.0,
+                severity=Severity.ERROR,
+            )
+        )
+    for width, targets in sorted(narrow.items()):
+        names = ", ".join(f"«{t}»" for t in targets)
+        if width < MIN_PATH_WITH_POCKETS_M:
+            message = (
+                f"Путь от входа сужается до {width} м — к {names}. Норма {rule.value} м, даже с "
+                f"карманами для разъезда — не менее {MIN_PATH_WITH_POCKETS_M} м: посетитель на "
+                f"кресле-коляске не пройдёт."
+            )
+            severity = Severity.ERROR
+        else:
+            message = (
+                f"Путь от входа сужается до {width} м — к {names}. Это допустимо только при "
+                f"карманах для разъезда длиной не менее 2 м."
+            )
+            severity = Severity.WARNING
+        findings.append(_finding(rule, message, targets, width, severity=severity))
+    return findings
+
+
+def _check_turning_circle(plan: Plan, rule: Rule) -> list[Finding]:
+    if rule.value is None:
+        return []
+    zone_types = (*CLIENT_ZONE_TYPES, *WAITING_ZONE_TYPES)
+    if not core.zone_by_type(plan, *zone_types):
+        return []
+    diameter, _center = passability.largest_clear_circle(plan, zone_types)
+    if diameter >= rule.value:
+        return []
+    return [
+        _finding(
+            rule,
+            f"В клиентской зоне нет свободного места для разворота кресла-коляски: наибольший "
+            f"свободный круг — {diameter} м при требуемых {rule.value} м.",
+            [zone.id for zone in core.zone_by_type(plan, *zone_types)],
+            diameter,
+        )
+    ]
+
+
+def _check_counter_front(plan: Plan, rule: Rule) -> list[Finding]:
+    """Рабочий фронт — сторона окна, обращённая к посетителю, то есть длинная сторона габарита."""
+    if rule.value is None:
+        return []
+    findings: list[Finding] = []
+    for item in core.equipment_by_type(plan, *SERVICE_WINDOW_TYPES):
+        front = max(item.size_m)
+        if front < rule.value:
+            findings.append(
+                _finding(
+                    rule,
+                    f"Рабочий фронт «{item.id}» — {front} м, требуется не менее {rule.value} м.",
+                    [item.id],
+                    front,
+                )
+            )
+    return findings
+
+
+def _check_door_maneuver(plan: Plan, rule: Rule) -> list[Finding]:
+    """Свободная площадка перед главным входом с внутренней стороны помещения."""
+    if rule.value is None:
+        return []
+    entrance = passability.entrance_point(plan)
+    shape = core.outline(plan)
+    if entrance is None or shape is None:
+        return []
+    half = rule.value / 2.0
+    # Квадрат строится от точки входа внутрь помещения, туда, где больше площади.
+    ex, ey = entrance
+    candidates = [
+        box(ex - half, ey - rule.value, ex + half, ey),
+        box(ex - half, ey, ex + half, ey + rule.value),
+        box(ex - rule.value, ey - half, ex, ey + half),
+        box(ex, ey - half, ex + rule.value, ey + half),
+    ]
+    square = max(candidates, key=lambda c: c.intersection(shape).area)
+    blockers = [
+        item.id
+        for item in plan.equipment
+        if core.equipment_polygon(item).intersection(square).area > 0.01
+    ]
+    if not blockers:
+        return []
+    return [
+        _finding(
+            rule,
+            f"Площадка {rule.value} × {rule.value} м перед входом занята: "
+            f"{', '.join(blockers)}.",
+            blockers,
+            None,
+        )
+    ]
+
+
+def _check_workplace_area(plan: Plan, rule: Rule) -> list[Finding]:
+    parcel = core.equipment_by_type(plan, "pvz_counter")
+    correspondence = core.equipment_by_type(plan, "cashier_window")
+    staff_zones = core.zone_by_type(plan, *STAFF_ZONE_TYPES)
+    if not (parcel or correspondence) or not staff_zones:
+        return []
+    required = len(parcel) * PARCEL_WORKPLACE_SQM + len(correspondence) * CORRESPONDENCE_WORKPLACE_SQM
+    available = round(sum(core.area_of_zone(z) for z in staff_zones), 2)
+    if available >= required:
+        return []
+    return [
+        _finding(
+            rule,
+            f"Служебная зона {available} м² при потребности {required} м²: "
+            f"{len(parcel)} мест приёма посылок по {PARCEL_WORKPLACE_SQM} м² и "
+            f"{len(correspondence)} мест корреспонденции по {CORRESPONDENCE_WORKPLACE_SQM} м².",
+            [item.id for item in (*parcel, *correspondence)],
+            available,
+            required=required,
+        )
+    ]
+
+
 CHECKS = {
     "passage_between_workplaces": _check_passages,
     "clearance_from_wall": _check_wall_clearance,
@@ -221,6 +382,16 @@ CHECKS = {
     "counter_height": _check_counter_height,
     "queue_terminal_near_entrance": _check_queue_terminal,
     "coverage_per_service_window": _check_coverage,
+    "movement_path_width": _check_path_width,
+    "wheelchair_turning_circle": _check_turning_circle,
+    "counter_front_width": _check_counter_front,
+    "door_maneuver_space": _check_door_maneuver,
+    "workplace_area": _check_workplace_area,
+}
+
+SKIP_REASONS = {
+    "ramp_width": "В формате плана нет объекта «пандус» и наружной площадки входа — "
+    "проверять нечем. Правило применится, когда пандус будет добавлен в справочник.",
 }
 
 
@@ -300,11 +471,13 @@ def validate(plan: Plan, overrides: dict[str, bool] | None = None) -> Validation
     active = _enabled(DEFAULT_RULES, overrides)
     checked: list[str] = []
     skipped: list[str] = []
+    reasons: dict[str, str] = {}
 
     for rule in active:
         check = CHECKS.get(rule.id)
         if check is None:
             skipped.append(rule.id)
+            reasons[rule.id] = SKIP_REASONS.get(rule.id, "Проверка для правила не реализована.")
             continue
         checked.append(rule.id)
         findings.extend(check(plan, rule))
@@ -316,4 +489,5 @@ def validate(plan: Plan, overrides: dict[str, bool] | None = None) -> Validation
         infos=sum(1 for f in findings if f.severity is Severity.INFO),
         checked_rules=checked,
         skipped_rules=skipped,
+        skipped_reasons=reasons,
     )

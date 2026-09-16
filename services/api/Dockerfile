@@ -5,7 +5,7 @@ ENV PYTHONUNBUFFERED=1 \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy
 
-COPY --from=ghcr.io/astral-sh/uv:0.9.7 /uv /usr/local/bin/uv
+RUN pip install --no-cache-dir uv==0.9.7
 
 WORKDIR /app
 

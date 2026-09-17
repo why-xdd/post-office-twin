@@ -60,6 +60,8 @@ interface WorkspaceState {
   report: ValidationReport | null;
   reportState: 'idle' | 'checking' | 'ready' | 'error';
   preview: Change[] | null;
+  /** Объекты, только что вставшие на место по рекомендации: для движения «защёлкивания». */
+  latched: string[];
 
   open: (planId: string | null, title: string, version: number, doc: Plan) => void;
   close: () => void;
@@ -80,6 +82,7 @@ interface WorkspaceState {
   setPanel: (panel: SidePanel) => void;
   setReport: (report: ValidationReport | null, state: WorkspaceState['reportState']) => void;
   setPreview: (changes: Change[] | null) => void;
+  latch: (ids: string[]) => void;
 
   updateEquipment: (id: string, patch: Partial<Equipment>) => void;
   updateZone: (id: string, patch: Partial<Zone>) => void;
@@ -108,6 +111,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   report: null,
   reportState: 'idle',
   preview: null,
+  latched: [],
 
   open: (planId, title, version, doc) =>
     set({
@@ -205,6 +209,10 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   setPanel: (panel) => set({ panel }),
   setReport: (report, reportState) => set({ report, reportState }),
   setPreview: (preview) => set({ preview }),
+  latch: (ids) => {
+    set({ latched: ids });
+    window.setTimeout(() => set({ latched: [] }), 700);
+  },
 
   updateEquipment: (id, patch) =>
     get().commit((draft) => {

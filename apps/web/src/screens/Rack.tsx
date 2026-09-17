@@ -11,6 +11,7 @@ import { Mark } from '../components/Mark';
 import { Plate } from '../components/Plate';
 import { ServerBadge } from '../components/ServerBadge';
 import { ApiError, api, type PlanSummary } from '../lib/api';
+import { withDemoPassports } from '../lib/demoPassports';
 import type { Plan } from '../lib/plan';
 import { blankPlan, formatNumber, planArea, plural } from '../lib/planFacts';
 import { navigate } from '../lib/router';
@@ -93,7 +94,7 @@ export function Rack() {
     setBusy('demo');
     setProblem(null);
     try {
-      const ref = await api.createPlan(DEMO_TITLE, sample, 'Исходный файл заказчика');
+      const ref = await api.createPlan(DEMO_TITLE, withDemoPassports(sample), 'Файл заказчика с синтетическими паспортами оборудования');
       navigate({ name: 'plan', id: ref.id });
     } catch (error) {
       setProblem(describeError(error, 'Не удалось открыть демо-план.'));

@@ -40,6 +40,19 @@ def test_path_fix_widens_entrance_to_norm(plan: Plan) -> None:
     assert {c.object_id for c in rec.changes} >= {"eq_atm", "eq_bench_1"}
 
 
+def test_path_fix_effects_match_its_summary(plan: Plan) -> None:
+    rec = recommend.recommend_path_fix(plan, recommend.summarize(plan))
+    assert rec is not None
+    effects = {e.key: e for e in rec.effects}
+    entrance = effects["entrance_route_width"]
+    assert entrance.after is not None and entrance.after >= 1.2
+    assert f"{entrance.before} → {entrance.after} м" in rec.summary
+    # Оставшееся местное сужение названо в тексте, а не спрятано за общей шириной прохода.
+    narrowest = effects["min_route_width"]
+    if narrowest.after is not None and narrowest.after < 1.2:
+        assert f"{narrowest.after} м" in rec.summary
+
+
 def test_every_recommendation_explains_itself(improvement: recommend.ImprovementReport) -> None:
     assert improvement.steps
     for step in improvement.steps:

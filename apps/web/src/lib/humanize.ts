@@ -23,5 +23,10 @@ export function humanize(text: string, plan: Plan | null, book: AddressBook): st
     if (wall) return `«${book.byId.get(key('wall', id)) ?? ''} ${wall.label ?? 'стена'}»`.replace('« ', '«');
     return whole;
   });
-  return withNames.replace(/(\d)\.(\d)/g, '$1,$2');
+  // «Окно кассы №1 (eq_cashier_1)» → «Окно кассы №1 (О-01)»
+  const withAddresses = withNames.replace(/\(([A-Za-z][A-Za-z0-9_.-]*)\)/g, (whole, id: string) => {
+    const address = book.byId.get(key('equipment', id)) ?? book.byId.get(key('zone', id));
+    return address ? `(${address})` : whole;
+  });
+  return withAddresses.replace(/(\d)\.(\d)/g, '$1,$2');
 }

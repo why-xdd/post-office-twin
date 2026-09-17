@@ -78,6 +78,7 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
   const tool = useWorkspace((s) => s.tool);
   const placingType = useWorkspace((s) => s.placingType);
   const preview = useWorkspace((s) => s.preview);
+  const latched = useWorkspace((s) => s.latched);
   const mode = useWorkspace((s) => s.mode);
   const select = useWorkspace((s) => s.select);
   const commit = useWorkspace((s) => s.commit);
@@ -544,7 +545,7 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
           return (
             <g
               key={item.id}
-              className={`plan-equipment${floor ? '' : ' plan-equipment--mounted'}${isPreviewed ? ' plan-equipment--drawn-out' : ''}${isHover ? ' plan-equipment--hover' : ''}`}
+              className={`plan-equipment${floor ? '' : ' plan-equipment--mounted'}${isPreviewed ? ' plan-equipment--drawn-out' : ''}${isHover ? ' plan-equipment--hover' : ''}${latched.includes(item.id) ? ' plan-equipment--latched' : ''}`}
             >
               <path d={screenPath(view, corners)} className="plan-equipment__body" />
               {isHighlighted && <path d={screenPath(view, corners)} className="plan-equipment__violation" />}
@@ -716,11 +717,11 @@ function SelectionFrame({ view, item, editable }: { view: View; item: Equipment;
   return (
     <g className="plan-selection" pointerEvents="none">
       <path d={`M${corners.map((p) => p.join(' ')).join('L')}Z`} className="plan-selection__outline" />
-      {corners.map(([x, y], index) => (
-        <rect key={index} x={x - 3.5} y={y - 3.5} width={7} height={7} className="plan-selection__corner" />
-      ))}
       {editable && (
         <>
+          {corners.map(([x, y], index) => (
+            <rect key={index} x={x - 3.5} y={y - 3.5} width={7} height={7} className="plan-selection__corner" />
+          ))}
           <line x1={handle.base[0]} y1={handle.base[1]} x2={handle.knob[0]} y2={handle.knob[1]} className="plan-selection__stem" />
           <circle cx={handle.knob[0]} cy={handle.knob[1]} r={5.5} className="plan-selection__knob" />
         </>

@@ -1,4 +1,4 @@
-"""ИИ-ассистент планировки: рекомендации с объяснением и эффектом.
+"""Ассистент планировки: рекомендации с объяснением и эффектом.
 
 Сценарии из ТЗ:
 - поиск места для дополнительного рабочего места, окна обслуживания или стеллажа;
@@ -100,6 +100,14 @@ class AssistantReport(BaseModel):
     elapsed_ms: float
 
 
+def _narrowest_targets(routes: list[passability.RouteWidth]) -> list[str]:
+    reachable = [r for r in routes if r.reachable]
+    if not reachable:
+        return []
+    narrowest = min(r.width_m for r in reachable)
+    return [r.target_id for r in reachable if r.width_m == narrowest]
+
+
 def summarize(plan: Plan) -> dict[str, Any]:
     report = validate(plan, explain=False)
     routes = passability.client_route_widths(plan, VISITOR_TARGET_TYPES)
@@ -116,6 +124,8 @@ def summarize(plan: Plan) -> dict[str, Any]:
         "equipment_total": len(plan.equipment),
         "equipment_by_type": counts,
         "min_route_width": min((r.width_m for r in routes), default=None),
+        "entrance_route_width": max((r.width_m for r in routes if r.reachable), default=None),
+        "narrowest_targets": _narrowest_targets(routes),
         "waiting_capacity": capacity.waiting_capacity_persons,
         "peak_queue": capacity.peak_queue_persons,
         "waits": {g.name: g.mean_wait_min for g in capacity.groups},
@@ -136,10 +146,14 @@ def _effects(before: dict[str, Any], after: dict[str, Any], type_code: str | Non
         eff("warnings", "Предупреждений", "", True),
         eff("free_area", "Свободная площадь", "м²", False),
         eff("occupied_area", "Занято оборудованием", "м²", True),
+        eff("entrance_route_width", "Ширина прохода от входа", "м", False),
         eff("min_route_width", "Самое узкое место пути посетителя", "м", False),
         eff("waiting_capacity", "Вместимость зоны ожидания", "чел.", False),
     ]
     effects[3].improved = None  # занятая площадь сама по себе не хороша и не плоха
+    if before.get("equipment_total") == after.get("equipment_total"):
+        # При перестановке площадь меняется только из-за снятых наложений и выхода за контур.
+        effects[2].improved = None
     if type_code is not None:
         effects.append(
             Effect(
@@ -174,7 +188,12 @@ def _object_name(plan: Plan, object_id: str) -> str:
     item = next((e for e in plan.equipment if e.id == object_id), None)
     if item is None:
         return object_id
-    return f"{item.label or _label(plan, item.type)} ({item.id})"
+    name = item.label or _label(plan, item.type)
+    # Внутри фразы название пишется со строчной: «переставить окно кассы №1», но «АТМ» и
+    # другие аббревиатуры остаются как есть.
+    if len(name) > 1 and name[0].isupper() and name[1].islower():
+        name = name[0].lower() + name[1:]
+    return f"{name} ({item.id})"
 
 
 def _change_from(plan: Plan, evaluated: search.Evaluated, op: str, object_id: str, type_code: str, template: Equipment | None = None) -> Change:
@@ -279,15 +298,35 @@ def recommend_path_fix(plan: Plan, before: dict[str, Any]) -> Recommendation | N
 
     names = ", ".join(_object_name(plan, c.object_id) for c in changes)
     reaches_norm = current_width >= MIN_PATH_WITH_POCKETS_M
+    remaining = ""
+    narrowest_after = after.get("min_route_width")
+    if narrowest_after is not None and narrowest_after < MIN_PATH_WITH_POCKETS_M:
+        targets = ", ".join(_object_name(current, t) for t in after.get("narrowest_targets", []))
+        remaining = (
+            f" Местное сужение до {narrowest_after} м остаётся на подходе: {targets} — "
+            "его снимают отдельные рекомендации."
+        )
+    trade_off = ""
+    if (
+        isinstance(before.get("waiting_capacity"), (int, float))
+        and isinstance(after.get("waiting_capacity"), (int, float))
+        and after["waiting_capacity"] < before["waiting_capacity"]
+    ):
+        trade_off = (
+            f" Цена решения: вместимость зоны ожидания {before['waiting_capacity']} → "
+            f"{after['waiting_capacity']} чел."
+        )
     return Recommendation(
         id="fix:path:" + "+".join(c.object_id for c in changes),
         scenario="fix",
         priority=0,
         title="Освободить проход от входа",
         summary=(
-            f"Переставить {names}: ширина прохода от входа {width_before} → {current_width} м"
+            f"Переставить: {names}. Ширина прохода от входа {width_before} → {current_width} м"
             + ("" if reaches_norm else f" (норма не менее {MIN_PATH_WITH_POCKETS_M} м пока не достигнута)")
             + f". Ошибок станет {after['errors']} вместо {before['errors']}."
+            + remaining
+            + trade_off
         ),
         changes=changes,
         reasons=[
@@ -363,7 +402,7 @@ def recommend_fixes(plan: Plan, before: dict[str, Any], limit: int | None = None
                 id=f"fix:{item.id}",
                 scenario="fix",
                 priority=0,
-                title=f"Переставить {_object_name(plan, item.id)}",
+                title=f"Переставить: {_object_name(plan, item.id)}",
                 summary=(
                     f"Перенос на {moved:.2f} м в зону «{_zone_label(best.plan, best.candidate and next(e for e in best.plan.equipment if e.id == item.id).zone)}» "
                     f"убирает ошибок: {fixed}. Ошибок станет {after['errors']} вместо {before['errors']}."
@@ -394,7 +433,14 @@ def recommend_fixes(plan: Plan, before: dict[str, Any], limit: int | None = None
                 search=_stats(found),
             )
         )
-    results.sort(key=lambda r: min((e.after for e in r.effects if e.key == "errors"), default=0))
+    # Освобождение прохода от входа идёт первым: пока посетитель на кресле-коляске не может
+    # войти, остальные исправления планировки для него не имеют значения.
+    results.sort(
+        key=lambda r: (
+            0 if r.id.startswith("fix:path:") else 1,
+            min((e.after for e in r.effects if e.key == "errors"), default=0),
+        )
+    )
     return results
 
 

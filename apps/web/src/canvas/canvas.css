@@ -68,6 +68,29 @@
   pointer-events: none;
 }
 
+/* Объект встал на место по рекомендации: короткий щелчок защёлки */
+.plan-equipment--latched {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: latch var(--dur-drawer) var(--ease-latch);
+}
+
+.plan-equipment--latched .plan-equipment__body {
+  stroke-width: 2.5;
+}
+
+@keyframes latch {
+  0% {
+    transform: scale(1.06);
+  }
+  55% {
+    transform: scale(0.985);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
 /* Адресные таблички */
 .plan-address rect {
   fill: var(--steel-700);
@@ -293,7 +316,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .plan-selection__outline,
-  .plan-preview__ghost {
+  .plan-preview__ghost,
+  .plan-equipment--latched {
     animation: none;
   }
 }

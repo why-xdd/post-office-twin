@@ -24,8 +24,11 @@ import type { View } from '../lib/geometry';
 import type { EquipmentTypeInfo, Point, Rule, ZoneTypeInfo } from '../lib/plan';
 import { formatNumber, planArea, plural } from '../lib/planFacts';
 import { navigate } from '../lib/router';
+import { Assistant } from '../panels/Assistant';
 import { Checks } from '../panels/Checks';
+import { Inventory } from '../panels/Inventory';
 import { Library } from '../panels/Library';
+import { Passport } from '../panels/Passport';
 import { Properties } from '../panels/Properties';
 import { isDirty, useWorkspace, type SidePanel } from '../state/store';
 import './workspace.css';
@@ -289,7 +292,7 @@ export function Workspace({ planId }: WorkspaceProps) {
 
   // При выборе объекта в проектировании показываем его свойства
   useEffect(() => {
-    if (selection && mode === 'design' && panel !== 'checks') setPanel('properties');
+    if (selection && mode === 'design' && panel !== 'checks' && panel !== 'assistant' && panel !== 'inventory') setPanel('properties');
     if (selection?.kind === 'equipment' && mode === 'operate') setPanel('passport');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selection?.id]);
@@ -318,9 +321,14 @@ export function Workspace({ planId }: WorkspaceProps) {
     mode === 'design'
       ? [
           { id: 'checks', label: 'Проверка', count: report?.errors ?? undefined, tone: report && report.errors > 0 ? 'signal' : undefined },
+          { id: 'assistant', label: 'Ассистент' },
           { id: 'properties', label: 'Свойства' },
+          { id: 'inventory', label: 'Инвентарь' },
         ]
-      : [{ id: 'passport', label: 'Паспорт' }];
+      : [
+          { id: 'passport', label: 'Паспорт' },
+          { id: 'inventory', label: 'Инвентарь' },
+        ];
 
   const area = planArea(doc);
 
@@ -441,11 +449,9 @@ export function Workspace({ planId }: WorkspaceProps) {
         <div className="ws-panel" role="tabpanel">
           {panel === 'checks' && <Checks book={book} onFocusObject={focusObject} />}
           {panel === 'properties' && <Properties book={book} types={typeMap} zoneTypes={zoneTypes} />}
-          {panel === 'passport' && (
-            <div className="panel-state">
-              <p>Выберите объект на плане, чтобы открыть его паспорт.</p>
-            </div>
-          )}
+          {panel === 'assistant' && <Assistant book={book} types={types} onFocusObject={focusObject} onNotice={setNotice} />}
+          {panel === 'inventory' && <Inventory book={book} types={typeMap} onFocusObject={focusObject} />}
+          {panel === 'passport' && <Passport book={book} types={typeMap} />}
         </div>
       </aside>
 

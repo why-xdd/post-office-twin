@@ -25,6 +25,7 @@ import { SelectField } from '../components/fields';
 import type { AddressBook } from '../lib/addresses';
 import { formatAddress, key } from '../lib/addresses';
 import { ApiError, api } from '../lib/api';
+import { mergeSteps } from '../lib/fixProposal';
 import { humanize } from '../lib/humanize';
 import type {
   CapacityReport,
@@ -502,17 +503,3 @@ function CapacityBlock({ capacity }: { capacity: CapacityReport }) {
 }
 
 /** Шаги улучшения сводятся к итоговым изменениям: для каждого объекта берётся последнее место. */
-function mergeSteps(report: ImprovementReport): RecommendationChange[] {
-  const byObject = new Map<string, RecommendationChange>();
-  for (const step of report.steps) {
-    for (const change of step.recommendation.changes) {
-      const prior = byObject.get(change.object_id);
-      byObject.set(change.object_id, {
-        ...change,
-        previous_position: prior?.previous_position ?? change.previous_position,
-        op: prior?.op === 'add' ? 'add' : change.op,
-      });
-    }
-  }
-  return [...byObject.values()];
-}

@@ -1,19 +1,19 @@
 /**
- * Стеллаж планов — первый экран.
+ * Первый экран: что делает сервис, одна главная кнопка — открыть пример, и сохранённые планы.
  *
- * Каждый план — дверца ячейки с адресом и этикеткой: название, площадь, объекты, версии и
- * итог проверки по нормам. Первая ячейка — демо-план в формате заказчика.
+ * Каждый план — дверца с этикеткой: название, площадь, объекты, версии и итог проверки.
  */
 
-import { CircleCheck, FileUp, KeyRound, LoaderCircle, Plus, TriangleAlert } from 'lucide-react';
+import { CircleCheck, FileUp, FolderOpen, LoaderCircle, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Mark } from '../components/Mark';
-import { Plate } from '../components/Plate';
+import { PlanThumb } from '../components/PlanThumb';
 import { ServerBadge } from '../components/ServerBadge';
 import { ApiError, api, type PlanSummary } from '../lib/api';
 import { withDemoPassports } from '../lib/demoPassports';
-import type { Plan } from '../lib/plan';
+import type { Plan, ValidationReport } from '../lib/plan';
 import { blankPlan, formatNumber, planArea, plural } from '../lib/planFacts';
+import { sortFindings } from '../lib/plainFindings';
 import { navigate } from '../lib/router';
 import { useServer } from '../lib/useServer';
 import './rack.css';
@@ -32,7 +32,7 @@ interface Problem {
   details: string[];
 }
 
-const DEMO_TITLE = 'ОПС-1 — демо-план заказчика';
+const DEMO_TITLE = 'Пример: ОПС-1';
 
 function describeError(error: unknown, fallback: string): Problem {
   if (error instanceof ApiError) return { title: error.message, details: error.details };
@@ -48,6 +48,7 @@ export function Rack() {
   const [facts, setFacts] = useState<Record<string, Facts>>({});
   const [sample, setSample] = useState<Plan | null>(null);
   const [sampleFacts, setSampleFacts] = useState<Facts | null>(null);
+  const [sampleReport, setSampleReport] = useState<ValidationReport | null>(null);
   const [busy, setBusy] = useState<Busy>(null);
   const [problem, setProblem] = useState<Problem | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -59,6 +60,7 @@ export function Rack() {
       setSample(demo);
       if (demo) {
         const report = await api.validate(demo).catch(() => null);
+        setSampleReport(report ? { ...report, findings: sortFindings(report.findings) } : null);
         setSampleFacts({
           area: planArea(demo),
           objects: demo.equipment?.length ?? 0,
@@ -91,6 +93,12 @@ export function Rack() {
 
   const openDemo = async () => {
     if (!sample) return;
+    // Нетронутая копия примера уже есть — открываем её, а не плодим одинаковые планы.
+    const untouched = plans?.find((plan) => plan.title === DEMO_TITLE && plan.versions === 1);
+    if (untouched) {
+      navigate({ name: 'plan', id: untouched.id });
+      return;
+    }
     setBusy('demo');
     setProblem(null);
     try {
@@ -142,50 +150,70 @@ export function Rack() {
       </header>
 
       <main className="cabinet on-steel">
-        <div className="cabinet__head">
-          <div>
-            <h1>Планы отделений</h1>
+        <section className="cabinet__hero">
+          <div className="cabinet__intro">
+            <h1>Проверка планировки отделения по нормам</h1>
             <p className="cabinet__lead">
-              Откройте план, чтобы проверить планировку по отраслевым нормам и изменить её.
+              Откройте план — нарушения отметятся прямо на чертеже, а расстановку, при которой их нет, можно получить одной
+              кнопкой.
+            </p>
+            <div className="cabinet__actions">
+              <button
+                type="button"
+                className="btn btn--label cabinet__primary"
+                onClick={openDemo}
+                disabled={!ready || !sample || busy !== null}
+              >
+                {busy === 'demo' ? <LoaderCircle size={18} className="spin" aria-hidden="true" /> : <FolderOpen size={18} aria-hidden="true" />}
+                Открыть пример
+              </button>
+              <button
+                type="button"
+                className="btn btn--steel cabinet__secondary"
+                onClick={() => fileInput.current?.click()}
+                disabled={!ready || busy !== null}
+              >
+                {busy === 'upload' ? <LoaderCircle size={18} className="spin" aria-hidden="true" /> : <FileUp size={18} aria-hidden="true" />}
+                Загрузить свой план
+              </button>
+              <input
+                ref={fileInput}
+                type="file"
+                accept="application/json,.json"
+                className="visually-hidden"
+                tabIndex={-1}
+                aria-hidden="true"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = '';
+                  if (file) void upload(file);
+                }}
+              />
+            </div>
+            <p className="cabinet__aside">
+              {sampleFacts && sampleFacts.errors !== null && sampleFacts.errors > 0 ? (
+                <>
+                  В примере — отделение на {formatNumber(sampleFacts.area, 0)} м² с {sampleFacts.errors}{' '}
+                  {plural(sampleFacts.errors, 'нарушением', 'нарушениями', 'нарушениями')} норм.{' '}
+                </>
+              ) : null}
+              <button type="button" className="cabinet__link" onClick={createBlank} disabled={!ready || busy !== null}>
+                {busy === 'blank' ? 'Создаём пустой план…' : 'Начать с пустого плана'}
+              </button>
             </p>
           </div>
-          <div className="cabinet__actions">
+          {sample && (
             <button
               type="button"
-              className="btn btn--label"
+              className="cabinet__sheet"
               onClick={openDemo}
-              disabled={!ready || !sample || busy !== null}
-            >
-              {busy === 'demo' ? <LoaderCircle size={16} className="spin" aria-hidden="true" /> : <KeyRound size={16} aria-hidden="true" />}
-              Открыть демо-план
-            </button>
-            <button type="button" className="btn btn--steel" onClick={createBlank} disabled={!ready || busy !== null}>
-              {busy === 'blank' ? <LoaderCircle size={16} className="spin" aria-hidden="true" /> : <Plus size={16} aria-hidden="true" />}
-              Новый план
-            </button>
-            <button
-              type="button"
-              className="btn btn--steel"
-              onClick={() => fileInput.current?.click()}
               disabled={!ready || busy !== null}
+              aria-label="Открыть пример плана"
             >
-              {busy === 'upload' ? <LoaderCircle size={16} className="spin" aria-hidden="true" /> : <FileUp size={16} aria-hidden="true" />}
-              Загрузить файл плана
+              <PlanThumb plan={sample} report={sampleReport} />
             </button>
-            <input
-              ref={fileInput}
-              type="file"
-              accept="application/json,.json"
-              className="visually-hidden"
-              tabIndex={-1}
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                event.target.value = '';
-                if (file) void upload(file);
-              }}
-            />
-          </div>
-        </div>
+          )}
+        </section>
 
         {problem && (
           <div className="cabinet__problem" role="alert">
@@ -210,69 +238,32 @@ export function Rack() {
           </p>
         )}
 
-        <ul className="cells" aria-label="Ячейки планов">
-          {sample && (
-            <li>
-              <button type="button" className="door door--demo" onClick={openDemo} disabled={!ready || busy !== null}>
-                <span className="door__top">
-                  <Plate size="md">Я-00</Plate>
-                  <span className="door__kind">
-                    <KeyRound size={14} aria-hidden="true" />
-                    Демо
-                  </span>
-                </span>
-                <span className="door__label">
-                  <span className="door__title">{sample.ops.name ?? 'Демо-план'}</span>
-                  <span className="door__sub">Пример в формате заказчика. Откроется копия — исходник не меняется.</span>
-                  <DoorFacts facts={sampleFacts} />
-                </span>
-              </button>
-            </li>
-          )}
-
-          {plans?.map((plan, index) => (
-            <li key={plan.id}>
-              <button
-                type="button"
-                className="door"
-                onClick={() => navigate({ name: 'plan', id: plan.id })}
-                disabled={!ready}
-              >
-                <span className="door__top">
-                  <Plate size="md">{`Я-${String(index + 1).padStart(2, '0')}`}</Plate>
-                  <span className="door__kind">
-                    {plan.versions} {plural(plan.versions, 'версия', 'версии', 'версий')}
-                  </span>
-                </span>
-                <span className="door__label">
-                  <span className="door__title">{plan.title}</span>
-                  <span className="door__sub">
-                    Создан {new Date(plan.created_at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}
-                  </span>
-                  <DoorFacts facts={facts[plan.id] ?? null} />
-                </span>
-              </button>
-            </li>
-          ))}
-
-          {Array.from({ length: Math.max(0, 7 - (plans?.length ?? 0) - (sample ? 1 : 0)) }).map((_, i) => (
-            <li key={`empty-${i}`} aria-hidden="true">
-              <span className="door door--empty">
-                <span className="door__top">
-                  <Plate size="md">{`Я-${String((plans?.length ?? 0) + i + 1).padStart(2, '0')}`}</Plate>
-                </span>
-                <span className="door__slot" />
-                <span className="door__lock" />
-              </span>
-            </li>
-          ))}
-        </ul>
-
-        {plans && plans.length === 0 && (
-          <p className="cabinet__note">
-            Своих планов пока нет. Откройте демо-план заказчика или создайте план с нуля — он появится в следующей
-            ячейке.
-          </p>
+        {plans && plans.length > 0 && (
+          <section className="cabinet__plans" aria-labelledby="plans-title">
+            <h2 id="plans-title">Сохранённые планы</h2>
+            <ul className="cells">
+              {plans.map((plan) => (
+                <li key={plan.id}>
+                  <button
+                    type="button"
+                    className="door"
+                    onClick={() => navigate({ name: 'plan', id: plan.id })}
+                    disabled={!ready}
+                  >
+                    <span className="door__label">
+                      <span className="door__title">{plan.title}</span>
+                      <span className="door__sub">
+                        {new Date(plan.created_at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}
+                        {' · '}
+                        {plan.versions} {plural(plan.versions, 'версия', 'версии', 'версий')}
+                      </span>
+                      <DoorFacts facts={facts[plan.id] ?? null} />
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
         )}
       </main>
     </div>

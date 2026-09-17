@@ -247,8 +247,8 @@ def assistant_advise(payload: SaveVersionRequest) -> AssistantReport:
     response_model=ImprovementReport,
     summary="Пошаговое улучшение плана",
 )
-def assistant_improve(payload: SaveVersionRequest) -> ImprovementReport:
-    return recommend.improve(_parse_plan(payload.document))
+def assistant_improve(payload: SaveVersionRequest, fixes_only: bool = False) -> ImprovementReport:
+    return recommend.improve(_parse_plan(payload.document), fixes_only=fixes_only)
 
 
 @app.post("/api/assistant/place", response_model=Recommendation, summary="Найти место для объекта")

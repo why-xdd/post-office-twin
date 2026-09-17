@@ -105,3 +105,17 @@ def test_place_equipment_does_not_add_errors(plan: Plan) -> None:
     if rec.changes:
         after = validate(recommend.apply_changes(plan, rec.changes)).errors
         assert after <= before
+
+
+def test_fixes_only_removes_errors_without_adding_equipment(plan: Plan) -> None:
+    report = recommend.improve(plan, fixes_only=True)
+    assert report.final["errors"] == 0
+    assert all(step.recommendation.scenario == "fix" for step in report.steps)
+    assert report.final["equipment_total"] == report.initial["equipment_total"]
+
+
+def test_fixes_never_block_doors(plan: Plan) -> None:
+    from app.geometry import core
+
+    report = recommend.improve(plan, fixes_only=True)
+    assert core.blocked_doors(Plan.model_validate(report.improved_plan)) == []

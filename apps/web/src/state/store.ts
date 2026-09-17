@@ -17,9 +17,10 @@ export interface Selection {
 }
 
 export type Tool = 'select' | 'zone' | 'wall' | 'equipment';
-export type Mode = 'design' | 'operate';
+/** Обзор — простой показ нарушений и исправления; редактор и эксплуатация — полные режимы. */
+export type Mode = 'review' | 'design' | 'operate';
 export type ViewKind = '2d' | '3d';
-export type SidePanel = 'properties' | 'checks' | 'assistant' | 'inventory' | 'passport';
+export type SidePanel = 'review' | 'properties' | 'checks' | 'assistant' | 'inventory' | 'passport';
 
 export interface Change {
   op: 'add' | 'move' | 'remove';
@@ -62,6 +63,8 @@ interface WorkspaceState {
   preview: Change[] | null;
   /** Объекты, только что вставшие на место по рекомендации: для движения «защёлкивания». */
   latched: string[];
+  /** Номер нарушения, открытого в обзоре: по нему на плане выделяется метка. */
+  activeFinding: number | null;
 
   open: (planId: string | null, title: string, version: number, doc: Plan) => void;
   close: () => void;
@@ -83,6 +86,7 @@ interface WorkspaceState {
   setReport: (report: ValidationReport | null, state: WorkspaceState['reportState']) => void;
   setPreview: (changes: Change[] | null) => void;
   latch: (ids: string[]) => void;
+  setActiveFinding: (index: number | null) => void;
 
   updateEquipment: (id: string, patch: Partial<Equipment>) => void;
   updateZone: (id: string, patch: Partial<Zone>) => void;
@@ -104,14 +108,15 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   highlighted: [],
   tool: 'select',
   placingType: null,
-  mode: 'design',
+  mode: 'review',
   view: '2d',
-  panel: 'checks',
+  panel: 'review',
 
   report: null,
   reportState: 'idle',
   preview: null,
   latched: [],
+  activeFinding: null,
 
   open: (planId, title, version, doc) =>
     set({
@@ -130,6 +135,9 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       preview: null,
       report: null,
       reportState: 'idle',
+      mode: 'review',
+      panel: 'review',
+      activeFinding: null,
     }),
 
   close: () => set({ doc: null, planId: null, title: '', past: [], future: [], preview: null }),
@@ -203,12 +211,22 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       tool: 'select',
       placingType: null,
       preview: null,
-      panel: mode === 'operate' ? 'passport' : state.panel === 'passport' ? 'properties' : state.panel,
+      highlighted: [],
+      activeFinding: null,
+      panel:
+        mode === 'review'
+          ? 'review'
+          : mode === 'operate'
+            ? 'passport'
+            : state.panel === 'passport' || state.panel === 'review'
+              ? 'checks'
+              : state.panel,
     })),
   setView: (view) => set({ view }),
   setPanel: (panel) => set({ panel }),
   setReport: (report, reportState) => set({ report, reportState }),
   setPreview: (preview) => set({ preview }),
+  setActiveFinding: (activeFinding) => set({ activeFinding }),
   latch: (ids) => {
     set({ latched: ids });
     window.setTimeout(() => set({ latched: [] }), 700);

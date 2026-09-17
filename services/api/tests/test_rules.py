@@ -150,3 +150,18 @@ def test_report_counters_match_findings(sample_plan: Plan) -> None:
     assert report.errors == sum(1 for f in report.findings if f.severity is Severity.ERROR)
     assert report.warnings == sum(1 for f in report.findings if f.severity is Severity.WARNING)
     assert report.infos == sum(1 for f in report.findings if f.severity is Severity.INFO)
+
+
+def test_operator_seat_in_doorway_blocks_the_door(sample_plan: Plan) -> None:
+    """Касса у перегородки допустима, пока стул оператора не стоит в проёме служебной двери."""
+    plan = sample_plan.model_copy(deep=True)
+    cashier = next(e for e in plan.equipment if e.id == "eq_cashier_2")
+    assert "doors_not_blocked" not in rule_ids(plan)
+
+    # Дверь в перегородке x = 7,5 на участке y 4–5: оператор садится вплотную к проёму.
+    cashier.position = (6.125, 4.5)
+    cashier.rotation_deg = 90.0
+    cashier.operator_position = (6.925, 4.5)
+    blocked = [f for f in validate(plan).findings if f.rule_id == "doors_not_blocked"]
+    assert blocked and blocked[0].objects == ["eq_cashier_2"]
+    assert blocked[0].severity is Severity.ERROR

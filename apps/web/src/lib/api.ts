@@ -151,8 +151,8 @@ export const api = {
   assistant: (document: Plan) =>
     request<AssistantReport>('/api/assistant', { method: 'POST', body: JSON.stringify({ document }) }),
 
-  improve: (document: Plan) =>
-    request<ImprovementReport>('/api/assistant/improve', {
+  improve: (document: Plan, fixesOnly = false) =>
+    request<ImprovementReport>(`/api/assistant/improve${fixesOnly ? '?fixes_only=true' : ''}`, {
       method: 'POST',
       body: JSON.stringify({ document }),
     }),

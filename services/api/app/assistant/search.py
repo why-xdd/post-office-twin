@@ -245,6 +245,7 @@ def generate(
         if w.type != "outer"
     ]
     door_squares = _door_squares(plan)
+    door_passages = [core.door_clear_area(d.wall) for d in plan.doors]
     windows = [core.equipment_polygon(i) for i in floor if i.type in SERVICE_WINDOW_TYPES]
     passage = rules_by_id()["passage_between_workplaces"].value or 1.0
     is_window = type_code in SERVICE_WINDOW_TYPES
@@ -281,6 +282,8 @@ def generate(
                         continue
                     if any(sq.intersection(poly).area > 1e-3 for sq in door_squares):
                         continue
+                    if any(dp.intersection(poly).area > 0.02 for dp in door_passages):
+                        continue
                     if is_window and any(0 <= w.distance(poly) < passage for w in windows):
                         continue
                     if not is_window and any(0 < w.distance(poly) < passage for w in windows):
@@ -296,6 +299,11 @@ def generate(
                 if prefer_near is not None:
                     score += 0.5 * math.hypot(x - prefer_near[0], y - prefer_near[1])
                 operator = _operator_side(plan, poly, rotation, size) if is_window else None
+                # Стул оператора в проёме перекрывает дверь так же, как сам объект.
+                if operator is not None and any(
+                    core.seat_in_door_swing(d.wall, d.width_m, operator) for d in plan.doors
+                ):
+                    continue
                 wall_distance = min((w.distance(poly) for w in walls), default=0.0)
                 result.append(
                     Candidate(

@@ -37,33 +37,102 @@
   color: var(--on-steel);
 }
 
-.cabinet__head {
+.cabinet__hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 560px);
+  align-items: center;
+  gap: var(--s-10);
+  padding: var(--s-8) 0 var(--s-10);
+}
+
+.cabinet__intro {
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: var(--s-6);
-  margin-bottom: var(--s-8);
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--s-4);
+}
+
+/* Лист с примером: тот же бумажный лист, что в редакторе */
+.cabinet__sheet {
+  padding: var(--s-4);
+  border: 0;
+  border-radius: var(--radius-door);
+  background: var(--sheet);
+  box-shadow: 0 0 0 1px var(--alu-lo), var(--lift-shadow);
+  transition:
+    transform var(--dur-base) var(--ease-drawer),
+    box-shadow var(--dur-base) var(--ease-drawer);
+}
+
+.cabinet__sheet:hover:not(:disabled) {
+  transform: translateY(-3px);
+  box-shadow: 0 0 0 1px var(--alu-lo), 0 16px 32px rgba(20, 24, 26, 0.34), 0 3px 8px rgba(20, 24, 26, 0.2);
+}
+
+@media (max-width: 1023px) {
+  .cabinet__hero {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--s-8);
+  }
 }
 
 .cabinet h1 {
-  font-size: var(--text-34);
-  font-weight: 620;
-  line-height: 1.1;
-  letter-spacing: -0.02em;
+  max-width: 18ch;
+  font-size: clamp(2.125rem, 1.4rem + 2.4vw, 3.25rem);
+  font-weight: 640;
+  line-height: 1.05;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
 }
 
 .cabinet__lead {
-  margin-top: var(--s-2);
-  max-width: 60ch;
+  max-width: 54ch;
   color: var(--on-steel-2);
   font-size: var(--text-16);
+  line-height: 1.5;
 }
 
 .cabinet__actions {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--s-2);
+  gap: var(--s-3);
+  margin-top: var(--s-2);
+}
+
+.cabinet__primary,
+.cabinet__secondary {
+  min-height: 52px;
+  padding: 0 var(--s-6);
+  font-size: var(--text-16);
+  font-weight: 620;
+}
+
+.cabinet__aside {
+  color: var(--on-steel-3);
+  font-size: var(--text-13);
+}
+
+.cabinet__link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--on-steel);
+  font: inherit;
+  font-weight: 560;
+  text-decoration: underline;
+  text-decoration-color: var(--steel-500);
+  text-underline-offset: 3px;
+}
+
+.cabinet__link:hover:not(:disabled) {
+  text-decoration-color: currentColor;
+}
+
+.cabinet__plans h2 {
+  margin-bottom: var(--s-3);
+  color: var(--on-steel-2);
+  font-size: var(--text-14);
+  font-weight: 600;
 }
 
 .cabinet__note {
@@ -173,8 +242,8 @@
   flex-direction: column;
   gap: var(--s-3);
   width: 100%;
-  min-height: 212px;
-  padding: var(--s-3);
+  min-height: 150px;
+  padding: var(--s-2);
   border: 0;
   text-align: left;
   color: var(--ink);
@@ -195,20 +264,6 @@
   cursor: progress;
 }
 
-.door__top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--s-2);
-  color: var(--on-steel-2);
-  font-size: var(--text-12);
-}
-
-.door__kind {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
 
 /* Этикетка в алюминиевой рамке */
 .door__label {
@@ -273,40 +328,6 @@
   color: var(--ok);
 }
 
-.door--demo {
-  background: linear-gradient(180deg, var(--steel-600), var(--steel-700));
-}
-
-.door--empty {
-  min-height: 212px;
-  background: linear-gradient(180deg, var(--steel-800), var(--steel-850));
-  opacity: 0.72;
-}
-
-/* Пустая рамка для этикетки и замок — дверца ждёт плана */
-.door__slot {
-  display: block;
-  margin: 4px;
-  height: 92px;
-  border-radius: 1px;
-  box-shadow:
-    0 0 0 3px var(--steel-600),
-    inset 0 1px 3px rgba(0, 0, 0, 0.45);
-  background: var(--steel-900);
-}
-
-.door__lock {
-  align-self: flex-end;
-  width: 18px;
-  height: 18px;
-  margin-top: auto;
-  border-radius: 50%;
-  background:
-    linear-gradient(var(--steel-950), var(--steel-950)) center 5px / 2px 7px no-repeat,
-    radial-gradient(circle at 50% 42%, var(--steel-950) 0 2.5px, transparent 3px),
-    radial-gradient(circle, var(--steel-400) 0 8px, var(--steel-500) 8.5px);
-  box-shadow: var(--emboss);
-}
 
 @media (max-width: 640px) {
   .cabinet {

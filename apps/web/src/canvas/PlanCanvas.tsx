@@ -25,7 +25,7 @@ import {
   zoomAt,
   type View,
 } from '../lib/geometry';
-import type { Equipment, EquipmentTypeInfo, Plan, Point, RecommendationChange } from '../lib/plan';
+import type { Equipment, EquipmentTypeInfo, Plan, Point, RecommendationChange, ValidationReport } from '../lib/plan';
 import { equipmentCorners, planBounds } from '../lib/plan';
 import { formatNumber } from '../lib/planFacts';
 import { outlinePoints } from '../lib/planFacts';
@@ -80,6 +80,10 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
   const preview = useWorkspace((s) => s.preview);
   const latched = useWorkspace((s) => s.latched);
   const mode = useWorkspace((s) => s.mode);
+  const report = useWorkspace((s) => s.report);
+  const activeFinding = useWorkspace((s) => s.activeFinding);
+  const setActiveFinding = useWorkspace((s) => s.setActiveFinding);
+  const highlight = useWorkspace((s) => s.highlight);
   const select = useWorkspace((s) => s.select);
   const commit = useWorkspace((s) => s.commit);
   const beginTransient = useWorkspace((s) => s.beginTransient);
@@ -376,6 +380,10 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
 
   const highlightSet = new Set(highlighted);
   const labelsVisible = layers.labels && view.scale >= 34;
+  // В обзоре коды-адреса не нужны: объекты узнаются по значкам, нарушения — по номерам меток.
+  const review = mode === 'review';
+  const addressesVisible = labelsVisible && !review;
+  const pins = review && report && !preview ? placePins(doc, report, activeFinding, view) : [];
 
   return (
     <div
@@ -568,7 +576,7 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
                   aria-hidden="true"
                 />
               )}
-              {(labelsVisible || isHighlighted) && (
+              {(addressesVisible || (isHighlighted && !review)) && (
                 <AddressTag
                   x={Math.min(...xs)}
                   y={Math.min(...ys) - 4}
@@ -587,13 +595,43 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
             const [lx, ly] = toScreen(view, polygonCentroid(zone.polygon));
             return (
               <g key={`label-${zone.id}`} className="plan-zone-label" transform={`translate(${lx} ${ly})`}>
-                <AddressTag x={-18} y={-10} text={book.byId.get(key('zone', zone.id)) ?? ''} tone="steel" />
-                <text x={0} y={18} textAnchor="middle">
+                {addressesVisible && (
+                  <AddressTag x={-18} y={-10} text={book.byId.get(key('zone', zone.id)) ?? ''} tone="steel" />
+                )}
+                <text x={0} y={addressesVisible ? 18 : 4} textAnchor="middle">
                   {zone.label ?? zone.type}
                 </text>
               </g>
             );
           })}
+
+        {/* Метки нарушений в обзоре: номер совпадает с пунктом списка */}
+        {pins.map((pin) => (
+          <g
+            key={pin.index}
+            className={`plan-pin${pin.active ? ' plan-pin--active' : ''}${pin.number === null ? ' plan-pin--note' : ''}`}
+            transform={`translate(${pin.x} ${pin.y})`}
+            role="button"
+            aria-label={pin.number === null ? 'Замечание' : `Нарушение ${pin.number}`}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={() => {
+              if (pin.active) {
+                setActiveFinding(null);
+                highlight([]);
+              } else {
+                setActiveFinding(pin.index);
+                highlight(pin.objects);
+              }
+            }}
+          >
+            <g className="plan-pin__body">
+              <circle r={pin.active ? 15 : 12} className="plan-pin__disc" />
+              <text textAnchor="middle" dominantBaseline="central" className="plan-pin__number">
+                {pin.number ?? '!'}
+              </text>
+            </g>
+          </g>
+        ))}
 
         {/* Предпросмотр рекомендации: объект выдвигается, как ящик ячейки */}
         {preview && <PreviewLayer view={view} doc={doc} changes={preview} types={types} />}
@@ -794,6 +832,51 @@ function PreviewLayer({
       })}
     </g>
   );
+}
+
+interface Pin {
+  index: number;
+  number: number | null;
+  objects: string[];
+  active: boolean;
+  x: number;
+  y: number;
+}
+
+const PIN_GAP_PX = 26;
+
+/**
+ * Метка ставится в середину объектов, из-за которых возникло нарушение: для пары объектов
+ * это как раз место конфликта. Метки, упавшие друг на друга, раздвигаются по горизонтали.
+ */
+function placePins(doc: Plan, report: ValidationReport, active: number | null, view: View): Pin[] {
+  const pins: Pin[] = [];
+  let number = 0;
+  report.findings.forEach((finding, index) => {
+    const isError = finding.severity === 'error';
+    if (isError) number += 1;
+    if (!isError && index !== active) return;
+    const points: Point[] = [];
+    for (const id of finding.objects) {
+      const item = doc.equipment?.find((e) => e.id === id);
+      if (item) {
+        points.push(item.position);
+        continue;
+      }
+      const zone = doc.zones?.find((z) => z.id === id);
+      if (zone) points.push(polygonCentroid(zone.polygon));
+    }
+    if (points.length === 0) return;
+    const world: Point = [
+      points.reduce((sum, p) => sum + p[0], 0) / points.length,
+      points.reduce((sum, p) => sum + p[1], 0) / points.length,
+    ];
+    let [x, y] = toScreen(view, world);
+    while (pins.some((pin) => Math.hypot(pin.x - x, pin.y - y) < PIN_GAP_PX)) x += PIN_GAP_PX;
+    pins.push({ index, number: isError ? number : null, objects: finding.objects, active: index === active, x, y });
+  });
+  // Выбранная метка рисуется последней, чтобы её не перекрывали соседние.
+  return pins.sort((a, b) => Number(a.active) - Number(b.active));
 }
 
 function WallDraft({ view, start, cursor }: { view: View; start: Point; cursor: Point }) {

@@ -226,6 +226,47 @@ def door_center(wall: tuple[float, float, float, float]) -> tuple[float, float]:
     return ((x1 + x2) / 2.0, (y1 + y2) / 2.0)
 
 
+DOOR_CLEAR_DEPTH_M = 0.6
+
+
+def door_clear_area(wall: tuple[float, float, float, float]) -> Polygon:
+    """Полоса шириной с проём и глубиной в ширину плеч проходящего человека по обе стороны двери."""
+    x1, y1, x2, y2 = wall
+    length = max(((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5, 1e-9)
+    nx, ny = -(y2 - y1) / length * DOOR_CLEAR_DEPTH_M, (x2 - x1) / length * DOOR_CLEAR_DEPTH_M
+    return Polygon([(x1 + nx, y1 + ny), (x2 + nx, y2 + ny), (x2 - nx, y2 - ny), (x1 - nx, y1 - ny)])
+
+
+def seat_in_door_swing(door_wall: tuple[float, float, float, float], width_m: float, seat: tuple[float, float]) -> bool:
+    """Место оператора в зоне открывания двери.
+
+    Полотно описывает четверть круга радиусом в ширину проёма; в какую сторону открывается
+    дверь, план не хранит, поэтому зона берётся с обеих сторон.
+    """
+    x1, y1, x2, y2 = door_wall
+    return LineString([(x1, y1), (x2, y2)]).distance(Point(seat)) < max(width_m, DOOR_CLEAR_DEPTH_M)
+
+
+def blocked_doors(plan: Plan) -> list[tuple[str, list[str]]]:
+    """Двери, проём которых загорожен оборудованием или местом оператора."""
+    result: list[tuple[str, list[str]]] = []
+    floor = floor_equipment(plan)
+    for door in plan.doors:
+        area = door_clear_area(door.wall)
+        blockers = [
+            item.id
+            for item in floor
+            if equipment_polygon(item).intersection(area).area > 0.02
+            or (
+                item.operator_position is not None
+                and seat_in_door_swing(door.wall, door.width_m, item.operator_position)
+            )
+        ]
+        if blockers:
+            result.append((door.id, blockers))
+    return result
+
+
 def distance_from_entrance(plan: Plan, item: Equipment) -> float | None:
     """Расстояние от объекта до главного входа по прямой.
 

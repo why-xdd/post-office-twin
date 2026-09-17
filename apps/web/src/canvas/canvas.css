@@ -69,6 +69,52 @@
 }
 
 /* Объект встал на место по рекомендации: короткий щелчок защёлки */
+/* Метки нарушений */
+.plan-pin {
+  cursor: pointer;
+}
+
+.plan-pin__body {
+  animation: pin-drop var(--dur-drawer) var(--ease-latch) both;
+}
+
+.plan-pin__disc {
+  fill: var(--signal);
+  stroke: #fff;
+  stroke-width: 2;
+  filter: drop-shadow(0 2px 3px rgba(60, 20, 10, 0.35));
+  transition: r var(--dur-base) var(--ease-latch);
+}
+
+.plan-pin--note .plan-pin__disc {
+  fill: var(--caution);
+}
+
+.plan-pin__number {
+  fill: #fff;
+  font-family: var(--font-plate);
+  font-stretch: 70%;
+  font-size: 13px;
+  font-weight: 700;
+  pointer-events: none;
+}
+
+.plan-pin--active .plan-pin__number {
+  font-size: 15px;
+}
+
+.plan-pin:hover .plan-pin__disc,
+.plan-pin--active .plan-pin__disc {
+  stroke: var(--ink);
+}
+
+@keyframes pin-drop {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+}
+
 .plan-equipment--latched {
   transform-box: fill-box;
   transform-origin: center;
@@ -317,7 +363,8 @@
 @media (prefers-reduced-motion: reduce) {
   .plan-selection__outline,
   .plan-preview__ghost,
-  .plan-equipment--latched {
+  .plan-equipment--latched,
+  .plan-pin__body {
     animation: none;
   }
 }

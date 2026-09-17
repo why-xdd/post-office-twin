@@ -23,6 +23,7 @@ import { ApiError, api } from '../lib/api';
 import type { View } from '../lib/geometry';
 import type { EquipmentTypeInfo, Point, Rule, ZoneTypeInfo } from '../lib/plan';
 import { formatNumber, planArea, plural } from '../lib/planFacts';
+import { sortFindings } from '../lib/plainFindings';
 import { navigate } from '../lib/router';
 import { Assistant } from '../panels/Assistant';
 import { Checks } from '../panels/Checks';
@@ -30,7 +31,8 @@ import { Inventory } from '../panels/Inventory';
 import { Library } from '../panels/Library';
 import { Passport } from '../panels/Passport';
 import { Properties } from '../panels/Properties';
-import { isDirty, useWorkspace, type SidePanel } from '../state/store';
+import { Review } from '../panels/Review';
+import { isDirty, useWorkspace, type Mode, type SidePanel } from '../state/store';
 import './workspace.css';
 
 interface WorkspaceProps {
@@ -40,6 +42,12 @@ interface WorkspaceProps {
 type LoadState = { kind: 'loading' } | { kind: 'ready' } | { kind: 'error'; message: string };
 
 const VALIDATE_DELAY_MS = 450;
+
+const MODES: { id: Mode; label: string; hint: string }[] = [
+  { id: 'review', label: 'Обзор', hint: 'Нарушения и исправление в один шаг' },
+  { id: 'design', label: 'Редактор', hint: 'Инструменты, свойства объектов, ассистент' },
+  { id: 'operate', label: 'Эксплуатация', hint: 'Паспорта оборудования и инвентаризация' },
+];
 
 export function Workspace({ planId }: WorkspaceProps) {
   const open = useWorkspace((s) => s.open);
@@ -61,6 +69,8 @@ export function Workspace({ planId }: WorkspaceProps) {
   const markSaved = useWorkspace((s) => s.markSaved);
   const select = useWorkspace((s) => s.select);
   const highlight = useWorkspace((s) => s.highlight);
+  const reviewErrors = useWorkspace((s) => s.report?.errors ?? 0);
+  const previewing = useWorkspace((s) => s.preview !== null);
 
   const [load, setLoad] = useState<LoadState>({ kind: 'loading' });
   const [types, setTypes] = useState<EquipmentTypeInfo[]>([]);
@@ -119,9 +129,8 @@ export function Workspace({ planId }: WorkspaceProps) {
     const timer = window.setTimeout(async () => {
       try {
         const result = await api.validate(doc);
-        // Порядок по серьёзности задаёт и адреса Н-01…: они совпадают с тем, что видно в списке.
-        const rank = { error: 0, warning: 1, info: 2 } as const;
-        result.findings = [...result.findings].sort((a, b) => rank[a.severity] - rank[b.severity]);
+        // Порядок задаёт и номера меток, и адреса Н-01…: они совпадают с тем, что видно в списке.
+        result.findings = sortFindings(result.findings);
         if (!cancelled) setReport(result, 'ready');
       } catch {
         if (!cancelled) setReport(useWorkspace.getState().report, 'error');
@@ -161,6 +170,13 @@ export function Workspace({ planId }: WorkspaceProps) {
     const timer = window.setTimeout(() => setNotice(null), 4000);
     return () => window.clearTimeout(timer);
   }, [notice]);
+
+  // Лист плана меняет ширину вместе с режимом: план вписывается заново, когда раскладка уже сменилась.
+  useEffect(() => {
+    if (load.kind !== 'ready') return;
+    const frame = window.requestAnimationFrame(() => setFitSignal((n) => n + 1));
+    return () => window.cancelAnimationFrame(frame);
+  }, [mode, load.kind]);
 
   // Предупреждение о несохранённом
   useEffect(() => {
@@ -202,6 +218,8 @@ export function Workspace({ planId }: WorkspaceProps) {
         return;
       }
       if (event.key === 'Escape') {
+        state.setActiveFinding(null);
+        state.highlight([]);
         state.setPreview(null);
         state.setTool('select');
         state.select(null);
@@ -317,8 +335,11 @@ export function Workspace({ planId }: WorkspaceProps) {
     );
   }
 
+  const review = mode === 'review';
   const tabs: { id: SidePanel; label: string; count?: number; tone?: 'signal' }[] =
-    mode === 'design'
+    review
+      ? []
+      : mode === 'design'
       ? [
           { id: 'checks', label: 'Проверка', count: report?.errors ?? undefined, tone: report && report.errors > 0 ? 'signal' : undefined },
           { id: 'assistant', label: 'Ассистент' },
@@ -333,7 +354,7 @@ export function Workspace({ planId }: WorkspaceProps) {
   const area = planArea(doc);
 
   return (
-    <div className="workspace">
+    <div className={`workspace workspace--${mode}`}>
       <header className="ws-rail on-steel">
         <button
           type="button"
@@ -356,54 +377,66 @@ export function Workspace({ planId }: WorkspaceProps) {
           </span>
         </div>
 
-        <form className={`address${addressError ? ' address--error' : ''}`} onSubmit={goToAddress} role="search">
-          <label htmlFor="address-input" className="address__label">
-            Адрес
-          </label>
-          <input
-            id="address-input"
-            ref={addressInput}
-            value={addressText}
-            placeholder="О-07"
-            autoComplete="off"
-            spellCheck={false}
-            aria-describedby="address-hint"
-            onChange={(event) => {
-              setAddressText(event.target.value);
-              setAddressError(null);
-            }}
-          />
-          <kbd aria-hidden="true">/</kbd>
-          <button type="submit" className="address__go" aria-label="Перейти к адресу">
-            <CornerDownLeft size={14} aria-hidden="true" />
-          </button>
-          <span id="address-hint" className="address__hint" role="status">
-            {addressError ?? ''}
-          </span>
-        </form>
+        {!review && (
+          <form className={`address${addressError ? ' address--error' : ''}`} onSubmit={goToAddress} role="search">
+            <label htmlFor="address-input" className="address__label">
+              Адрес
+            </label>
+            <input
+              id="address-input"
+              ref={addressInput}
+              value={addressText}
+              placeholder="О-07"
+              autoComplete="off"
+              spellCheck={false}
+              aria-describedby="address-hint"
+              onChange={(event) => {
+                setAddressText(event.target.value);
+                setAddressError(null);
+              }}
+            />
+            <kbd aria-hidden="true">/</kbd>
+            <button type="submit" className="address__go" aria-label="Перейти к адресу">
+              <CornerDownLeft size={14} aria-hidden="true" />
+            </button>
+            <span id="address-hint" className="address__hint" role="status">
+              {addressError ?? ''}
+            </span>
+          </form>
+        )}
 
         <div className="segmented" role="radiogroup" aria-label="Режим">
-          <button type="button" role="radio" aria-checked={mode === 'design'} onClick={() => setMode('design')}>
-            Проектирование
-          </button>
-          <button type="button" role="radio" aria-checked={mode === 'operate'} onClick={() => setMode('operate')}>
-            Эксплуатация
-          </button>
+          {MODES.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              role="radio"
+              aria-checked={mode === item.id}
+              title={item.hint}
+              onClick={() => setMode(item.id)}
+            >
+              {item.label}
+            </button>
+          ))}
         </div>
 
         <div className="ws-rail__tools">
-          <button type="button" className="icon-btn" onClick={undo} disabled={past.length === 0} title="Отменить — Ctrl+Z">
-            <Undo2 size={17} aria-hidden="true" />
-            <span className="visually-hidden">Отменить</span>
-          </button>
-          <button type="button" className="icon-btn" onClick={redo} disabled={future.length === 0} title="Повторить — Ctrl+Y">
-            <Redo2 size={17} aria-hidden="true" />
-            <span className="visually-hidden">Повторить</span>
-          </button>
-          <button type="button" className="icon-btn" onClick={() => setFitSignal((n) => n + 1)} title="Вписать план — F">
-            <Maximize size={17} aria-hidden="true" />
-            <span className="visually-hidden">Вписать план</span>
-          </button>
+          {!review && (
+            <>
+              <button type="button" className="icon-btn" onClick={undo} disabled={past.length === 0} title="Отменить — Ctrl+Z">
+                <Undo2 size={17} aria-hidden="true" />
+                <span className="visually-hidden">Отменить</span>
+              </button>
+              <button type="button" className="icon-btn" onClick={redo} disabled={future.length === 0} title="Повторить — Ctrl+Y">
+                <Redo2 size={17} aria-hidden="true" />
+                <span className="visually-hidden">Повторить</span>
+              </button>
+              <button type="button" className="icon-btn" onClick={() => setFitSignal((n) => n + 1)} title="Вписать план — F">
+                <Maximize size={17} aria-hidden="true" />
+                <span className="visually-hidden">Вписать план</span>
+              </button>
+            </>
+          )}
           <button type="button" className="btn btn--label ws-rail__save" onClick={() => void save()} disabled={saving || !dirty}>
             {saving ? <LoaderCircle size={16} className="spin" aria-hidden="true" /> : <Save size={16} aria-hidden="true" />}
             {dirty ? 'Сохранить версию' : 'Сохранено'}
@@ -411,7 +444,7 @@ export function Workspace({ planId }: WorkspaceProps) {
         </div>
       </header>
 
-      <Library types={types} layers={layers} onLayers={setLayers} />
+      {!review && <Library types={types} layers={layers} onLayers={setLayers} />}
 
       <main className="ws-sheet" aria-label="Лист плана">
         <PlanCanvas
@@ -423,6 +456,13 @@ export function Workspace({ planId }: WorkspaceProps) {
           onViewChange={setView}
           onCursor={setCursor}
         />
+        {review && reviewErrors > 0 && (
+          <p className="ws-hint" role="note">
+            {previewing
+              ? 'Пунктирные стрелки — куда переедут объекты'
+              : 'Красные номера — нарушения норм. Нажмите на номер, чтобы узнать, что не так'}
+          </p>
+        )}
         {notice && (
           <div className="ws-notice" role="status">
             {notice}
@@ -431,22 +471,27 @@ export function Workspace({ planId }: WorkspaceProps) {
       </main>
 
       <aside className="ws-column" aria-label="Панели">
-        <div className="ws-tabs" role="tablist" aria-label="Панели справа">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              aria-selected={panel === tab.id}
-              className="ws-tab"
-              onClick={() => setPanel(tab.id)}
-            >
-              {tab.label}
-              {tab.count !== undefined && <span className={`ws-tab__count${tab.tone ? ' ws-tab__count--signal' : ''}`}>{tab.count}</span>}
-            </button>
-          ))}
-        </div>
-        <div className="ws-panel" role="tabpanel">
+        {!review && (
+          <div className="ws-tabs" role="tablist" aria-label="Панели справа">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={panel === tab.id}
+                className="ws-tab"
+                onClick={() => setPanel(tab.id)}
+              >
+                {tab.label}
+                {tab.count !== undefined && <span className={`ws-tab__count${tab.tone ? ' ws-tab__count--signal' : ''}`}>{tab.count}</span>}
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="ws-panel" role={review ? 'region' : 'tabpanel'} aria-label={review ? 'Обзор плана' : undefined}>
+          {panel === 'review' && (
+            <Review book={book} saving={saving} onSave={() => void save()} onFocusObject={focusObject} onNotice={setNotice} />
+          )}
           {panel === 'checks' && <Checks book={book} onFocusObject={focusObject} />}
           {panel === 'properties' && <Properties book={book} types={typeMap} zoneTypes={zoneTypes} />}
           {panel === 'assistant' && <Assistant book={book} types={types} onFocusObject={focusObject} onNotice={setNotice} />}
@@ -455,24 +500,26 @@ export function Workspace({ planId }: WorkspaceProps) {
         </div>
       </aside>
 
-      <footer className="ws-status on-steel">
-        <span>
-          <PanelsTopLeft size={13} aria-hidden="true" /> {cursor ? `X ${formatNumber(cursor[0])} · Y ${formatNumber(cursor[1])} м` : 'Курсор вне плана'}
-        </span>
-        <span>Масштаб {view ? `${Math.round((view.scale / 60) * 100)}%` : '—'}</span>
-        <span>Площадь {formatNumber(area)} м²</span>
-        <span>
-          <Box size={13} aria-hidden="true" /> {doc.equipment?.length ?? 0}{' '}
-          {plural(doc.equipment?.length ?? 0, 'объект', 'объекта', 'объектов')}, {doc.zones?.length ?? 0}{' '}
-          {plural(doc.zones?.length ?? 0, 'зона', 'зоны', 'зон')}
-        </span>
-        {selection && (
+      {!review && (
+        <footer className="ws-status on-steel">
           <span>
-            Выбрано: {book.byId.get(`${selection.kind}:${selection.id}`)} — {ADDRESS_KIND_LABEL[selection.kind]}
+            <PanelsTopLeft size={13} aria-hidden="true" /> {cursor ? `X ${formatNumber(cursor[0])} · Y ${formatNumber(cursor[1])} м` : 'Курсор вне плана'}
           </span>
-        )}
-        <span className="ws-status__hint">Колесо — масштаб · перетаскивание пустого места — сдвиг · / — адрес</span>
-      </footer>
+          <span>Масштаб {view ? `${Math.round((view.scale / 60) * 100)}%` : '—'}</span>
+          <span>Площадь {formatNumber(area)} м²</span>
+          <span>
+            <Box size={13} aria-hidden="true" /> {doc.equipment?.length ?? 0}{' '}
+            {plural(doc.equipment?.length ?? 0, 'объект', 'объекта', 'объектов')}, {doc.zones?.length ?? 0}{' '}
+            {plural(doc.zones?.length ?? 0, 'зона', 'зоны', 'зон')}
+          </span>
+          {selection && (
+            <span>
+              Выбрано: {book.byId.get(`${selection.kind}:${selection.id}`)} — {ADDRESS_KIND_LABEL[selection.kind]}
+            </span>
+          )}
+          <span className="ws-status__hint">Колесо — масштаб · перетаскивание пустого места — сдвиг · / — адрес</span>
+        </footer>
+      )}
 
       <div className="ws-narrow on-steel" role="note">
         <Mark size={32} />

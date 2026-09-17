@@ -43,6 +43,7 @@ MOVE_PRIORITY = {
     "cashier_window": 4,
 }
 FIX_TOP_K = 10
+FIX_WIDE_TOP_K = 40
 MAX_FIX_OBJECTS = 6
 LOW_RESERVE_PERCENT = 25.0
 
@@ -388,6 +389,10 @@ def recommend_fixes(plan: Plan, before: dict[str, Any], limit: int | None = None
             prefer_near=item.position,
         )
         improving = [e for e in found.best if e.errors < before["errors"]]
+        if not improving:
+            # Рядом с текущим местом подходящего нет — проверяется больше мест по всей зоне.
+            found = search.place(plan, item.type, new_id=item.id, template=item, top_k=FIX_WIDE_TOP_K, keep=2)
+            improving = [e for e in found.best if e.errors < before["errors"]]
         if not improving:
             continue
         best = improving[0]
@@ -763,40 +768,56 @@ def apply_changes(plan: Plan, changes: list[Change]) -> Plan:
     return Plan.model_validate(document)
 
 
-def improve(plan: Plan, max_steps: int = 12) -> ImprovementReport:
+def _step_key(rec: Recommendation) -> str:
+    places = ";".join(f"{c.op}:{c.object_id}@{c.position}/{c.rotation_deg}" for c in rec.changes)
+    return f"{rec.id}|{places}"
+
+
+def improve(plan: Plan, max_steps: int = 12, fixes_only: bool = False) -> ImprovementReport:
     """Последовательное улучшение плана.
 
     На каждом шаге рекомендации пересчитываются для текущего состояния, и применяется лучшая:
     сначала устранение ошибок, затем пропускная способность, затем комплектность. Так
     рекомендации не конфликтуют между собой — каждая учитывает результат предыдущих.
+    fixes_only ограничивает улучшение устранением нарушений: план не пополняется оборудованием.
     """
     started = time.perf_counter()
     initial = summarize(plan)
     current = plan
     steps: list[ImprovementStep] = []
+    # Рекомендация запоминается вместе с местом: объект, переставленный раньше, можно передвинуть
+    # ещё раз, если на новом месте он создал другое нарушение, — но не на то же место.
     applied: set[str] = set()
+    touched: set[str] = set()
 
     for _ in range(max_steps):
         state = summarize(current)
         capacity = capacity_model.analyze(current)
-        candidates = [r for r in recommend_fixes(current, state, limit=1) if r.id not in applied]
-        if not candidates:
+        candidates = [r for r in recommend_fixes(current, state, limit=1) if _step_key(r) not in applied]
+        if not candidates and not fixes_only:
             candidates = [
-                r for r in recommend_capacity(current, state, capacity, limit=1) if r.id not in applied and r.changes
+                r
+                for r in recommend_capacity(current, state, capacity, limit=1)
+                if _step_key(r) not in applied and r.changes
             ]
-        if not candidates:
+        if not candidates and not fixes_only:
             candidates = [
-                r for r in recommend_completeness(current, state, capacity, limit=1) if r.id not in applied and r.changes
+                r
+                for r in recommend_completeness(current, state, capacity, limit=1)
+                if _step_key(r) not in applied and r.changes
             ]
         if not candidates:
             break
         chosen = candidates[0]
         next_plan = apply_changes(current, chosen.changes)
         next_state = summarize(next_plan)
-        if next_state["errors"] > state["errors"]:
-            applied.add(chosen.id)
+        applied.add(_step_key(chosen))
+        # Повторная перестановка допустима только с явным выигрышем, иначе объекты начнут
+        # ходить по кругу между равноценными местами.
+        repeated = chosen.id in touched
+        if next_state["errors"] > state["errors"] or (repeated and next_state["errors"] >= state["errors"]):
             continue
-        applied.add(chosen.id)
+        touched.add(chosen.id)
         steps.append(
             ImprovementStep(
                 recommendation=chosen,

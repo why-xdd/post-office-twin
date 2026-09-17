@@ -462,6 +462,21 @@ def structural_findings(plan: Plan) -> list[Finding]:
             )
         )
 
+    labels = {door.id: door.label or door.id for door in plan.doors}
+    for door_id, blockers in core.blocked_doors(plan):
+        findings.append(
+            Finding(
+                rule_id="doors_not_blocked",
+                title="Проём двери не загорожен",
+                message=(
+                    f"Проход через «{labels[door_id]}» перекрыт: "
+                    f"{', '.join(f'«{b}»' for b in blockers)} — через дверь не пройти."
+                ),
+                objects=blockers,
+                **base,
+            )
+        )
+
     for problem in core.mismatched_zone_links(plan):
         declared = problem["указана"] or "не указана"
         actual = problem["фактически"] or "вне зон"

@@ -117,10 +117,10 @@ export const api = {
       body: JSON.stringify({ title, document, note }),
     }),
 
-  savePlan: (id: string, document: Plan, note = '') =>
+  savePlan: (id: string, document: Plan, note = '', title?: string) =>
     request<PlanRef>(`/api/plans/${id}`, {
       method: 'PUT',
-      body: JSON.stringify({ document, note }),
+      body: JSON.stringify({ document, note, title }),
     }),
 
   versions: (id: string) => request<PlanVersion[]>(`/api/plans/${id}/versions`),

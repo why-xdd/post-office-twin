@@ -119,3 +119,17 @@ def test_fixes_never_block_doors(plan: Plan) -> None:
 
     report = recommend.improve(plan, fixes_only=True)
     assert core.blocked_doors(Plan.model_validate(report.improved_plan)) == []
+
+
+def test_search_leaves_no_slivers_between_object_and_wall(plan: Plan) -> None:
+    """Место либо вплотную к стене, либо с зазором, в который можно пройти или поставить объект."""
+    from app.assistant import search
+    from app.geometry import core
+
+    found = search.place(plan, "storage_rack", new_id="rack_new", top_k=24, keep=5)
+    shape = core.outline(plan)
+    assert found.best
+    for option in found.best:
+        gap = shape.exterior.distance(option.candidate.polygon)
+        assert gap < 1e-6 or gap >= search.SETTLE_WALL_M - 1e-6, gap
+        assert shape.contains(option.candidate.polygon.buffer(-1e-6))

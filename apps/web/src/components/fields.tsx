@@ -36,9 +36,14 @@ interface NumberFieldProps {
   hint?: string;
   onCommit: (value: number | null) => void;
   allowEmpty?: boolean;
+  /** Ошибка, найденная снаружи поля: например, проверкой всей формы. */
+  error?: string;
+  /** Применять каждое корректное значение сразу при вводе, а не по уходу фокуса. */
+  live?: boolean;
+  wide?: boolean;
 }
 
-export function NumberField({ label, value, unit, min, max, step = 0.05, hint, onCommit, allowEmpty }: NumberFieldProps) {
+export function NumberField({ label, value, unit, min, max, step = 0.05, hint, onCommit, allowEmpty, error: outerError, live, wide }: NumberFieldProps) {
   const format = (v: number | null | undefined) => (v === null || v === undefined ? '' : String(Number(v.toFixed(3))).replace('.', ','));
   const [text, setText] = useState(format(value));
   const [error, setError] = useState<string | null>(null);
@@ -48,8 +53,8 @@ export function NumberField({ label, value, unit, min, max, step = 0.05, hint, o
     setError(null);
   }, [value]);
 
-  const apply = () => {
-    const trimmed = text.trim();
+  const apply = (source = text) => {
+    const trimmed = source.trim();
     if (trimmed === '') {
       if (allowEmpty) {
         setError(null);
@@ -76,17 +81,27 @@ export function NumberField({ label, value, unit, min, max, step = 0.05, hint, o
     if (parsed !== value) onCommit(parsed);
   };
 
+  const shown = error ?? outerError;
   return (
-    <FieldShell label={label} hint={error ?? hint}>
+    <FieldShell label={label} hint={shown ?? hint} wide={wide}>
       {(id) => (
-        <span className={`field__control${error ? ' field__control--error' : ''}`}>
+        <span className={`field__control${shown ? ' field__control--error' : ''}`}>
           <input
             id={id}
             inputMode="decimal"
             value={text}
-            aria-invalid={error ? true : undefined}
-            onChange={(event) => setText(event.target.value)}
-            onBlur={apply}
+            aria-invalid={shown ? true : undefined}
+            onChange={(event) => {
+              setText(event.target.value);
+              if (live) {
+                const parsed = Number(event.target.value.trim().replace(',', '.'));
+                if (event.target.value.trim() !== '' && Number.isFinite(parsed)) {
+                  setError(null);
+                  if (parsed !== value) onCommit(parsed);
+                }
+              }
+            }}
+            onBlur={() => apply()}
             onKeyDown={(event) => {
               if (event.key === 'Enter') {
                 apply();
@@ -102,6 +117,7 @@ export function NumberField({ label, value, unit, min, max, step = 0.05, hint, o
                 const current = Number(text.replace(',', '.')) || 0;
                 const next = Number((current + (event.key === 'ArrowUp' ? step : -step)).toFixed(3));
                 setText(format(next));
+                if (live) apply(format(next));
               }
             }}
           />
@@ -118,24 +134,30 @@ interface TextFieldProps {
   placeholder?: string;
   hint?: string;
   wide?: boolean;
+  error?: string;
+  live?: boolean;
   onCommit: (value: string) => void;
 }
 
-export function TextField({ label, value, placeholder, hint, wide, onCommit }: TextFieldProps) {
+export function TextField({ label, value, placeholder, hint, wide, error, live, onCommit }: TextFieldProps) {
   const [text, setText] = useState(value ?? '');
   useEffect(() => setText(value ?? ''), [value]);
   const apply = () => {
     if (text !== (value ?? '')) onCommit(text.trim());
   };
   return (
-    <FieldShell label={label} hint={hint} wide={wide}>
+    <FieldShell label={label} hint={error ?? hint} wide={wide}>
       {(id) => (
-        <span className="field__control">
+        <span className={`field__control${error ? ' field__control--error' : ''}`}>
           <input
             id={id}
             value={text}
             placeholder={placeholder}
-            onChange={(event) => setText(event.target.value)}
+            aria-invalid={error ? true : undefined}
+            onChange={(event) => {
+              setText(event.target.value);
+              if (live) onCommit(event.target.value);
+            }}
             onBlur={apply}
             onKeyDown={(event) => {
               if (event.key === 'Enter') (event.target as HTMLInputElement).blur();
@@ -158,14 +180,15 @@ interface SelectFieldProps {
   hint?: string;
   wide?: boolean;
   emptyLabel?: string;
+  error?: string;
   onCommit: (value: string) => void;
 }
 
-export function SelectField({ label, value, options, hint, wide, emptyLabel, onCommit }: SelectFieldProps) {
+export function SelectField({ label, value, options, hint, wide, emptyLabel, error, onCommit }: SelectFieldProps) {
   return (
-    <FieldShell label={label} hint={hint} wide={wide}>
+    <FieldShell label={label} hint={error ?? hint} wide={wide}>
       {(id) => (
-        <span className="field__control field__control--select">
+        <span className={`field__control field__control--select${error ? ' field__control--error' : ''}`}>
           <select id={id} value={value ?? ''} onChange={(event) => onCommit(event.target.value)}>
             {emptyLabel !== undefined && <option value="">{emptyLabel}</option>}
             {options.map((option) => (

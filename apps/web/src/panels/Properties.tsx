@@ -3,12 +3,16 @@
  */
 
 import { Copy, RotateCw, Trash2 } from 'lucide-react';
+import { useState } from 'react';
 import { NumberField, ReadonlyField, SelectField, TextField } from '../components/fields';
 import { Plate } from '../components/Plate';
 import type { AddressBook } from '../lib/addresses';
 import { key } from '../lib/addresses';
+import { transformInPlace, withTransform } from '../lib/equipmentOps';
 import { round3, uniqueId, zoneAt } from '../lib/geometry';
-import type { Equipment, EquipmentTypeInfo, Plan, ZoneTypeInfo } from '../lib/plan';
+import type { Door, Equipment, EquipmentTypeInfo, Plan, WindowOpening, ZoneTypeInfo } from '../lib/plan';
+import { hostWall } from '../lib/room';
+import { MIN_WALL_M, openingPlacement, resizeOpening, wallAxis, wallLength } from '../lib/wallEdit';
 import { formatNumber, planArea, polygonArea } from '../lib/planFacts';
 import { useWorkspace } from '../state/store';
 import { glyphFor } from '../canvas/glyphs';
@@ -204,9 +208,26 @@ export function Properties({ book, types, zoneTypes }: PropertiesProps) {
             ]}
             onCommit={(type) => commit((draft) => { const w = draft.walls?.find((x) => x.id === wall.id); if (w) w.type = type; })}
           />
-          <ReadonlyField label="Длина" value={`${formatNumber(length)} м`} />
+          {wall.type === 'outer' ? (
+            <ReadonlyField label="Длина" value={`${formatNumber(length)} м`} />
+          ) : (
+            <NumberField
+              label="Длина"
+              unit="м"
+              min={MIN_WALL_M}
+              max={80}
+              value={round3(length)}
+              hint="Конец перегородки сдвигается вдоль неё"
+              onCommit={(v) => v !== null && setPartitionLength(wall.id, v)}
+            />
+          )}
           <ReadonlyField label="Направление" value={Math.abs(wall.from[0] - wall.to[0]) < 1e-6 ? 'вертикально' : Math.abs(wall.from[1] - wall.to[1]) < 1e-6 ? 'горизонтально' : 'под углом'} />
         </div>
+        <p className="props__note">
+          {wallAxis(wall)
+            ? 'Чтобы сдвинуть стену, тяните синюю ручку на плане. Двойной щелчок по стене добавит дверь или окно.'
+            : 'Двойной щелчок по стене добавит дверь или окно.'}
+        </p>
         <div className="props__actions">
           <button type="button" className="action action--danger" onClick={removeSelection}>
             <Trash2 size={15} aria-hidden="true" />
@@ -218,52 +239,29 @@ export function Properties({ book, types, zoneTypes }: PropertiesProps) {
     );
   }
 
-  if (selection?.kind === 'door') {
-    const door = doc.doors?.find((d) => d.id === selection.id);
-    if (!door) return <PlanProperties doc={doc} />;
-    return (
-      <div className="props">
-        <header className="props__head">
-          <div>
-            <Plate surface="label" size="sm">
-              {book.byId.get(key('door', door.id)) ?? ''}
-            </Plate>
-            <h2>{door.label || 'Дверной проём'}</h2>
-            <p className="props__id">{door.id}</p>
-          </div>
-        </header>
-        <div className="fields">
-          <SelectField
-            label="Назначение"
-            wide
-            value={door.type ?? 'internal'}
-            options={[
-              { value: 'entrance', label: 'Главный вход для посетителей' },
-              { value: 'service', label: 'Служебный вход' },
-              { value: 'internal', label: 'Внутренняя дверь' },
-            ]}
-            onCommit={(type) => commit((draft) => { const d = draft.doors?.find((x) => x.id === door.id); if (d) d.type = type; })}
-          />
-          <ReadonlyField label="Ширина проёма" value={`${formatNumber(door.width_m)} м`} />
-        </div>
-        <div className="props__actions">
-          <button type="button" className="action action--danger" onClick={() => { removeSelection(); select(null); }}>
-            <Trash2 size={15} aria-hidden="true" />
-            Удалить проём
-            <kbd>Del</kbd>
-          </button>
-        </div>
-      </div>
-    );
+  if (selection?.kind === 'door' || selection?.kind === 'window') {
+    return <OpeningProperties key={selection.id} kind={selection.kind} id={selection.id} book={book} />;
   }
 
   return <PlanProperties doc={doc} />;
+
+  function setPartitionLength(id: string, length: number) {
+    commit((draft) => {
+      const target = draft.walls?.find((w) => w.id === id);
+      if (!target) return;
+      const current = Math.hypot(target.to[0] - target.from[0], target.to[1] - target.from[1]) || 1;
+      target.to = [
+        round3(target.from[0] + ((target.to[0] - target.from[0]) / current) * length),
+        round3(target.from[1] + ((target.to[1] - target.from[1]) / current) * length),
+      ];
+    });
+  }
 
   function moveTo(id: string, position: [number, number]) {
     commit((draft) => {
       const target = draft.equipment?.find((e) => e.id === id);
       if (!target) return;
-      target.position = [round3(position[0]), round3(position[1])];
+      transformInPlace(target, { position: [round3(position[0]), round3(position[1])] });
       const zone = zoneAt(draft, target.position);
       if (zone) target.zone = zone.id;
       else delete target.zone;
@@ -277,7 +275,11 @@ export function Properties({ book, types, zoneTypes }: PropertiesProps) {
     commit((draft) => {
       draft.equipment = [
         ...(draft.equipment ?? []),
-        { ...structuredClone(source), id: copyId, position: [round3(source.position[0] + 0.5), round3(source.position[1] - 0.5)] },
+        {
+          ...structuredClone(source),
+          ...withTransform(source, { position: [round3(source.position[0] + 0.5), round3(source.position[1] - 0.5)] }),
+          id: copyId,
+        },
       ];
     });
     select({ kind: 'equipment', id: copyId });
@@ -345,13 +347,13 @@ function PlanProperties({ doc }: { doc: Plan }) {
         <NumberField label="Высота потолка" unit="м" min={2} max={8} allowEmpty value={doc.ops.ceiling_height_m} onCommit={(v) => setOps({ ceiling_height_m: v ?? undefined })} />
         <NumberField
           label="Население пункта"
-          unit="тыс."
+          unit="тыс. чел."
           step={1}
           min={0}
           allowEmpty
           value={doc.ops.settlement_population}
           hint="Для проверки охвата по Приказу № 538"
-          onCommit={(v) => setOps({ settlement_population: v === null ? undefined : Math.round(v) })}
+          onCommit={(v) => setOps({ settlement_population: v ?? undefined })}
         />
         <NumberField
           label="Посетителей в день"
@@ -372,6 +374,108 @@ function PlanProperties({ doc }: { doc: Plan }) {
           value={doc.flow_hints?.typical_visit_duration_min}
           onCommit={(v) => setFlow({ typical_visit_duration_min: v ?? undefined })}
         />
+      </div>
+    </div>
+  );
+}
+
+const DOOR_TYPES = [
+  { value: 'entrance', label: 'Главный вход для посетителей' },
+  { value: 'service', label: 'Служебный вход' },
+  { value: 'internal', label: 'Внутренняя дверь' },
+];
+
+function OpeningProperties({ kind, id, book }: { kind: 'door' | 'window'; id: string; book: AddressBook }) {
+  const doc = useWorkspace((s) => s.doc);
+  const commit = useWorkspace((s) => s.commit);
+  const removeSelection = useWorkspace((s) => s.removeSelection);
+  const [problem, setProblem] = useState<string | null>(null);
+  if (!doc) return null;
+  const opening = kind === 'door' ? doc.doors?.find((d) => d.id === id) : doc.windows?.find((w) => w.id === id);
+  if (!opening) return <PlanProperties doc={doc} />;
+  const wall = hostWall(doc, opening.wall);
+  const placement = wall ? openingPlacement(wall, opening.wall) : null;
+  const door = kind === 'door' ? (opening as Door) : null;
+  const win = kind === 'window' ? (opening as WindowOpening) : null;
+
+  const resize = (patch: { offset?: number; width?: number }) => {
+    const result = resizeOpening(doc, kind, id, patch);
+    if ('error' in result) {
+      setProblem(result.error);
+      return;
+    }
+    setProblem(null);
+    commit((draft) => {
+      draft.doors = result.plan.doors;
+      draft.windows = result.plan.windows;
+    });
+  };
+
+  return (
+    <div className="props">
+      <header className="props__head">
+        <div>
+          <Plate surface="label" size="sm">
+            {book.byId.get(key(kind, id)) ?? ''}
+          </Plate>
+          <h2>{door ? door.label || 'Дверь' : 'Окно'}</h2>
+          <p className="props__id">{id}</p>
+        </div>
+      </header>
+      <div className="fields">
+        {door && (
+          <>
+            <TextField
+              label="Подпись"
+              wide
+              value={door.label}
+              onCommit={(label) => commit((draft) => { const d = draft.doors?.find((x) => x.id === id); if (d) d.label = label || undefined; })}
+            />
+            <SelectField
+              label="Назначение"
+              wide
+              value={door.type ?? 'internal'}
+              options={DOOR_TYPES}
+              hint={door.type === 'entrance' ? 'От этой двери считаются пути посетителей' : undefined}
+              onCommit={(type) =>
+                commit((draft) => {
+                  const d = draft.doors?.find((x) => x.id === id);
+                  if (!d) return;
+                  d.type = type;
+                  // Главный вход один: от него считаются пути и площадка у входа.
+                  if (type === 'entrance') draft.flow_hints = { ...(draft.flow_hints ?? {}), main_entrance: id };
+                })
+              }
+            />
+          </>
+        )}
+        {placement ? (
+          <>
+            <NumberField label="Ширина" unit="м" min={0.5} max={6} step={0.1} value={placement.width} error={problem ?? undefined} onCommit={(v) => v !== null && resize({ width: v })} />
+            <NumberField label="Отступ от угла" unit="м" min={0} step={0.1} value={placement.offset} onCommit={(v) => v !== null && resize({ offset: v })} />
+          </>
+        ) : (
+          <p className="props__note field--wide">Проём не лежит ни на одной стене. Удалите его и поставьте заново двойным щелчком по стене.</p>
+        )}
+        {win && (
+          <NumberField
+            label="Высота окна"
+            unit="м"
+            min={0.3}
+            max={4}
+            allowEmpty
+            value={win.height_m}
+            onCommit={(v) => commit((draft) => { const w = draft.windows?.find((x) => x.id === id); if (w) w.height_m = v ?? undefined; })}
+          />
+        )}
+        {wall && <ReadonlyField label="Стена" value={`${book.byId.get(key('wall', wall.id)) ?? ''} · ${formatNumber(wallLength(wall))} м`} />}
+      </div>
+      <div className="props__actions">
+        <button type="button" className="action action--danger" onClick={removeSelection}>
+          <Trash2 size={15} aria-hidden="true" />
+          {door ? 'Удалить дверь' : 'Удалить окно'}
+          <kbd>Del</kbd>
+        </button>
       </div>
     </div>
   );

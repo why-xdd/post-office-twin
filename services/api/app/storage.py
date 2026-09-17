@@ -61,7 +61,10 @@ class PlanStore:
             )
         return plan_id, 1
 
-    def save_version(self, plan_id: str, document: dict[str, Any], note: str = "") -> int:
+    def save_version(
+        self, plan_id: str, document: dict[str, Any], note: str = "", title: str | None = None
+    ) -> int:
+        """Новая версия плана. title обновляет название плана в списке, если оно изменилось."""
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT COALESCE(MAX(version), 0) AS v FROM versions WHERE plan_id = ?",
@@ -75,6 +78,8 @@ class PlanStore:
                 "VALUES (?, ?, ?, ?, ?)",
                 (plan_id, version, json.dumps(document, ensure_ascii=False), note, _now()),
             )
+            if title:
+                conn.execute("UPDATE plans SET title = ? WHERE id = ?", (title, plan_id))
         return version
 
     def get(self, plan_id: str, version: int | None = None) -> dict[str, Any]:

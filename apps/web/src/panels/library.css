@@ -9,7 +9,7 @@
 
 .library__tools {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 6px;
   padding: var(--s-3);
   background: var(--steel-850);
@@ -237,4 +237,105 @@
 .layer input:focus-visible + .layer__box {
   outline: 2px solid var(--on-steel);
   outline-offset: 2px;
+}
+
+/* Свой предмет */
+.library__add {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  margin: 0 var(--s-2) var(--s-2);
+  padding: 6px var(--s-3);
+  border: 0;
+  border-radius: var(--radius-plate);
+  color: var(--on-steel);
+  background: var(--steel-700);
+  box-shadow: var(--emboss);
+  font-size: var(--text-13);
+  font-weight: 560;
+}
+
+.library__add:hover {
+  background: var(--steel-600);
+}
+
+.library__own {
+  position: relative;
+}
+
+.library__own-actions {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  display: none;
+  gap: 2px;
+  transform: translateY(-50%);
+}
+
+.library__own:hover .library__own-actions,
+.library__own:focus-within .library__own-actions {
+  display: flex;
+}
+
+.library__icon {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 2px;
+  color: var(--on-steel-2);
+  background: var(--steel-800);
+}
+
+.library__icon:hover {
+  color: var(--on-steel);
+  background: var(--steel-600);
+}
+
+.custom-type {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  margin: 0 var(--s-2) var(--s-3);
+  padding: var(--s-3);
+  border-radius: var(--radius-plate);
+  color: var(--ink);
+  background: var(--label);
+  box-shadow: var(--lift-shadow);
+}
+
+.custom-type h3 {
+  font-size: var(--text-14);
+  font-weight: 660;
+}
+
+.custom-type__zones {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.custom-type__zones legend {
+  padding: 0 0 4px;
+  color: var(--ink-3);
+  font-size: var(--text-12);
+  font-weight: 540;
+}
+
+.custom-type__hint {
+  margin-top: 4px;
+  color: var(--ink-3);
+  font-size: var(--text-11);
+  line-height: 1.4;
+}
+
+.custom-type__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }

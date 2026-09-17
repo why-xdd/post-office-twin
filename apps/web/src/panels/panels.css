@@ -272,6 +272,12 @@
   font-variant-numeric: tabular-nums;
 }
 
+.props__note {
+  color: var(--ink-3);
+  font-size: var(--text-12);
+  line-height: 1.45;
+}
+
 .props__actions {
   display: flex;
   flex-direction: column;

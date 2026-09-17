@@ -19,8 +19,9 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable
 
+import numpy as np
 import shapely
-from shapely.geometry import LineString, Point, Polygon, box
+from shapely.geometry import LinearRing, LineString, Point, Polygon, box
 from shapely.ops import nearest_points, unary_union
 from shapely.strtree import STRtree
 
@@ -112,6 +113,59 @@ def _door_squares(plan: Plan, side: float = 1.5) -> list[Polygon]:
         ]
         squares.append(max(options, key=lambda c: c.intersection(shape).area))
     return squares
+
+
+SETTLE_WALL_M = 0.3
+SETTLE_ITEM_M = 0.2
+
+
+def _blocker_boxes(geometries) -> np.ndarray:
+    """Габариты препятствий строками [min_x, min_y, max_x, max_y].
+
+    Контур помещения раскладывается на рёбра: как один габарит он накрыл бы всё помещение.
+    """
+    rows: list[tuple[float, float, float, float]] = []
+    for geometry in geometries:
+        if isinstance(geometry, (LineString, LinearRing)):
+            coords = list(geometry.coords)
+            for (x1, y1), (x2, y2) in zip(coords, coords[1:]):
+                rows.append((min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2)))
+        else:
+            rows.append(geometry.bounds)
+    return np.array(rows, dtype=float).reshape(-1, 4)
+
+
+def _settle(bounds: tuple[float, float, float, float], position: tuple[float, float], walls: np.ndarray, items: np.ndarray) -> tuple[float, float]:
+    """Прижимает габарит к ближайшей стене или соседу по каждой оси, если зазор мал.
+
+    Препятствие учитывается, если лежит напротив грани габарита (перекрывается с ней по
+    поперечной оси) и отстоит от неё не дальше порога: стены — SETTLE_WALL_M, соседи — SETTLE_ITEM_M.
+    """
+    min_x, min_y, max_x, max_y = bounds
+    x, y = position
+    inset = 0.01
+    shifts: dict[str, list[float]] = {"x": [], "y": []}
+    for boxes, reach in ((walls, SETTLE_WALL_M), (items, SETTLE_ITEM_M)):
+        if boxes.size == 0:
+            continue
+        bx0, by0, bx1, by1 = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
+        facing_x = (by0 < max_y - inset) & (by1 > min_y + inset)
+        facing_y = (bx0 < max_x - inset) & (bx1 > min_x + inset)
+        gaps = (
+            ("x", 1, facing_x, bx0 - max_x),
+            ("x", -1, facing_x, min_x - bx1),
+            ("y", 1, facing_y, by0 - max_y),
+            ("y", -1, facing_y, min_y - by1),
+        )
+        for axis, sign, facing, gap in gaps:
+            near = facing & (gap > 1e-4) & (gap <= reach)
+            if near.any():
+                shifts[axis].append(sign * float(gap[near].min()))
+    if shifts["x"]:
+        x += min(shifts["x"], key=abs)
+    if shifts["y"]:
+        y += min(shifts["y"], key=abs)
+    return round(x, 3), round(y, 3)
 
 
 def _axes(rotation_deg: float, size: tuple[float, float]) -> tuple[tuple[float, float], tuple[float, float]]:
@@ -265,65 +319,83 @@ def generate(
     xs = [min_x + step / 2 + i * step for i in range(max(int((max_x - min_x) / step), 1))]
     ys = [min_y + step / 2 + j * step for j in range(max(int((max_y - min_y) / step), 1))]
 
+    # Грани, к которым прижимается кандидат: внутренняя сторона наружных стен, перегородки и
+    # соседнее оборудование. Шаг сетки не совпадает со стенами, и без прижатия между объектом
+    # и стеной остаются зазоры в несколько сантиметров, которыми нельзя воспользоваться.
+    wall_boxes = _blocker_boxes(([shape.exterior] if shape is not None else []) + partitions)
+    item_boxes = _blocker_boxes(obstacles if type_def.floor_object else [])
+    seen: set[tuple[float, float, float]] = set()
+
+    def accept(x: float, y: float, rotation: float) -> Candidate | None:
+        probe = Equipment(id="__candidate__", type=type_code, position=(x, y), size_m=size, rotation_deg=rotation)
+        poly = core.equipment_polygon(probe)
+        if not prepared_region.contains(poly):
+            return None
+        if type_def.floor_object:
+            if tree is not None:
+                hits = tree.query(poly, predicate="intersects")
+                if any(obstacles[h].intersection(poly).area > 1e-3 for h in hits):
+                    return None
+            if any(p.intersection(poly).area > 1e-4 for p in partitions):
+                return None
+            if any(sq.intersection(poly).area > 1e-3 for sq in door_squares):
+                return None
+            if any(dp.intersection(poly).area > 0.02 for dp in door_passages):
+                return None
+            if is_window and any(0 <= w.distance(poly) < passage for w in windows):
+                return None
+            if not is_window and any(0 < w.distance(poly) < passage for w in windows):
+                return None
+        else:
+            wall_distance = min((w.distance(poly) for w in walls), default=0.0)
+            if type_code != "fire_alarm" and wall_distance > WALL_MOUNT_TOLERANCE:
+                return None
+        if type_code == "self_service_kiosk" and entrance is not None:
+            if poly.distance(Point(entrance)) > kiosk_limit:
+                return None
+        score = fitness(plan, poly, rotation, size)
+        if prefer_near is not None:
+            score += 0.5 * math.hypot(x - prefer_near[0], y - prefer_near[1])
+        operator = _operator_side(plan, poly, rotation, size) if is_window else None
+        # Стул оператора в проёме перекрывает дверь так же, как сам объект.
+        if operator is not None and any(core.seat_in_door_swing(d.wall, d.width_m, operator) for d in plan.doors):
+            return None
+        return Candidate(
+            position=(round(x, 3), round(y, 3)),
+            rotation_deg=rotation,
+            polygon=poly,
+            fitness=score,
+            operator_position=operator,
+            features={
+                "fitness": score,
+                "wall_distance": min((w.distance(poly) for w in walls), default=0.0),
+                "entrance_distance": poly.distance(Point(entrance)) if entrance else 0.0,
+                "nearest_obstacle": min((o.distance(poly) for o in obstacles), default=10.0),
+                "rotation": rotation,
+                "area": poly.area,
+                "boundary_distance": shape.exterior.distance(poly) if shape is not None else 0.0,
+                "door_distance": min((sq.distance(poly) for sq in door_squares), default=10.0),
+            },
+        )
+
     for rotation in rotations:
-        for x in xs:
-            for y in ys:
+        for x0 in xs:
+            for y0 in ys:
                 generated += 1
-                probe = Equipment(id="__candidate__", type=type_code, position=(x, y), size_m=size, rotation_deg=rotation)
-                poly = core.equipment_polygon(probe)
-                if not prepared_region.contains(poly):
+                raw = Equipment(id="__candidate__", type=type_code, position=(x0, y0), size_m=size, rotation_deg=rotation)
+                raw_poly = core.equipment_polygon(raw)
+                if not prepared_region.contains(raw_poly):
                     continue
-                if type_def.floor_object:
-                    if tree is not None:
-                        hits = tree.query(poly, predicate="intersects")
-                        if any(obstacles[h].intersection(poly).area > 1e-3 for h in hits):
-                            continue
-                    if any(p.intersects(poly) for p in partitions):
-                        continue
-                    if any(sq.intersection(poly).area > 1e-3 for sq in door_squares):
-                        continue
-                    if any(dp.intersection(poly).area > 0.02 for dp in door_passages):
-                        continue
-                    if is_window and any(0 <= w.distance(poly) < passage for w in windows):
-                        continue
-                    if not is_window and any(0 < w.distance(poly) < passage for w in windows):
-                        continue
-                else:
-                    wall_distance = min((w.distance(poly) for w in walls), default=0.0)
-                    if type_code != "fire_alarm" and wall_distance > WALL_MOUNT_TOLERANCE:
-                        continue
-                if type_code == "self_service_kiosk" and entrance is not None:
-                    if poly.distance(Point(entrance)) > kiosk_limit:
-                        continue
-                score = fitness(plan, poly, rotation, size)
-                if prefer_near is not None:
-                    score += 0.5 * math.hypot(x - prefer_near[0], y - prefer_near[1])
-                operator = _operator_side(plan, poly, rotation, size) if is_window else None
-                # Стул оператора в проёме перекрывает дверь так же, как сам объект.
-                if operator is not None and any(
-                    core.seat_in_door_swing(d.wall, d.width_m, operator) for d in plan.doors
-                ):
-                    continue
-                wall_distance = min((w.distance(poly) for w in walls), default=0.0)
-                result.append(
-                    Candidate(
-                        position=(round(x, 3), round(y, 3)),
-                        rotation_deg=rotation,
-                        polygon=poly,
-                        fitness=score,
-                        operator_position=operator,
-                        features={
-                            "fitness": score,
-                            "wall_distance": wall_distance,
-                            "entrance_distance": poly.distance(Point(entrance)) if entrance else 0.0,
-                            "nearest_obstacle": min((o.distance(poly) for o in obstacles), default=10.0),
-                            "rotation": rotation,
-                            "area": poly.area,
-                            "boundary_distance": shape.exterior.distance(poly) if shape is not None else 0.0,
-                            "door_distance": min((sq.distance(poly) for sq in door_squares), default=10.0),
-                        },
-                    )
-                )
+                settled = _settle(raw_poly.bounds, (x0, y0), wall_boxes, item_boxes)
+                # Прижатое место предпочтительнее; если оно нарушает зазоры, остаётся место сетки.
+                for x, y in (settled, (round(x0, 3), round(y0, 3))):
+                    if (x, y, rotation) in seen:
+                        break
+                    candidate = accept(x, y, rotation)
+                    if candidate is not None:
+                        seen.add((x, y, rotation))
+                        result.append(candidate)
+                        break
     result.sort(key=lambda c: c.fitness)
     return result, generated
 

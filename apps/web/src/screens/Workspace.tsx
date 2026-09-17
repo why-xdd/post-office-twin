@@ -7,7 +7,9 @@
 import {
   ArrowLeft,
   Box,
+  ChevronDown,
   CornerDownLeft,
+  Download,
   LoaderCircle,
   Maximize,
   PanelsTopLeft,
@@ -19,12 +21,15 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { PlanCanvas, type Layers } from '../canvas/PlanCanvas';
 import { Mark } from '../components/Mark';
 import { ADDRESS_KIND_LABEL, buildAddressBook, parseAddress } from '../lib/addresses';
-import { ApiError, api } from '../lib/api';
+import { ApiError, api, type PlanVersion } from '../lib/api';
 import type { View } from '../lib/geometry';
 import type { EquipmentTypeInfo, Point, Rule, ZoneTypeInfo } from '../lib/plan';
 import { formatNumber, planArea, plural } from '../lib/planFacts';
 import { sortFindings } from '../lib/plainFindings';
+import { withTransform } from '../lib/equipmentOps';
+import { fitsRoom } from '../lib/room';
 import { navigate } from '../lib/router';
+import { downloadJson } from '../lib/download';
 import { Assistant } from '../panels/Assistant';
 import { Checks } from '../panels/Checks';
 import { Inventory } from '../panels/Inventory';
@@ -67,8 +72,10 @@ export function Workspace({ planId }: WorkspaceProps) {
   const undo = useWorkspace((s) => s.undo);
   const redo = useWorkspace((s) => s.redo);
   const markSaved = useWorkspace((s) => s.markSaved);
+  const restoreVersion = useWorkspace((s) => s.restoreVersion);
   const select = useWorkspace((s) => s.select);
   const highlight = useWorkspace((s) => s.highlight);
+  const tool = useWorkspace((s) => s.tool);
   const reviewErrors = useWorkspace((s) => s.report?.errors ?? 0);
   const previewing = useWorkspace((s) => s.preview !== null);
 
@@ -85,6 +92,9 @@ export function Workspace({ planId }: WorkspaceProps) {
   const [notice, setNotice] = useState<string | null>(null);
   const [addressText, setAddressText] = useState('');
   const [addressError, setAddressError] = useState<string | null>(null);
+  const [versions, setVersions] = useState<PlanVersion[] | null>(null);
+  const [versionsOpen, setVersionsOpen] = useState(false);
+  const [leaving, setLeaving] = useState(false);
   const addressInput = useRef<HTMLInputElement>(null);
 
   // Загрузка плана
@@ -100,6 +110,8 @@ export function Workspace({ planId }: WorkspaceProps) {
         if (cancelled) return;
         const summary = plans.find((p) => p.id === planId);
         open(planId, summary?.title ?? document.ops.name ?? 'План', summary?.versions ?? 1, document);
+        // Пустое помещение нечего проверять: оно открывается сразу в редакторе.
+        if ((document.equipment ?? []).length === 0) useWorkspace.getState().setMode('design');
         setRules(ruleList);
         setLoad({ kind: 'ready' });
         const dictionaries = await api.dictionaries(document).catch(() => null);
@@ -142,7 +154,28 @@ export function Workspace({ planId }: WorkspaceProps) {
     };
   }, [doc, setReport]);
 
+  // Свои типы лежат в самом плане: после их правки справочник берётся с сервера заново.
+  const customTypes = doc?.dictionaries ? JSON.stringify(doc.dictionaries) : '';
+  useEffect(() => {
+    if (load.kind !== 'ready' || !doc) return;
+    let cancelled = false;
+    api
+      .dictionaries(doc)
+      .then((dictionaries) => {
+        if (cancelled) return;
+        setTypes(dictionaries.equipment_types);
+        setZoneTypes(dictionaries.zone_types);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customTypes, load.kind]);
+
   const typeMap = useMemo(() => new Map(types.map((t) => [t.code, t])), [types]);
+  const typesRef = useRef(typeMap);
+  typesRef.current = typeMap;
   const book = useMemo(
     () => buildAddressBook(doc, report?.findings ?? [], [], rules.map((r) => r.id)),
     [doc, report, rules],
@@ -155,8 +188,9 @@ export function Workspace({ planId }: WorkspaceProps) {
     if (!state.doc || !state.planId || saving) return;
     setSaving(true);
     try {
-      const ref = await api.savePlan(state.planId, state.doc, 'Сохранено из редактора');
+      const ref = await api.savePlan(state.planId, state.doc, 'Сохранено из редактора', state.doc.ops.name);
       markSaved(ref.id, ref.version);
+      setVersions(null);
       setNotice(`Сохранено как версия ${ref.version}`);
     } catch (error) {
       setNotice(error instanceof ApiError ? `Не сохранено: ${error.message}` : 'Не сохранено: сервер недоступен');
@@ -232,6 +266,7 @@ export function Workspace({ planId }: WorkspaceProps) {
       if (state.mode !== 'design') return;
       if (event.code === 'KeyV') state.setTool('select');
       if (event.code === 'KeyW') state.setTool('wall');
+      if (event.code === 'KeyO' && !mod) state.setTool('outline');
       if (event.code === 'KeyZ' && !mod) state.setTool('zone');
 
       const sel = state.selection;
@@ -244,15 +279,25 @@ export function Workspace({ planId }: WorkspaceProps) {
       if (sel?.kind !== 'equipment' || !state.doc) return;
       const item = state.doc.equipment?.find((e) => e.id === sel.id);
       if (!item) return;
+      const floor = typesRef.current.get(item.type)?.floor_object ?? true;
+      const blocked = (patch: Partial<typeof item>) => floor && !fitsRoom(state.doc!, { ...item, ...patch });
       if (event.code === 'KeyR' && !mod) {
-        state.updateEquipment(item.id, { rotation_deg: ((item.rotation_deg ?? 0) + (event.shiftKey ? 15 : 90)) % 360 });
+        const patch = { rotation_deg: ((item.rotation_deg ?? 0) + (event.shiftKey ? 15 : 90)) % 360 };
+        if (blocked(patch)) {
+          setNotice('Не повернуть: объект упрётся в стену. Отодвиньте его от стены.');
+          return;
+        }
+        state.updateEquipment(item.id, patch);
         return;
       }
       if (mod && event.code === 'KeyD') {
         event.preventDefault();
         const copyId = `${item.type}_${Date.now().toString(36)}`;
         state.commit((draft) => {
-          draft.equipment = [...(draft.equipment ?? []), { ...structuredClone(item), id: copyId, position: [item.position[0] + 0.5, item.position[1] - 0.5] }];
+          draft.equipment = [
+            ...(draft.equipment ?? []),
+            { ...structuredClone(item), ...withTransform(item, { position: [item.position[0] + 0.5, item.position[1] - 0.5] }), id: copyId },
+          ];
         });
         state.select({ kind: 'equipment', id: copyId });
         return;
@@ -267,9 +312,10 @@ export function Workspace({ planId }: WorkspaceProps) {
       const step = delta[event.key];
       if (step) {
         event.preventDefault();
-        state.updateEquipment(item.id, {
-          position: [Math.round((item.position[0] + step[0]) * 1000) / 1000, Math.round((item.position[1] + step[1]) * 1000) / 1000],
-        });
+        const patch = {
+          position: [Math.round((item.position[0] + step[0]) * 1000) / 1000, Math.round((item.position[1] + step[1]) * 1000) / 1000] as [number, number],
+        };
+        if (!blocked(patch)) state.updateEquipment(item.id, patch);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -310,7 +356,9 @@ export function Workspace({ planId }: WorkspaceProps) {
 
   // При выборе объекта в проектировании показываем его свойства
   useEffect(() => {
-    if (selection && mode === 'design' && panel !== 'checks' && panel !== 'assistant' && panel !== 'inventory') setPanel('properties');
+    // Выбор на плане открывает свойства: иначе щелчок по объекту ничего не показывает.
+    // Ассистент и инвентаризация остаются: там выбор — часть их собственного сценария.
+    if (selection && mode === 'design' && panel !== 'assistant' && panel !== 'inventory') setPanel('properties');
     if (selection?.kind === 'equipment' && mode === 'operate') setPanel('passport');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selection?.id]);
@@ -336,6 +384,18 @@ export function Workspace({ planId }: WorkspaceProps) {
   }
 
   const review = mode === 'review';
+  const toolHint =
+    tool === 'outline'
+      ? 'Щёлкайте по углам помещения. Замкнуть — щелчок по первой точке или Enter, Backspace — убрать точку, Esc — отмена'
+      : tool === 'wall'
+        ? 'Щёлкните начало и конец перегородки. Shift — под любым углом, Esc — отмена'
+        : tool === 'zone'
+          ? 'Щёлкайте по вершинам зоны. Замкнуть — двойной щелчок или Enter, Esc — отмена'
+          : tool === 'equipment'
+            ? 'Щёлкните по плану, чтобы поставить. С Shift — поставить несколько, Esc — отмена'
+            : selection?.kind === 'wall'
+              ? 'Тяните синюю ручку, чтобы сдвинуть стену. Двойной щелчок по стене — дверь или окно'
+              : null;
   const tabs: { id: SidePanel; label: string; count?: number; tone?: 'signal' }[] =
     review
       ? []
@@ -359,11 +419,7 @@ export function Workspace({ planId }: WorkspaceProps) {
         <button
           type="button"
           className="ws-rail__back"
-          onClick={() => {
-            if (!dirty || window.confirm('Есть несохранённые изменения. Уйти к стеллажу без сохранения?')) {
-              navigate({ name: 'rack' });
-            }
-          }}
+          onClick={() => (dirty ? setLeaving(true) : navigate({ name: 'rack' }))}
           title="К стеллажу планов"
         >
           <ArrowLeft size={16} aria-hidden="true" />
@@ -371,10 +427,57 @@ export function Workspace({ planId }: WorkspaceProps) {
         </button>
 
         <div className="ws-rail__title">
-          <span className="ws-rail__name">{title}</span>
-          <span className="ws-rail__version">
+          <span className="ws-rail__name">{doc.ops.name || title}</span>
+          <button
+            type="button"
+            className="ws-rail__version"
+            aria-expanded={versionsOpen}
+            onClick={() => {
+              setVersionsOpen((open) => !open);
+              if (!versions && planId) void api.versions(planId).then(setVersions).catch(() => setVersions([]));
+            }}
+          >
             {dirty ? 'Есть несохранённые изменения' : `Версия ${version}`}
-          </span>
+            <ChevronDown size={13} aria-hidden="true" />
+          </button>
+          {versionsOpen && (
+            <div className="versions" role="dialog" aria-label="Версии плана">
+              <p className="versions__title">Сохранённые версии</p>
+              {versions === null && <p className="versions__empty">Загружаем…</p>}
+              {versions?.length === 0 && <p className="versions__empty">Версий пока нет.</p>}
+              <ul>
+                {versions?.map((item) => (
+                  <li key={item.version}>
+                    <span className="versions__number">Версия {item.version}</span>
+                    <span className="versions__date">
+                      {new Date(item.created_at).toLocaleString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}
+                      {item.note ? ` · ${item.note}` : ''}
+                    </span>
+                    {item.version === version ? (
+                      <span className="versions__current">открыта</span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!planId) return;
+                          try {
+                            const document = await api.getPlan(planId, item.version);
+                            restoreVersion(document);
+                            setVersionsOpen(false);
+                            setNotice(`Открыта версия ${item.version}. Сохранить — Ctrl+S, отменить — Ctrl+Z`);
+                          } catch {
+                            setNotice('Не удалось открыть версию: сервер не ответил');
+                          }
+                        }}
+                      >
+                        Открыть
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
 
         {!review && (
@@ -435,6 +538,18 @@ export function Workspace({ planId }: WorkspaceProps) {
                 <Maximize size={17} aria-hidden="true" />
                 <span className="visually-hidden">Вписать план</span>
               </button>
+              <button
+                type="button"
+                className="icon-btn"
+                onClick={() => {
+                  downloadJson(doc.ops.name || title, doc);
+                  setNotice('План сохранён файлом в загрузки');
+                }}
+                title="Скачать план файлом JSON"
+              >
+                <Download size={17} aria-hidden="true" />
+                <span className="visually-hidden">Скачать план</span>
+              </button>
             </>
           )}
           <button type="button" className="btn btn--label ws-rail__save" onClick={() => void save()} disabled={saving || !dirty}>
@@ -444,7 +559,7 @@ export function Workspace({ planId }: WorkspaceProps) {
         </div>
       </header>
 
-      {!review && <Library types={types} layers={layers} onLayers={setLayers} />}
+      {!review && <Library types={types} zoneTypes={zoneTypes} layers={layers} onLayers={setLayers} onNotice={setNotice} />}
 
       <main className="ws-sheet" aria-label="Лист плана">
         <PlanCanvas
@@ -455,7 +570,13 @@ export function Workspace({ planId }: WorkspaceProps) {
           focus={focus}
           onViewChange={setView}
           onCursor={setCursor}
+          onNotice={setNotice}
         />
+        {mode === 'design' && toolHint && (
+          <p className="ws-hint" role="note">
+            {toolHint}
+          </p>
+        )}
         {review && reviewErrors > 0 && (
           <p className="ws-hint" role="note">
             {previewing
@@ -466,6 +587,22 @@ export function Workspace({ planId }: WorkspaceProps) {
         {notice && (
           <div className="ws-notice" role="status">
             {notice}
+          </div>
+        )}
+        {leaving && (
+          <div className="ws-confirm" role="alertdialog" aria-label="Несохранённые изменения">
+            <p>Изменения не сохранены. Уйти к списку планов?</p>
+            <div className="ws-confirm__actions">
+              <button type="button" className="btn btn--label" onClick={() => void save().then(() => navigate({ name: 'rack' }))}>
+                Сохранить и выйти
+              </button>
+              <button type="button" className="btn btn--steel" onClick={() => navigate({ name: 'rack' })}>
+                Выйти без сохранения
+              </button>
+              <button type="button" className="btn btn--steel" onClick={() => setLeaving(false)}>
+                Остаться
+              </button>
+            </div>
           </div>
         )}
       </main>

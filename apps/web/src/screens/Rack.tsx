@@ -4,7 +4,7 @@
  * Каждый план — дверца с этикеткой: название, площадь, объекты, версии и итог проверки.
  */
 
-import { CircleCheck, FileUp, FolderOpen, LoaderCircle, TriangleAlert } from 'lucide-react';
+import { CircleCheck, Download, FileUp, FolderOpen, LoaderCircle, Trash2, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Mark } from '../components/Mark';
 import { PlanThumb } from '../components/PlanThumb';
@@ -12,8 +12,9 @@ import { ServerBadge } from '../components/ServerBadge';
 import { ApiError, api, type PlanSummary } from '../lib/api';
 import { withDemoPassports } from '../lib/demoPassports';
 import type { Plan, ValidationReport } from '../lib/plan';
-import { blankPlan, formatNumber, planArea, plural } from '../lib/planFacts';
+import { formatNumber, planArea, plural } from '../lib/planFacts';
 import { sortFindings } from '../lib/plainFindings';
+import { downloadJson } from '../lib/download';
 import { navigate } from '../lib/router';
 import { useServer } from '../lib/useServer';
 import './rack.css';
@@ -25,7 +26,7 @@ interface Facts {
   warnings: number | null;
 }
 
-type Busy = null | 'demo' | 'blank' | 'upload';
+type Busy = null | 'demo' | 'upload';
 
 interface Problem {
   title: string;
@@ -51,6 +52,7 @@ export function Rack() {
   const [sampleReport, setSampleReport] = useState<ValidationReport | null>(null);
   const [busy, setBusy] = useState<Busy>(null);
   const [problem, setProblem] = useState<Problem | null>(null);
+  const [removing, setRemoving] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -110,15 +112,22 @@ export function Rack() {
     }
   };
 
-  const createBlank = async () => {
-    setBusy('blank');
-    setProblem(null);
+  const download = async (plan: PlanSummary) => {
     try {
-      const ref = await api.createPlan('Новое отделение', blankPlan(), 'Пустой план');
-      navigate({ name: 'plan', id: ref.id });
+      downloadJson(plan.title, await api.getPlan(plan.id));
     } catch (error) {
-      setProblem(describeError(error, 'Не удалось создать план.'));
-      setBusy(null);
+      setProblem(describeError(error, 'Не удалось скачать план.'));
+    }
+  };
+
+  const remove = async (id: string) => {
+    try {
+      await api.deletePlan(id);
+      setRemoving(null);
+      setPlans((current) => (current ?? []).filter((p) => p.id !== id));
+    } catch (error) {
+      setProblem(describeError(error, 'Не удалось удалить план.'));
+      setRemoving(null);
     }
   };
 
@@ -197,9 +206,9 @@ export function Rack() {
                   {plural(sampleFacts.errors, 'нарушением', 'нарушениями', 'нарушениями')} норм.{' '}
                 </>
               ) : null}
-              <button type="button" className="cabinet__link" onClick={createBlank} disabled={!ready || busy !== null}>
-                {busy === 'blank' ? 'Создаём пустой план…' : 'Начать с пустого плана'}
-              </button>
+              <a className="cabinet__link" href="#/new">
+                Создать своё помещение
+              </a>
             </p>
           </div>
           {sample && (
@@ -244,13 +253,8 @@ export function Rack() {
             <ul className="cells">
               {plans.map((plan) => (
                 <li key={plan.id}>
-                  <button
-                    type="button"
-                    className="door"
-                    onClick={() => navigate({ name: 'plan', id: plan.id })}
-                    disabled={!ready}
-                  >
-                    <span className="door__label">
+                  <article className="door">
+                    <a className="door__label" href={`#/plan/${plan.id}`}>
                       <span className="door__title">{plan.title}</span>
                       <span className="door__sub">
                         {new Date(plan.created_at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}
@@ -258,8 +262,32 @@ export function Rack() {
                         {plan.versions} {plural(plan.versions, 'версия', 'версии', 'версий')}
                       </span>
                       <DoorFacts facts={facts[plan.id] ?? null} />
-                    </span>
-                  </button>
+                    </a>
+                    {removing === plan.id ? (
+                      <div className="door__confirm" role="alertdialog" aria-label={`Удалить план «${plan.title}»`}>
+                        <p>Удалить план со всеми версиями?</p>
+                        <div>
+                          <button type="button" className="btn btn--label" onClick={() => void remove(plan.id)}>
+                            Удалить
+                          </button>
+                          <button type="button" className="btn btn--steel" onClick={() => setRemoving(null)}>
+                            Отмена
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="door__tools">
+                        <button type="button" onClick={() => void download(plan)} title="Скачать план файлом JSON">
+                          <Download size={14} aria-hidden="true" />
+                          <span className="visually-hidden">Скачать {plan.title}</span>
+                        </button>
+                        <button type="button" onClick={() => setRemoving(plan.id)} title="Удалить план">
+                          <Trash2 size={14} aria-hidden="true" />
+                          <span className="visually-hidden">Удалить {plan.title}</span>
+                        </button>
+                      </div>
+                    )}
+                  </article>
                 </li>
               ))}
             </ul>

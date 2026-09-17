@@ -122,7 +122,12 @@ export interface ZoneTypeDef {
 export interface EquipmentTypeDef {
   code: string;
   label: string;
+  group?: string;
   default_size_m?: [number, number];
+  floor_object?: boolean;
+  allowed_zones?: string[];
+  capacity_persons?: number | null;
+  operator_workplace?: boolean;
   attribute_schema?: Record<string, string>;
 }
 
@@ -263,6 +268,8 @@ export interface EquipmentTypeInfo {
   floor_object: boolean;
   allowed_zones: string[];
   capacity_persons?: number | null;
+  /** У объекта есть место сотрудника: касса, стойка выдачи, рабочее место. */
+  operator_workplace?: boolean;
   attribute_schema: Record<string, string>;
 }
 

@@ -49,6 +49,9 @@ class CreatePlanRequest(BaseModel):
 class SaveVersionRequest(BaseModel):
     document: dict[str, Any]
     note: str = ""
+    title: str | None = Field(
+        default=None, description="Новое название плана в списке; пусто — оставить прежнее"
+    )
 
 
 class PlanRef(BaseModel):
@@ -120,7 +123,7 @@ def get_plan(plan_id: str, version: int | None = None) -> dict[str, Any]:
 def save_plan(plan_id: str, payload: SaveVersionRequest) -> PlanRef:
     _parse_plan(payload.document)
     try:
-        version = store.save_version(plan_id, payload.document, payload.note)
+        version = store.save_version(plan_id, payload.document, payload.note, payload.title)
     except KeyError:
         raise HTTPException(status_code=404, detail=f"План {plan_id} не найден") from None
     return PlanRef(id=plan_id, version=version)

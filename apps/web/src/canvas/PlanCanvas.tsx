@@ -6,6 +6,7 @@
  * пересчитывается из метров в пиксели одним видом (lib/geometry).
  */
 
+import { AppWindow, DoorOpen } from 'lucide-react';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { AddressBook } from '../lib/addresses';
 import { key } from '../lib/addresses';
@@ -13,7 +14,6 @@ import {
   distanceToSegment,
   equipmentAt,
   fitView,
-  magnetToWalls,
   polygonCentroid,
   round3,
   screenPath,
@@ -25,10 +25,13 @@ import {
   zoomAt,
   type View,
 } from '../lib/geometry';
-import type { Equipment, EquipmentTypeInfo, Plan, Point, RecommendationChange, ValidationReport } from '../lib/plan';
+import type { Equipment, EquipmentTypeInfo, Plan, Point, RecommendationChange, ValidationReport, Wall } from '../lib/plan';
 import { equipmentCorners, planBounds } from '../lib/plan';
 import { formatNumber } from '../lib/planFacts';
 import { outlinePoints } from '../lib/planFacts';
+import { defaultOperatorPosition, transformInPlace } from '../lib/equipmentOps';
+import { MIN_WALL_M, addOpening, moveWall, replaceOutline, wallAxis, wallLength } from '../lib/wallEdit';
+import { OUTER_WALL_M, PARTITION_M, fitsRoom, hostWall, isOuter, offsetOutline, outwardNormal, placeInRoom } from '../lib/room';
 import { useWorkspace } from '../state/store';
 import { glyphFor } from './glyphs';
 import './canvas.css';
@@ -48,19 +51,26 @@ interface PlanCanvasProps {
   focus: { id: string; nonce: number } | null;
   onViewChange: (view: View) => void;
   onCursor: (point: Point | null) => void;
+  onNotice?: (text: string) => void;
 }
 
 const POSITION_STEP = 0.05;
 const DRAFT_STEP = 0.25;
 const ROTATE_STEP = 15;
-const OUTER_WALL_M = 0.2;
-const PARTITION_M = 0.1;
 
 type Gesture =
   | { kind: 'none' }
   | { kind: 'pan'; startX: number; startY: number; origin: View }
   | { kind: 'drag'; id: string; startWorld: Point; startPosition: Point; moved: boolean }
-  | { kind: 'rotate'; id: string };
+  | { kind: 'rotate'; id: string }
+  | { kind: 'wall'; id: string; axis: 'x' | 'y'; startWorld: Point; base: Plan; delta: number };
+
+interface WallMenu {
+  wallId: string;
+  point: Point;
+  sx: number;
+  sy: number;
+}
 
 const ZONE_FILL: Record<string, string> = {
   client_area: 'var(--zone-client)',
@@ -71,7 +81,7 @@ const ZONE_FILL: Record<string, string> = {
   staff_room: 'url(#hatch-back)',
 };
 
-function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, onCursor }: PlanCanvasProps) {
+function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, onCursor, onNotice }: PlanCanvasProps) {
   const doc = useWorkspace((s) => s.doc);
   const selection = useWorkspace((s) => s.selection);
   const highlighted = useWorkspace((s) => s.highlighted);
@@ -99,6 +109,9 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
   const [hoverId, setHoverId] = useState<string | null>(null);
   const [zoneDraft, setZoneDraft] = useState<Point[]>([]);
   const [wallStart, setWallStart] = useState<Point | null>(null);
+  const [outlineDraft, setOutlineDraft] = useState<Point[]>([]);
+  const [wallMenu, setWallMenu] = useState<WallMenu | null>(null);
+  const [wallShift, setWallShift] = useState<number | null>(null);
   const gesture = useRef<Gesture>({ kind: 'none' });
   const fitted = useRef(false);
 
@@ -148,6 +161,8 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
   useEffect(() => {
     if (tool !== 'zone') setZoneDraft([]);
     if (tool !== 'wall') setWallStart(null);
+    if (tool !== 'outline') setOutlineDraft([]);
+    setWallMenu(null);
   }, [tool]);
 
   useEffect(() => {
@@ -155,8 +170,15 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
       if (event.key === 'Escape') {
         setZoneDraft([]);
         setWallStart(null);
+        setOutlineDraft([]);
+        setWallMenu(null);
       }
       if (event.key === 'Enter' && zoneDraft.length >= 3) closeZone(zoneDraft);
+      if (event.key === 'Enter' && outlineDraft.length >= 3) closeOutline(outlineDraft);
+      if (event.key === 'Backspace' && outlineDraft.length > 0 && tool === 'outline') {
+        event.preventDefault();
+        setOutlineDraft((points) => points.slice(0, -1));
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -180,11 +202,54 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
     select({ kind: 'zone', id: zoneId });
   };
 
+  const closeOutline = (points: Point[]) => {
+    if (!doc) return;
+    const { plan: next, droppedOpenings } = replaceOutline(doc, points);
+    commit((draft) => {
+      draft.walls = next.walls;
+      draft.doors = next.doors;
+      draft.windows = next.windows;
+    });
+    setOutlineDraft([]);
+    setTool('select');
+    onNotice?.(
+      droppedOpenings > 0
+        ? `Контур заменён. Проёмов, оставшихся без стены, удалено: ${droppedOpenings}. Отменить — Ctrl+Z`
+        : 'Контур заменён. Границы зон не менялись — проверьте их. Отменить — Ctrl+Z',
+    );
+  };
+
+  const addOpeningAt = (kind: 'door' | 'window') => {
+    if (!doc || !wallMenu) return;
+    const result = addOpening(doc, wallMenu.wallId, wallMenu.point, kind);
+    setWallMenu(null);
+    if ('error' in result) {
+      onNotice?.(result.error);
+      return;
+    }
+    commit((draft) => {
+      draft.doors = result.plan.doors;
+      draft.windows = result.plan.windows;
+      draft.flow_hints = result.plan.flow_hints;
+    });
+    select({ kind: kind === 'door' ? 'door' : 'window', id: result.id });
+  };
+
+  /** Ручка сдвига осевой стены — на середине стены, там, где стена нарисована. */
+  const wallHandle = (wall: Wall): [number, number] | null => {
+    if (!doc || !wallAxis(wall)) return null;
+    const outer = isOuter(wall);
+    const [nx, ny] = outer ? outwardNormal(doc, wall, outlinePoints(doc)) : [0, 0];
+    const shift = outer ? OUTER_WALL_M / 2 : 0;
+    return toScreen(view, [(wall.from[0] + wall.to[0]) / 2 + nx * shift, (wall.from[1] + wall.to[1]) / 2 + ny * shift]);
+  };
+
   const onPointerDown = (event: React.PointerEvent<SVGSVGElement>) => {
     if (!doc) return;
     const { sx, sy } = pointer(event);
     const world = toWorld(view, sx, sy);
     svg.current?.setPointerCapture(event.pointerId);
+    setWallMenu(null);
 
     if (event.button === 1 || (event.button === 0 && event.altKey)) {
       gesture.current = { kind: 'pan', startX: sx, startY: sy, origin: view };
@@ -204,10 +269,16 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
         size_m,
         rotation_deg: 0,
       };
-      probe.position = magnetToWalls(doc, probe);
+      const floor = info?.floor_object ?? true;
+      probe.position = placeInRoom(doc, probe, null, floor);
+      if (floor && !fitsRoom(doc, probe)) {
+        onNotice?.('Здесь объект не помещается: он заходит в стену или за контур помещения.');
+        return;
+      }
       const zone = zoneAt(doc, probe.position);
       if (zone) probe.zone = zone.id;
       if (info?.capacity_persons) probe.capacity_persons = info.capacity_persons;
+      if (info?.operator_workplace) probe.operator_position = defaultOperatorPosition(doc, probe);
       commit((draft) => {
         draft.equipment = [...(draft.equipment ?? []), probe];
       });
@@ -226,6 +297,24 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
         }
       }
       setZoneDraft((points) => [...points, point]);
+      return;
+    }
+
+    if (mode === 'design' && tool === 'outline') {
+      let point: Point = event.shiftKey ? [snap(world[0], POSITION_STEP), snap(world[1], POSITION_STEP)] : [snap(world[0], DRAFT_STEP), snap(world[1], DRAFT_STEP)];
+      const last = outlineDraft[outlineDraft.length - 1];
+      if (last && !event.shiftKey) {
+        point = Math.abs(point[0] - last[0]) >= Math.abs(point[1] - last[1]) ? [point[0], last[1]] : [last[0], point[1]];
+      }
+      if (outlineDraft.length >= 3) {
+        const [fx, fy] = toScreen(view, outlineDraft[0]);
+        if (Math.hypot(fx - sx, fy - sy) < 14) {
+          closeOutline(outlineDraft);
+          return;
+        }
+      }
+      if (last && Math.hypot(point[0] - last[0], point[1] - last[1]) < MIN_WALL_M) return;
+      setOutlineDraft((points) => [...points, [round3(point[0]), round3(point[1])]]);
       return;
     }
 
@@ -253,6 +342,19 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
       return;
     }
 
+    // Ручка выделенной стены
+    if (selection?.kind === 'wall' && mode === 'design') {
+      const wall = doc.walls?.find((w) => w.id === selection.id);
+      const handle = wall ? wallHandle(wall) : null;
+      const axis = wall ? wallAxis(wall) : null;
+      if (wall && handle && axis && Math.hypot(handle[0] - sx, handle[1] - sy) < 13) {
+        beginTransient();
+        gesture.current = { kind: 'wall', id: wall.id, axis, startWorld: world, base: doc, delta: 0 };
+        setWallShift(0);
+        return;
+      }
+    }
+
     // Выбор и перетаскивание
     if (selection?.kind === 'equipment' && mode === 'design') {
       const item = doc.equipment?.find((e) => e.id === selection.id);
@@ -278,12 +380,19 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
 
     if (mode === 'design') {
       const tolerance = 8 / view.scale;
-      const door = doc.doors?.find((d) => distanceToSegment(world, [d.wall[0], d.wall[1]], [d.wall[2], d.wall[3]]) < tolerance);
+      const nearOpening = (segment: [number, number, number, number]) =>
+        distanceToSegment(world, [segment[0], segment[1]], [segment[2], segment[3]]) < tolerance + OUTER_WALL_M;
+      const door = doc.doors?.find((d) => nearOpening(d.wall));
       if (door) {
         select({ kind: 'door', id: door.id });
         return;
       }
-      const wall = doc.walls?.find((w) => distanceToSegment(world, w.from, w.to) < tolerance);
+      const win = doc.windows?.find((w) => nearOpening(w.wall));
+      if (win) {
+        select({ kind: 'window', id: win.id });
+        return;
+      }
+      const wall = doc.walls?.find((w) => distanceToSegment(world, w.from, w.to) < tolerance + (isOuter(w) ? OUTER_WALL_M : 0));
       if (wall) {
         select({ kind: 'wall', id: wall.id });
         return;
@@ -327,14 +436,41 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
         const target = draft.equipment?.find((e) => e.id === current.id);
         if (!target) return;
         const step = event.shiftKey ? DRAFT_STEP : POSITION_STEP;
-        target.position = [
-          round3(snap(current.startPosition[0] + dx, step)),
-          round3(snap(current.startPosition[1] + dy, step)),
-        ];
-        target.position = magnetToWalls(draft, target);
+        const previous = target.position;
+        const probe: Equipment = {
+          ...target,
+          position: [round3(snap(current.startPosition[0] + dx, step)), round3(snap(current.startPosition[1] + dy, step))],
+        };
+        // Ctrl отключает привязку к стенам и соседям, но не пускает сквозь стены.
+        const floor = types.get(target.type)?.floor_object ?? true;
+        const next = event.ctrlKey
+          ? fitsRoom(draft, probe) || !floor
+            ? probe.position
+            : previous
+          : placeInRoom(draft, probe, previous, floor);
+        transformInPlace(target, { position: next });
         const zone = zoneAt(draft, target.position);
         if (zone) target.zone = zone.id;
         else delete target.zone;
+      });
+      return;
+    }
+
+    if (current.kind === 'wall') {
+      const index = current.axis === 'x' ? 0 : 1;
+      const step = event.shiftKey ? DRAFT_STEP : POSITION_STEP;
+      const delta = round3(snap(world[index] - current.startWorld[index], step));
+      if (delta === current.delta) return;
+      const moved = moveWall(current.base, current.id, delta);
+      // Стена, которая схлопнула бы соседнюю, останавливается на последнем допустимом месте.
+      if (!moved) return;
+      current.delta = delta;
+      setWallShift(delta);
+      transient((draft) => {
+        draft.walls = moved.walls;
+        draft.doors = moved.doors;
+        draft.windows = moved.windows;
+        draft.zones = moved.zones;
       });
       return;
     }
@@ -347,7 +483,10 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
         // Угол от центра к указателю; 0° — ручка над объектом, поворот по часовой.
         const degrees = (Math.atan2(sx - cx, cy - sy) * 180) / Math.PI;
         const step = event.shiftKey ? 1 : ROTATE_STEP;
-        target.rotation_deg = ((Math.round(degrees / step) * step) % 360 + 360) % 360;
+        const rotation = ((Math.round(degrees / step) * step) % 360 + 360) % 360;
+        // Поворот, при котором объект упирается в стену, не применяется.
+        if ((types.get(target.type)?.floor_object ?? true) && !fitsRoom(draft, { ...target, rotation_deg: rotation })) return;
+        transformInPlace(target, { rotation_deg: rotation });
       });
       return;
     }
@@ -360,7 +499,8 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
   const onPointerUp = (event: React.PointerEvent<SVGSVGElement>) => {
     svg.current?.releasePointerCapture(event.pointerId);
     const current = gesture.current;
-    if (current.kind === 'drag' || current.kind === 'rotate') endTransient();
+    if (current.kind === 'drag' || current.kind === 'rotate' || current.kind === 'wall') endTransient();
+    if (current.kind === 'wall') setWallShift(null);
     gesture.current = { kind: 'none' };
   };
 
@@ -369,8 +509,17 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
     setView((v) => zoomAt(v, sx, sy, Math.pow(1.0016, -event.deltaY)));
   };
 
-  const onDoubleClick = () => {
-    if (tool === 'zone' && zoneDraft.length >= 3) closeZone(zoneDraft);
+  const onDoubleClick = (event: React.MouseEvent<SVGSVGElement>) => {
+    if (tool === 'zone' && zoneDraft.length >= 3) {
+      closeZone(zoneDraft);
+      return;
+    }
+    if (!doc || mode !== 'design' || tool !== 'select') return;
+    const { sx, sy } = pointer(event);
+    const world = toWorld(view, sx, sy);
+    const tolerance = 8 / view.scale;
+    const wall = doc.walls?.find((w) => distanceToSegment(world, w.from, w.to) < tolerance + (isOuter(w) ? OUTER_WALL_M : 0));
+    if (wall) setWallMenu({ wallId: wall.id, point: world, sx, sy });
   };
 
   const outline = useMemo(() => (doc ? outlinePoints(doc) : null), [doc]);
@@ -483,12 +632,25 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
             </g>
           ))}
 
-        {/* Стены */}
+        {/* Стены: наружная задана внутренней гранью, толщина лежит снаружи помещения */}
+        {outline && (
+          <path
+            d={`${screenPath(view, outline)}${screenPath(view, offsetOutline(outline, OUTER_WALL_M))}`}
+            fillRule="evenodd"
+            fill="var(--ink)"
+            className="plan-walls"
+          />
+        )}
         {(doc.walls ?? []).map((wall) => {
-          const [ax, ay] = toScreen(view, wall.from);
-          const [bx, by] = toScreen(view, wall.to);
-          const outer = (wall.type ?? 'outer') === 'outer';
+          const outer = isOuter(wall);
+          // Замкнутый контур уже нарисован кольцом; отдельно — перегородки, разомкнутые стены и выделение.
           const selected = selection?.kind === 'wall' && selection.id === wall.id;
+          if (outer && outline && !selected) return null;
+          const thickness = outer ? OUTER_WALL_M : PARTITION_M;
+          const [nx, ny] = outer ? outwardNormal(doc, wall, outline) : [0, 0];
+          const shift = outer ? thickness / 2 : 0;
+          const [ax, ay] = toScreen(view, [wall.from[0] + nx * shift, wall.from[1] + ny * shift]);
+          const [bx, by] = toScreen(view, [wall.to[0] + nx * shift, wall.to[1] + ny * shift]);
           return (
             <line
               key={wall.id}
@@ -497,24 +659,30 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
               x2={bx}
               y2={by}
               stroke={selected ? 'var(--notice)' : 'var(--ink)'}
-              strokeWidth={Math.max((outer ? OUTER_WALL_M : PARTITION_M) * view.scale, outer ? 3 : 2)}
-              strokeLinecap="square"
+              strokeWidth={Math.max(thickness * view.scale, outer ? 3 : 2)}
+              strokeLinecap={outer ? 'butt' : 'square'}
             />
           );
         })}
 
         {/* Окна */}
         {(doc.windows ?? []).map((win) => {
-          const [ax, ay] = toScreen(view, [win.wall[0], win.wall[1]]);
-          const [bx, by] = toScreen(view, [win.wall[2], win.wall[3]]);
-          const thickness = Math.max(OUTER_WALL_M * view.scale, 3);
+          const host = hostWall(doc, win.wall);
+          const outer = host ? isOuter(host) : true;
+          const thicknessM = outer ? OUTER_WALL_M : PARTITION_M;
+          const [wx, wy] = host && outer ? outwardNormal(doc, host, outline) : [0, 0];
+          const shift = outer ? thicknessM / 2 : 0;
+          const [ax, ay] = toScreen(view, [win.wall[0] + wx * shift, win.wall[1] + wy * shift]);
+          const [bx, by] = toScreen(view, [win.wall[2] + wx * shift, win.wall[3] + wy * shift]);
+          const thickness = Math.max(thicknessM * view.scale, 3);
           const nx = -(by - ay);
           const ny = bx - ax;
           const length = Math.hypot(nx, ny) || 1;
           const ox = (nx / length) * (thickness / 3.2);
           const oy = (ny / length) * (thickness / 3.2);
+          const selectedWindow = selection?.kind === 'window' && selection.id === win.id;
           return (
-            <g key={win.id} className="plan-window">
+            <g key={win.id} className={`plan-window${selectedWindow ? ' plan-window--selected' : ''}`}>
               <line x1={ax} y1={ay} x2={bx} y2={by} stroke="var(--sheet)" strokeWidth={thickness - 1} />
               <line x1={ax + ox} y1={ay + oy} x2={bx + ox} y2={by + oy} />
               <line x1={ax - ox} y1={ay - oy} x2={bx - ox} y2={by - oy} />
@@ -527,6 +695,8 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
           <DoorGlyph
             key={door.id}
             view={view}
+            plan={doc}
+            outline={outline}
             segment={door.wall}
             interior={interior}
             entrance={door.type === 'entrance'}
@@ -662,12 +832,51 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
         {tool === 'wall' && wallStart && cursor && (
           <WallDraft view={view} start={wallStart} cursor={cursor} />
         )}
+        {tool === 'outline' && outlineDraft.length > 0 && (
+          <OutlineDraft view={view} points={outlineDraft} cursor={cursor} />
+        )}
+
+        {/* Ручка сдвига выделенной стены */}
+        {mode === 'design' &&
+          selection?.kind === 'wall' &&
+          (() => {
+            const wall = doc.walls?.find((w) => w.id === selection.id);
+            const handle = wall ? wallHandle(wall) : null;
+            if (!wall || !handle) return null;
+            const vertical = wallAxis(wall) === 'x';
+            const [hx, hy] = handle;
+            return (
+              <g className="plan-wall-handle" transform={`translate(${hx} ${hy})`}>
+                <circle r={10} />
+                <path d={vertical ? 'M-6 0H6M-6 0l3-3M-6 0l3 3M6 0l-3-3M6 0l-3 3' : 'M0 -6V6M0 -6l-3 3M0 -6l3 3M0 6l-3-3M0 6l3-3'} />
+                <text x={vertical ? 16 : 0} y={vertical ? 4 : -16} textAnchor={vertical ? 'start' : 'middle'} className="plan-wall-handle__label">
+                  {wallShift !== null
+                    ? `${wallShift > 0 ? '+' : wallShift < 0 ? '−' : ''}${formatNumber(Math.abs(wallShift))} м`
+                    : `${formatNumber(wallLength(wall))} м`}
+                </text>
+              </g>
+            );
+          })()}
         {tool === 'equipment' && placingType && cursor && (
           <PlacingGhost view={view} doc={doc} type={placingType} info={types.get(placingType)} cursor={cursor} />
         )}
 
         <ScaleBar view={view} height={size.height} />
       </svg>
+      {wallMenu && (
+        <div className="wall-menu" role="menu" aria-label="Проём в стене" style={{ left: wallMenu.sx, top: wallMenu.sy }}>
+          <button type="button" role="menuitem" onClick={() => addOpeningAt('door')}>
+            <DoorOpen size={15} aria-hidden="true" />
+            Дверь
+          </button>
+          {doc.walls?.find((w) => w.id === wallMenu.wallId && isOuter(w)) && (
+            <button type="button" role="menuitem" onClick={() => addOpeningAt('window')}>
+              <AppWindow size={15} aria-hidden="true" />
+              Окно
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -704,12 +913,16 @@ function AddressTag({ x, y, text, tone }: { x: number; y: number; text: string; 
 
 function DoorGlyph({
   view,
+  plan,
+  outline,
   segment,
   interior,
   entrance,
   selected,
 }: {
   view: View;
+  plan: Plan;
+  outline: Point[] | null;
   segment: [number, number, number, number];
   interior: Point | null;
   entrance: boolean;
@@ -736,11 +949,18 @@ function DoorGlyph({
   const [sbx, sby] = toScreen(view, b);
   const [slx, sly] = toScreen(view, leafEnd);
   const radius = length * view.scale;
+  const host = hostWall(plan, segment);
+  const outer = host ? isOuter(host) : true;
+  const thickness = outer ? OUTER_WALL_M : PARTITION_M;
+  const [ox, oy] = host && outer ? outwardNormal(plan, host, outline) : [0, 0];
+  const shift = outer ? thickness / 2 : 0;
+  const [gax, gay] = toScreen(view, [a[0] + ox * shift, a[1] + oy * shift]);
+  const [gbx, gby] = toScreen(view, [b[0] + ox * shift, b[1] + oy * shift]);
   const cross = (sbx - sax) * (sly - say) - (sby - say) * (slx - sax);
   const sweep = cross > 0 ? 1 : 0;
   return (
     <g className={`plan-door${entrance ? ' plan-door--entrance' : ''}${selected ? ' plan-door--selected' : ''}`}>
-      <line x1={sax} y1={say} x2={sbx} y2={sby} className="plan-door__gap" strokeWidth={Math.max(OUTER_WALL_M * view.scale, 3) + 2} />
+      <line x1={gax} y1={gay} x2={gbx} y2={gby} className="plan-door__gap" strokeWidth={Math.max(thickness * view.scale, 3) + 2} />
       <line x1={sax} y1={say} x2={slx} y2={sly} className="plan-door__leaf" />
       <path d={`M${sbx} ${sby}A${radius} ${radius} 0 0 ${sweep} ${slx} ${sly}`} className="plan-door__swing" />
     </g>
@@ -879,6 +1099,36 @@ function placePins(doc: Plan, report: ValidationReport, active: number | null, v
   return pins.sort((a, b) => Number(a.active) - Number(b.active));
 }
 
+function OutlineDraft({ view, points, cursor }: { view: View; points: Point[]; cursor: Point | null }) {
+  const last = points[points.length - 1];
+  let next: Point | null = null;
+  if (cursor) {
+    next = [snap(cursor[0], DRAFT_STEP), snap(cursor[1], DRAFT_STEP)];
+    next = Math.abs(next[0] - last[0]) >= Math.abs(next[1] - last[1]) ? [next[0], last[1]] : [last[0], next[1]];
+  }
+  const chain = next ? [...points, next] : points;
+  return (
+    <g className="plan-draft plan-draft--outline">
+      <path d={screenPath(view, chain, false)} />
+      {chain.slice(1).map((point, index) => {
+        const from = chain[index];
+        const length = Math.hypot(point[0] - from[0], point[1] - from[1]);
+        if (length < 0.01) return null;
+        const [mx, my] = toScreen(view, [(point[0] + from[0]) / 2, (point[1] + from[1]) / 2]);
+        return (
+          <text key={index} x={mx + 6} y={my - 6} className="plan-draft__length">
+            {formatNumber(length)} м
+          </text>
+        );
+      })}
+      {points.map((p, index) => {
+        const [x, y] = toScreen(view, p);
+        return <rect key={index} x={x - 4} y={y - 4} width={8} height={8} className={index === 0 && points.length >= 3 ? 'plan-draft__close' : undefined} />;
+      })}
+    </g>
+  );
+}
+
 function WallDraft({ view, start, cursor }: { view: View; start: Point; cursor: Point }) {
   let end: Point = [snap(cursor[0], DRAFT_STEP), snap(cursor[1], DRAFT_STEP)];
   const dx = Math.abs(end[0] - start[0]);
@@ -917,11 +1167,13 @@ function PlacingGhost({
     size_m: info?.default_size_m ?? [1, 1],
     rotation_deg: 0,
   };
-  ghost.position = magnetToWalls(doc, ghost);
+  const floor = info?.floor_object ?? true;
+  ghost.position = placeInRoom(doc, ghost, null, floor);
+  const fits = !floor || fitsRoom(doc, ghost);
   const [gx, gy] = toScreen(view, ghost.position);
   const Glyph = glyphFor(type);
   return (
-    <g className="plan-placing" pointerEvents="none">
+    <g className={`plan-placing${fits ? '' : ' plan-placing--blocked'}`} pointerEvents="none">
       <path d={screenPath(view, equipmentCorners(ghost))} />
       <Glyph x={gx - 10} y={gy - 10} width={20} height={20} strokeWidth={1.75} aria-hidden="true" />
     </g>

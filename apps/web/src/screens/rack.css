@@ -346,3 +346,55 @@
     display: none;
   }
 }
+
+/* Действия с планом */
+.door__label {
+  color: inherit;
+  text-decoration: none;
+}
+
+.door__tools,
+.door__confirm {
+  display: flex;
+  gap: 6px;
+  padding: 0 4px 2px;
+}
+
+.door__tools {
+  justify-content: flex-end;
+}
+
+.door__tools button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 2px;
+  color: var(--on-steel-2);
+  background: var(--steel-800);
+}
+
+.door__tools button:hover {
+  color: var(--on-steel);
+  background: var(--steel-600);
+}
+
+.door__confirm {
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-2) 4px;
+  color: var(--on-steel);
+  font-size: var(--text-13);
+}
+
+.door__confirm div {
+  display: flex;
+  gap: 6px;
+}
+
+.door__confirm .btn {
+  min-height: 32px;
+  padding: 0 var(--s-3);
+  font-size: var(--text-13);
+}

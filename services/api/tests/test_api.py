@@ -178,3 +178,13 @@ def test_assistant_place_returns_explained_recommendation(client: TestClient, do
     ).json()
     assert body["reasons"]
     assert body["effects"]
+
+
+def test_saving_updates_plan_title(client: TestClient, document: dict) -> None:
+    created = client.post("/api/plans", json={"title": "Старое имя", "document": document}).json()
+    client.put(
+        f"/api/plans/{created['id']}",
+        json={"document": document, "note": "переименование", "title": "Новое имя"},
+    )
+    titles = {p["id"]: p["title"] for p in client.get("/api/plans").json()}
+    assert titles[created["id"]] == "Новое имя"

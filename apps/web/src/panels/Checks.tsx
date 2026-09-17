@@ -34,7 +34,6 @@ export function Checks({ book, onFocusObject }: ChecksProps) {
   const report = useWorkspace((s) => s.report);
   const state = useWorkspace((s) => s.reportState);
   const highlight = useWorkspace((s) => s.highlight);
-  const select = useWorkspace((s) => s.select);
 
   if (!report) {
     return (
@@ -89,7 +88,8 @@ export function Checks({ book, onFocusObject }: ChecksProps) {
               onEnter={() => highlight(finding.objects)}
               onLeave={() => highlight([])}
               onObject={(id) => {
-                select({ kind: book.byId.has(key('equipment', id)) ? 'equipment' : 'zone', id });
+                // Из списка проверки объект только подсвечивается: список остаётся на месте.
+                highlight([id]);
                 onFocusObject(id);
               }}
             />
@@ -178,7 +178,13 @@ function FindingRow({
         {finding.objects.length > 0 && (
           <span className="finding__objects">
             {finding.objects.map((id) => {
-              const objectAddress = book.byId.get(key('equipment', id)) ?? book.byId.get(key('zone', id)) ?? id;
+              const objectAddress =
+                book.byId.get(key('equipment', id)) ??
+                book.byId.get(key('zone', id)) ??
+                book.byId.get(key('wall', id)) ??
+                book.byId.get(key('door', id)) ??
+                book.byId.get(key('window', id)) ??
+                id;
               return (
                 <button key={id} type="button" className="chip" onClick={() => onObject(id)} title={`Показать ${id} на плане`}>
                   {objectAddress}

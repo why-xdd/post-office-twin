@@ -28,6 +28,9 @@ class EquipmentType(BaseModel):
     )
     allowed_zones: list[str] = Field(default_factory=list)
     capacity_persons: int | None = None
+    operator_workplace: bool = Field(
+        default=False, description="У объекта есть место сотрудника: касса, стойка выдачи"
+    )
     attribute_schema: dict[str, str] = Field(default_factory=dict)
 
 
@@ -51,6 +54,7 @@ DEFAULT_EQUIPMENT_TYPES: list[EquipmentType] = [
         group="Зона обслуживания клиентов",
         default_size_m=(1.2, 0.8),
         allowed_zones=["client_area", "queue_accumulator"],
+        operator_workplace=True,
         attribute_schema={"window_number": "number", "services": "string", **INVENTORY},
     ),
     EquipmentType(
@@ -59,6 +63,7 @@ DEFAULT_EQUIPMENT_TYPES: list[EquipmentType] = [
         group="Зона обслуживания клиентов",
         default_size_m=(2.0, 0.8),
         allowed_zones=["client_area"],
+        operator_workplace=True,
         attribute_schema={"cells": "number", **INVENTORY},
     ),
     EquipmentType(
@@ -133,6 +138,7 @@ DEFAULT_EQUIPMENT_TYPES: list[EquipmentType] = [
         group="Рабочее место оператора",
         default_size_m=(1.2, 0.8),
         allowed_zones=SERVICE,
+        operator_workplace=True,
         attribute_schema={"computer": "string", **INVENTORY},
     ),
     EquipmentType(
@@ -261,6 +267,7 @@ def equipment_types(plan: Plan | None = None) -> dict[str, EquipmentType]:
                 "group": "Пользовательские типы",
                 "default_size_m": custom.default_size_m or (1.0, 1.0),
             }
+            # Пустые поля своего типа не затирают значения базового типа.
             data.update({k: v for k, v in custom.model_dump().items() if v not in (None, {}, [])})
             result[custom.code] = EquipmentType.model_validate(data)
     return result

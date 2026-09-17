@@ -37,7 +37,7 @@ class OpsMeta(Base):
     bbox: BBox | None = None
     scale: str | None = None
     ceiling_height_m: float | None = Field(default=None, gt=0)
-    settlement_population: int | None = Field(
+    settlement_population: float | None = Field(
         default=None,
         ge=0,
         description="Население населённого пункта, тыс. чел. — для проверки по Приказу № 538",
@@ -150,9 +150,22 @@ class ZoneTypeDef(Base):
 
 
 class EquipmentTypeDef(Base):
+    """Свой тип оборудования, добавленный пользователем прямо в план."""
+
     code: str
     label: str
+    group: str | None = None
     default_size_m: tuple[float, float] | None = None
+    floor_object: bool | None = Field(
+        default=None, description="Занимает площадь пола; настенные и настольные — нет"
+    )
+    allowed_zones: list[str] = Field(
+        default_factory=list, description="Коды зон, где объект можно ставить; пусто — любые"
+    )
+    capacity_persons: int | None = Field(default=None, ge=0)
+    operator_workplace: bool | None = Field(
+        default=None, description="Рабочее место с оператором: у объекта есть место сотрудника"
+    )
     attribute_schema: dict[str, str] = Field(
         default_factory=dict, description="Имя атрибута -> тип: string, number, date, bool"
     )

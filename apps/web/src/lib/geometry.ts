@@ -129,35 +129,6 @@ export function distanceToSegment([px, py]: Point, [ax, ay]: Point, [bx, by]: Po
   return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
 }
 
-/**
- * Привязка объекта к стенам: если край габарита ближе порога к стене, объект придвигается
- * вплотную. Работает для осевых стен и объектов без наклона — так ставят оборудование в ОПС.
- */
-export function magnetToWalls(plan: Plan, item: Equipment, threshold = 0.15): Point {
-  const [cx, cy] = item.position;
-  const rotation = ((item.rotation_deg ?? 0) % 180 + 180) % 180;
-  const [sx, sy] = rotation === 90 ? [item.size_m[1], item.size_m[0]] : item.size_m;
-  if (rotation !== 0 && rotation !== 90) return item.position;
-  let x = cx;
-  let y = cy;
-  for (const wall of plan.walls ?? []) {
-    const [ax, ay] = wall.from;
-    const [bx, by] = wall.to;
-    if (Math.abs(ax - bx) < 1e-6) {
-      const within = cy >= Math.min(ay, by) && cy <= Math.max(ay, by);
-      if (!within) continue;
-      if (Math.abs(cx - sx / 2 - ax) < threshold) x = ax + sx / 2;
-      else if (Math.abs(cx + sx / 2 - ax) < threshold) x = ax - sx / 2;
-    } else if (Math.abs(ay - by) < 1e-6) {
-      const within = cx >= Math.min(ax, bx) && cx <= Math.max(ax, bx);
-      if (!within) continue;
-      if (Math.abs(cy - sy / 2 - ay) < threshold) y = ay + sy / 2;
-      else if (Math.abs(cy + sy / 2 - ay) < threshold) y = ay - sy / 2;
-    }
-  }
-  return [round3(x), round3(y)];
-}
-
 export function uniqueId(existing: Iterable<string>, base: string): string {
   const taken = new Set(existing);
   let index = 1;

@@ -361,7 +361,8 @@ def _check_door_maneuver(plan: Plan, rule: Rule) -> list[Finding]:
         _finding(
             rule,
             f"Площадка {rule.value} × {rule.value} м перед входом занята: "
-            f"{', '.join(blockers)}.",
+            + ", ".join(f"«{b}»" for b in blockers)
+            + ".",
             blockers,
             None,
         )
@@ -428,7 +429,11 @@ def structural_findings(plan: Plan) -> list[Finding]:
             Finding(
                 rule_id="unique_ids",
                 title="Уникальность идентификаторов",
-                message=f"Повторяющиеся идентификаторы в разделе «{section}»: {', '.join(ids)}.",
+                message=(
+                    f"Повторяющиеся идентификаторы в разделе «{section}»: "
+                    + ", ".join(f"«{i}»" for i in ids)
+                    + "."
+                ),
                 objects=ids,
                 **base,
             )
@@ -440,7 +445,11 @@ def structural_findings(plan: Plan) -> list[Finding]:
             Finding(
                 rule_id="objects_inside_outline",
                 title="Объекты за пределами помещения",
-                message=f"За границами помещения находятся объекты: {', '.join(outside)}.",
+                message=(
+                    "За границами помещения находятся объекты: "
+                    + ", ".join(f"«{o}»" for o in outside)
+                    + "."
+                ),
                 objects=outside,
                 **base,
             )

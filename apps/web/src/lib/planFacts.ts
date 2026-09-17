@@ -53,28 +53,3 @@ export function plural(count: number, one: string, few: string, many: string): s
 }
 
 /** Пустое отделение с прямоугольным контуром — стартовая точка нового плана. */
-export function blankPlan(width = 12, height = 8): Plan {
-  const id = `ops_${Date.now().toString(36)}`;
-  return {
-    ops: {
-      id,
-      name: 'Новое отделение',
-      scale: '1 unit = 1 meter',
-      bbox: { width_m: width, height_m: height },
-      ceiling_height_m: 3,
-    },
-    walls: [
-      { id: 'w_s', from: [0, 0], to: [width, 0], type: 'outer' },
-      { id: 'w_e', from: [width, 0], to: [width, height], type: 'outer' },
-      { id: 'w_n', from: [width, height], to: [0, height], type: 'outer' },
-      { id: 'w_w', from: [0, height], to: [0, 0], type: 'outer' },
-    ],
-    doors: [
-      { id: 'd_main', wall: [1, height, 2.5, height], type: 'entrance', width_m: 1.5, label: 'Главный вход' },
-    ],
-    windows: [],
-    zones: [],
-    equipment: [],
-    flow_hints: { main_entrance: 'd_main', typical_paths: [] },
-  };
-}

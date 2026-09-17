@@ -21,6 +21,10 @@ export function humanize(text: string, plan: Plan | null, book: AddressBook): st
     }
     const wall = plan?.walls?.find((w) => w.id === id);
     if (wall) return `«${book.byId.get(key('wall', id)) ?? ''} ${wall.label ?? 'стена'}»`.replace('« ', '«');
+    const door = plan?.doors?.find((d) => d.id === id);
+    if (door) return `«${book.byId.get(key('door', id)) ?? ''} ${door.label ?? 'дверь'}»`.replace('« ', '«');
+    const win = plan?.windows?.find((w) => w.id === id);
+    if (win) return `«${book.byId.get(key('window', id)) ?? ''} окно»`.replace('« ', '«');
     return whole;
   });
   // «Окно кассы №1 (eq_cashier_1)» → «Окно кассы №1 (О-01)»

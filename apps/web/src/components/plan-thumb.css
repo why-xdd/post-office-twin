@@ -15,6 +15,10 @@
   stroke: var(--signal);
 }
 
+.plan-thumb__ring {
+  fill: var(--ink);
+}
+
 .plan-thumb__wall {
   stroke: var(--ink);
   stroke-linecap: square;
@@ -22,6 +26,13 @@
 
 .plan-thumb__door {
   stroke: var(--sheet);
+}
+
+.plan-thumb__size text {
+  fill: var(--ink-2);
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 .plan-thumb__pin {

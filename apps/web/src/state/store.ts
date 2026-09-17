@@ -7,16 +7,18 @@
  */
 
 import { create } from 'zustand';
+import { transformInPlace } from '../lib/equipmentOps';
+import { removeWall } from '../lib/wallEdit';
 import type { Equipment, Plan, ValidationReport, Zone } from '../lib/plan';
 
-export type SelectionKind = 'equipment' | 'zone' | 'wall' | 'door';
+export type SelectionKind = 'equipment' | 'zone' | 'wall' | 'door' | 'window';
 
 export interface Selection {
   kind: SelectionKind;
   id: string;
 }
 
-export type Tool = 'select' | 'zone' | 'wall' | 'equipment';
+export type Tool = 'select' | 'zone' | 'wall' | 'outline' | 'equipment';
 /** Обзор — простой показ нарушений и исправления; редактор и эксплуатация — полные режимы. */
 export type Mode = 'review' | 'design' | 'operate';
 export type ViewKind = '2d' | '3d';
@@ -76,6 +78,8 @@ interface WorkspaceState {
   undo: () => void;
   redo: () => void;
   markSaved: (planId: string, version: number) => void;
+  /** Открыть прежнюю версию как правку текущей: её можно отменить и сохранить как новую. */
+  restoreVersion: (doc: Plan) => void;
 
   select: (selection: Selection | null) => void;
   highlight: (ids: string[]) => void;
@@ -202,6 +206,12 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     set({ planId, version, savedSnapshot: JSON.stringify(doc) });
   },
 
+  restoreVersion: (doc) => {
+    const { doc: current, past } = get();
+    if (!current) return;
+    set({ doc: clone(doc), past: [...past, current].slice(-HISTORY_LIMIT), future: [], preview: null, selection: null });
+  },
+
   select: (selection) => set({ selection }),
   highlight: (ids) => set({ highlighted: ids }),
   setTool: (tool, placingType = null) => set({ tool, placingType }),
@@ -235,7 +245,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   updateEquipment: (id, patch) =>
     get().commit((draft) => {
       const item = draft.equipment?.find((e) => e.id === id);
-      if (item) Object.assign(item, patch);
+      if (item) transformInPlace(item, patch);
     }),
 
   updateZone: (id, patch) =>
@@ -256,7 +266,12 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
           if (e.zone === selection.id) delete e.zone;
         });
       } else if (selection.kind === 'wall') {
-        draft.walls = (draft.walls ?? []).filter((w) => w.id !== selection.id);
+        const next = removeWall(draft, selection.id);
+        draft.walls = next.walls;
+        draft.doors = next.doors;
+        draft.windows = next.windows;
+      } else if (selection.kind === 'window') {
+        draft.windows = (draft.windows ?? []).filter((w) => w.id !== selection.id);
       } else if (selection.kind === 'door') {
         draft.doors = (draft.doors ?? []).filter((d) => d.id !== selection.id);
       }

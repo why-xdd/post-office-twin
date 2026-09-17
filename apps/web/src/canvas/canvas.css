@@ -288,6 +288,11 @@
   stroke-dasharray: 4 3;
 }
 
+.plan-placing--blocked path {
+  fill: rgba(241, 215, 204, 0.85);
+  stroke: var(--signal);
+}
+
 .plan-placing svg {
   color: var(--ink-2);
 }
@@ -366,5 +371,90 @@
   .plan-equipment--latched,
   .plan-pin__body {
     animation: none;
+  }
+}
+
+/* Ручка сдвига стены */
+.plan-wall-handle {
+  cursor: grab;
+}
+
+.plan-wall-handle circle {
+  fill: var(--notice);
+  stroke: #fff;
+  stroke-width: 2;
+  filter: drop-shadow(0 1px 2px rgba(20, 24, 26, 0.35));
+}
+
+.plan-wall-handle path {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  pointer-events: none;
+}
+
+.plan-wall-handle__label {
+  fill: var(--notice);
+  font-size: 12px;
+  font-weight: 650;
+  paint-order: stroke;
+  stroke: var(--sheet);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.plan-window.plan-window--selected line + line {
+  stroke: var(--notice);
+  stroke-width: 2.5;
+}
+
+.plan-draft--outline path {
+  fill: none;
+  stroke-width: 2;
+}
+
+.plan-draft__close {
+  fill: var(--notice) !important;
+}
+
+/* Меню проёма на стене */
+.wall-menu {
+  position: absolute;
+  z-index: 4;
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--radius-plate);
+  background: var(--steel-900);
+  box-shadow: var(--lift-shadow);
+  transform: translate(-50%, calc(-100% - 12px));
+  animation: wall-menu-in var(--dur-base) var(--ease-drawer) both;
+}
+
+.wall-menu button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 var(--s-3);
+  border: 0;
+  border-radius: 2px;
+  color: var(--on-steel);
+  background: transparent;
+  font-size: var(--text-13);
+  font-weight: 560;
+}
+
+.wall-menu button:hover,
+.wall-menu button:focus-visible {
+  background: var(--steel-700);
+}
+
+@keyframes wall-menu-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, calc(-100% - 6px));
   }
 }

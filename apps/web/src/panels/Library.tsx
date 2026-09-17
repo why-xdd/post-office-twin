@@ -2,23 +2,27 @@
  * Стеллаж библиотеки: инструменты, оборудование по группам перечня ОПС, слои плана.
  */
 
-import { BrickWall, MousePointer2, Search, SquareDashed } from 'lucide-react';
+import { BrickWall, MousePointer2, PenLine, Pencil, Plus, Search, SquareDashed, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import type { Layers } from '../canvas/PlanCanvas';
 import { glyphFor } from '../canvas/glyphs';
-import type { EquipmentTypeInfo } from '../lib/plan';
+import type { EquipmentTypeInfo, ZoneTypeInfo } from '../lib/plan';
+import { CustomTypeForm } from './CustomType';
 import { formatNumber } from '../lib/planFacts';
 import { useWorkspace, type Tool } from '../state/store';
 import './library.css';
 
 interface LibraryProps {
   types: EquipmentTypeInfo[];
+  zoneTypes: ZoneTypeInfo[];
   layers: Layers;
   onLayers: (layers: Layers) => void;
+  onNotice: (text: string) => void;
 }
 
 const TOOLS: { tool: Tool; label: string; hotkey: string; icon: typeof MousePointer2 }[] = [
   { tool: 'select', label: 'Выбор', hotkey: 'V', icon: MousePointer2 },
+  { tool: 'outline', label: 'Контур', hotkey: 'O', icon: PenLine },
   { tool: 'wall', label: 'Перегородка', hotkey: 'W', icon: BrickWall },
   { tool: 'zone', label: 'Зона', hotkey: 'Z', icon: SquareDashed },
 ];
@@ -30,12 +34,33 @@ const LAYER_LABELS: { key: keyof Layers; label: string }[] = [
   { key: 'grid', label: 'Сетка 25 см' },
 ];
 
-export function Library({ types, layers, onLayers }: LibraryProps) {
+export function Library({ types, zoneTypes, layers, onLayers, onNotice }: LibraryProps) {
   const tool = useWorkspace((s) => s.tool);
   const placingType = useWorkspace((s) => s.placingType);
   const mode = useWorkspace((s) => s.mode);
   const setTool = useWorkspace((s) => s.setTool);
+  const doc = useWorkspace((s) => s.doc);
+  const commit = useWorkspace((s) => s.commit);
   const [query, setQuery] = useState('');
+  const [form, setForm] = useState<{ edited: EquipmentTypeInfo | null } | null>(null);
+
+  const custom = useMemo(
+    () => new Set((doc?.dictionaries?.equipment_types ?? []).map((t) => t.code)),
+    [doc?.dictionaries?.equipment_types],
+  );
+
+  const removeType = (type: EquipmentTypeInfo) => {
+    const used = (doc?.equipment ?? []).filter((e) => e.type === type.code).length;
+    if (used > 0) {
+      onNotice(`На плане ${used} ${used === 1 ? 'объект' : 'объектов'} этого типа — сначала удалите их с плана.`);
+      return;
+    }
+    commit((plan) => {
+      const types = (plan.dictionaries?.equipment_types ?? []).filter((t) => t.code !== type.code);
+      plan.dictionaries = { ...(plan.dictionaries ?? {}), equipment_types: types };
+    });
+    onNotice(`Предмет «${type.label}» убран из библиотеки. Отменить — Ctrl+Z`);
+  };
 
   const groups = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -80,6 +105,25 @@ export function Library({ types, layers, onLayers }: LibraryProps) {
             <input value={query} placeholder="Найти оборудование" onChange={(event) => setQuery(event.target.value)} />
           </label>
 
+          {form ? (
+            <CustomTypeForm
+              edited={form.edited}
+              zoneTypes={zoneTypes}
+              onDone={(code) => {
+                setForm(null);
+                if (code) {
+                  onNotice(form.edited ? 'Предмет изменён' : 'Предмет добавлен. Щёлкните по плану, чтобы поставить его');
+                  if (!form.edited) setTool('equipment', code);
+                }
+              }}
+            />
+          ) : (
+            <button type="button" className="library__add" onClick={() => setForm({ edited: null })}>
+              <Plus size={15} aria-hidden="true" />
+              Свой предмет
+            </button>
+          )}
+
           <div className="library__groups">
             {groups.length === 0 && <p className="library__empty">Ничего не найдено. Проверьте написание.</p>}
             {groups.map(([group, list]) => (
@@ -89,8 +133,9 @@ export function Library({ types, layers, onLayers }: LibraryProps) {
                   {list.map((type) => {
                     const Glyph = glyphFor(type.code);
                     const active = tool === 'equipment' && placingType === type.code;
+                    const own = custom.has(type.code);
                     return (
-                      <li key={type.code}>
+                      <li key={type.code} className={own ? 'library__own' : undefined}>
                         <button
                           type="button"
                           className={`item${active ? ' item--active' : ''}`}
@@ -108,6 +153,18 @@ export function Library({ types, layers, onLayers }: LibraryProps) {
                               : 'на стене'}
                           </span>
                         </button>
+                        {own && (
+                          <span className="library__own-actions">
+                            <button type="button" className="library__icon" title="Изменить предмет" onClick={() => setForm({ edited: type })}>
+                              <Pencil size={13} aria-hidden="true" />
+                              <span className="visually-hidden">Изменить {type.label}</span>
+                            </button>
+                            <button type="button" className="library__icon" title="Убрать из библиотеки" onClick={() => removeType(type)}>
+                              <Trash2 size={13} aria-hidden="true" />
+                              <span className="visually-hidden">Убрать {type.label}</span>
+                            </button>
+                          </span>
+                        )}
                       </li>
                     );
                   })}

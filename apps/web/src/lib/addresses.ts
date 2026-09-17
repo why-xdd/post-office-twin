@@ -8,13 +8,14 @@
 
 import type { Finding, Plan } from './plan';
 
-export type AddressKind = 'equipment' | 'zone' | 'wall' | 'door' | 'finding' | 'recommendation' | 'rule';
+export type AddressKind = 'equipment' | 'zone' | 'wall' | 'door' | 'window' | 'finding' | 'recommendation' | 'rule';
 
 export const ADDRESS_PREFIX: Record<AddressKind, string> = {
   equipment: 'О',
   zone: 'З',
   wall: 'С',
   door: 'Д',
+  window: 'Ок',
   finding: 'Н',
   recommendation: 'Р',
   rule: 'П',
@@ -24,7 +25,8 @@ export const ADDRESS_KIND_LABEL: Record<AddressKind, string> = {
   equipment: 'объект',
   zone: 'зона',
   wall: 'стена',
-  door: 'проём',
+  door: 'дверь',
+  window: 'окно',
   finding: 'нарушение',
   recommendation: 'рекомендация',
   rule: 'норма',
@@ -70,6 +72,7 @@ export function buildAddressBook(
     add('zone', (plan.zones ?? []).map((z) => z.id));
     add('wall', (plan.walls ?? []).map((w) => w.id));
     add('door', (plan.doors ?? []).map((d) => d.id));
+    add('window', (plan.windows ?? []).map((w) => w.id));
   }
   add(
     'finding',
@@ -82,9 +85,9 @@ export function buildAddressBook(
 
 /** Нормализует ввод: латинские двойники букв, пробелы, номер без ведущего нуля. */
 export function parseAddress(input: string): string | null {
-  const latinToCyrillic: Record<string, string> = { O: 'О', C: 'С', P: 'Р', H: 'Н', '3': 'З' };
+  const latinToCyrillic: Record<string, string> = { O: 'О', C: 'С', P: 'Р', H: 'Н', '3': 'З', OK: 'Ок', ОК: 'Ок' };
   const cleaned = input.trim().toUpperCase().replace(/\s+/g, '');
-  const match = cleaned.match(/^([A-ZА-ЯЁ3])-?(\d{1,3})$/);
+  const match = cleaned.match(/^(ОК|OK|[A-ZА-ЯЁ3])-?(\d{1,3})$/);
   if (!match) return null;
   const letter = latinToCyrillic[match[1]] ?? match[1];
   const known = Object.values(ADDRESS_PREFIX);

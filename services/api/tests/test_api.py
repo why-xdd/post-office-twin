@@ -188,3 +188,45 @@ def test_saving_updates_plan_title(client: TestClient, document: dict) -> None:
     )
     titles = {p["id"]: p["title"] for p in client.get("/api/plans").json()}
     assert titles[created["id"]] == "Новое имя"
+
+
+def test_parallel_saves_do_not_break_the_store(client: TestClient, document: dict) -> None:
+    """Одновременные сохранения выстраиваются в очередь: версии идут подряд, без потерь."""
+    import threading
+
+    created = client.post("/api/plans", json={"title": "Параллельный", "document": document}).json()
+    results: list[int] = []
+    errors: list[str] = []
+
+    def save() -> None:
+        try:
+            response = client.put(f"/api/plans/{created['id']}", json={"document": document})
+            results.append(response.json()["version"])
+        except Exception as error:  # pragma: no cover - падение видно в списке
+            errors.append(str(error))
+
+    threads = [threading.Thread(target=save) for _ in range(5)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert not errors
+    assert sorted(results) == [2, 3, 4, 5, 6]
+
+
+def test_heavy_requests_answer_when_the_service_is_busy(client: TestClient, document: dict) -> None:
+    """Пока занят единственный слот расчёта, сервис отвечает понятным отказом, а не молчит."""
+    from app import concurrency
+
+    concurrency._slots.acquire()
+    original = concurrency.WAIT_TIMEOUT_S
+    concurrency.WAIT_TIMEOUT_S = 0.1
+    try:
+        response = client.post("/api/assistant/improve", json={"document": document})
+    finally:
+        concurrency.WAIT_TIMEOUT_S = original
+        concurrency._slots.release()
+
+    assert response.status_code == 503
+    assert "занят" in response.json()["detail"]

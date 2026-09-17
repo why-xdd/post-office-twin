@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, ValidationError
 
 from app.assistant import capacity as capacity_model
+from app.concurrency import heavy_slot
 from app.assistant import recommend
 from app.assistant.capacity import CapacityReport
 from app.assistant.recommend import AssistantReport, ImprovementReport, Recommendation
@@ -242,7 +243,8 @@ def assistant_advise(payload: SaveVersionRequest) -> AssistantReport:
 
     Каждая содержит изменения для редактора, причины со ссылкой на норму, допущения и эффект.
     """
-    return recommend.advise(_parse_plan(payload.document))
+    with heavy_slot("подбор рекомендаций"):
+        return recommend.advise(_parse_plan(payload.document))
 
 
 @app.post(
@@ -251,7 +253,8 @@ def assistant_advise(payload: SaveVersionRequest) -> AssistantReport:
     summary="Пошаговое улучшение плана",
 )
 def assistant_improve(payload: SaveVersionRequest, fixes_only: bool = False) -> ImprovementReport:
-    return recommend.improve(_parse_plan(payload.document), fixes_only=fixes_only)
+    with heavy_slot("подбор расстановки"):
+        return recommend.improve(_parse_plan(payload.document), fixes_only=fixes_only)
 
 
 @app.post("/api/assistant/place", response_model=Recommendation, summary="Найти место для объекта")
@@ -264,4 +267,5 @@ def assistant_place(payload: PlaceRequest) -> Recommendation:
         )
     if payload.zone_id is not None and payload.zone_id not in {z.id for z in plan.zones}:
         raise HTTPException(status_code=422, detail=f"Зона «{payload.zone_id}» на плане не найдена.")
-    return recommend.place_equipment(plan, payload.equipment_type, payload.zone_id)
+    with heavy_slot("поиск места"):
+        return recommend.place_equipment(plan, payload.equipment_type, payload.zone_id)

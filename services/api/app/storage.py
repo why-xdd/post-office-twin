@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,26 +31,40 @@ CREATE TABLE IF NOT EXISTS versions (
 """
 
 
+BUSY_TIMEOUT_S = 10.0
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 class PlanStore:
+    """Хранилище планов в SQLite.
+
+    Обработчики FastAPI выполняются в пуле потоков, поэтому две записи могут прийти
+    одновременно. Журнал WAL разводит читателей и писателей, а взаимное исключение на запись
+    выстраивает сами записи в очередь: иначе вторая получает «database is locked».
+    """
+
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._write_lock = threading.Lock()
         with self._connect() as conn:
             conn.executescript(SCHEMA)
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.path)
+        conn = sqlite3.connect(self.path, timeout=BUSY_TIMEOUT_S)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
+        # Журнал упреждающей записи: чтение не ждёт запись, запись не ждёт чтение.
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = NORMAL")
         return conn
 
     def create(self, title: str, document: dict[str, Any], note: str = "") -> tuple[str, int]:
         plan_id = uuid.uuid4().hex
-        with self._connect() as conn:
+        with self._write_lock, self._connect() as conn:
             conn.execute(
                 "INSERT INTO plans (id, title, created_at) VALUES (?, ?, ?)",
                 (plan_id, title, _now()),
@@ -65,7 +80,7 @@ class PlanStore:
         self, plan_id: str, document: dict[str, Any], note: str = "", title: str | None = None
     ) -> int:
         """Новая версия плана. title обновляет название плана в списке, если оно изменилось."""
-        with self._connect() as conn:
+        with self._write_lock, self._connect() as conn:
             row = conn.execute(
                 "SELECT COALESCE(MAX(version), 0) AS v FROM versions WHERE plan_id = ?",
                 (plan_id,),
@@ -120,7 +135,7 @@ class PlanStore:
         return [dict(row) for row in rows]
 
     def delete(self, plan_id: str) -> None:
-        with self._connect() as conn:
+        with self._write_lock, self._connect() as conn:
             cur = conn.execute("DELETE FROM plans WHERE id = ?", (plan_id,))
             if cur.rowcount == 0:
                 raise KeyError(plan_id)

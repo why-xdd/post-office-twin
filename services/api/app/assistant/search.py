@@ -29,6 +29,7 @@ from app.dictionaries import EquipmentType, equipment_types, zone_types
 from app.geometry import core, passability
 from app.models import Equipment, Plan
 from app.rules.catalog import rules_by_id
+from app.assistant import objective
 from app.rules.engine import SERVICE_WINDOW_TYPES, validate
 
 GRID_STEP = 0.25
@@ -54,6 +55,7 @@ class Evaluated:
     warnings: int
     min_route_width: float | None
     accepted: bool
+    score: objective.Score | None = None
 
 
 @dataclass
@@ -419,6 +421,7 @@ def with_equipment(plan: Plan, item: Equipment, replace_id: str | None = None) -
 
 
 def evaluate(plan: Plan, candidate_plan: Plan, candidate: Candidate, baseline_errors: int) -> Evaluated:
+    """Полная оценка варианта: нормы плюс все прочие стороны качества расстановки."""
     report = validate(candidate_plan, explain=False)
     width = _route_floor(candidate_plan)
     return Evaluated(
@@ -428,6 +431,9 @@ def evaluate(plan: Plan, candidate_plan: Plan, candidate: Candidate, baseline_er
         warnings=report.warnings,
         min_route_width=width,
         accepted=report.errors <= baseline_errors,
+        score=objective.score(
+            candidate_plan, plan, errors=report.errors, warnings=report.warnings
+        ),
     )
 
 
@@ -490,11 +496,13 @@ def place(
         evaluated.append(evaluate(plan, candidate_plan, candidate, baseline_errors))
 
     accepted = [e for e in evaluated if e.accepted]
+    # Сначала меньше нарушений, при равенстве — лучшая расстановка целиком: проход, места
+    # ожидания, путь посетителя и величина переноса.
     accepted.sort(
         key=lambda e: (
             e.errors,
+            e.score.total if e.score is not None else 0.0,
             -(e.min_route_width if e.min_route_width is not None else 10.0),
-            e.warnings,
             e.candidate.fitness,
         )
     )

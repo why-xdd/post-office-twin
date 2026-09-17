@@ -18,6 +18,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from app.assistant import capacity as capacity_model
+from app.assistant import objective
 from app.assistant import completeness as completeness_model
 from app.assistant import search
 from app.dictionaries import equipment_types
@@ -278,7 +279,12 @@ def recommend_path_fix(plan: Plan, before: dict[str, Any]) -> Recommendation | N
             ]
             if not options:
                 continue
-            best_width, best = max(options, key=lambda o: (o[0], -o[1].errors))
+            # При равной ширине прохода выбирается вариант, который лучше для плана в целом:
+            # места ожидания, путь посетителя и величина переноса.
+            best_width, best = max(
+                options,
+                key=lambda o: (round(o[0], 2), -o[1].errors, -(o[1].score.total if o[1].score else 0.0)),
+            )
             if best_width < current_width + 0.01:
                 continue
             original = next(e for e in plan.equipment if e.id == item.id)
@@ -827,6 +833,11 @@ def improve(plan: Plan, max_steps: int = 12, fixes_only: bool = False) -> Improv
         )
         current = next_plan
 
+    # Полируется то, что действительно переехало: идентификаторы объектов, а не рекомендаций.
+    moved_objects = {c.object_id for step in steps for c in step.recommendation.changes if c.op == "move"}
+    current, polish_steps = _polish(plan, current, moved_objects)
+    steps.extend(polish_steps)
+
     final = summarize(current)
     return ImprovementReport(
         initial=initial,
@@ -836,6 +847,98 @@ def improve(plan: Plan, max_steps: int = 12, fixes_only: bool = False) -> Improv
         effects=_effects(initial, final),
         elapsed_ms=round((time.perf_counter() - started) * 1000, 1),
     )
+
+
+def _polish(original: Plan, plan: Plan, moved: set[str], max_steps: int = 4) -> tuple[Plan, list[ImprovementStep]]:
+    """Возврат перенесённых объектов ближе к их прежнему месту, если план от этого выигрывает.
+
+    Устранение нарушений иногда уводит скамью из зоны ожидания или стойку от окон: ошибок нет,
+    а пользоваться отделением стало хуже. Здесь каждый перенесённый объект пробуется вернуть в
+    ту зону, где он стоял, и изменение принимается только при улучшении общей оценки.
+    """
+    steps: list[ImprovementStep] = []
+    current = plan
+    before_zone = {item.id: item.zone for item in original.equipment}
+    for object_id in sorted(moved)[:max_steps]:
+        item = next((e for e in current.equipment if e.id == object_id), None)
+        source = next((e for e in original.equipment if e.id == object_id), None)
+        if item is None or source is None or item.zone == before_zone.get(object_id):
+            continue
+        current_score = objective.score(current, original)
+        found = search.place(
+            current,
+            item.type,
+            new_id=item.id,
+            template=item,
+            zone_id=before_zone.get(object_id),
+            top_k=FIX_TOP_K,
+            keep=1,
+            prefer_near=source.position,
+        )
+        best = next((e for e in found.best if e.errors <= current_score.errors), None)
+        if best is None:
+            continue
+        # Обе оценки считаются от одного исходного плана, иначе величины переноса несравнимы.
+        best_score = objective.score(best.plan, original, errors=best.errors, warnings=best.warnings)
+        if not best_score.better_than(current_score, margin=0.5):
+            continue
+        state = summarize(current)
+        after = summarize(best.plan)
+        change = _change_from(current, best, "move", item.id, item.type, template=item)
+        gain = _polish_gain(current_score, best_score)
+        recommendation = Recommendation(
+            id=f"polish:{item.id}",
+            scenario="fix",
+            priority=1,
+            title=f"Вернуть ближе к прежнему месту: {_object_name(current, item.id)}",
+            summary=(
+                f"Объект переносится обратно в зону «{_zone_label(best.plan, before_zone.get(object_id))}». "
+                + gain
+                + f" Ошибок остаётся {after['errors']}."
+            ),
+            changes=[change],
+            reasons=[
+                Reason(
+                    text=(
+                        "Устранение нарушений увело объект из его зоны. Возврат не добавляет ошибок "
+                        "и улучшает план по остальным показателям."
+                    ),
+                    source="Расчёт планировки",
+                    clause="сравнение вариантов расстановки",
+                )
+            ],
+            assumptions=[
+                "Сравниваются места внутри прежней зоны объекта; принимается только вариант, "
+                "который не добавляет ошибок и улучшает общую оценку плана."
+            ],
+            effects=_effects(state, after),
+            objects=[item.id],
+            zones=[z for z in [before_zone.get(object_id)] if z],
+            search=_stats(found),
+        )
+        steps.append(
+            ImprovementStep(
+                recommendation=recommendation,
+                errors_after=after["errors"],
+                warnings_after=after["warnings"],
+            )
+        )
+        current = best.plan
+    return current, steps
+
+
+def _polish_gain(before: objective.Score, after: objective.Score) -> str:
+    """Человеческая формулировка того, что именно улучшилось при возврате объекта."""
+    parts: list[str] = []
+    if after.waiting_capacity is not None and before.waiting_capacity is not None and after.waiting_capacity > before.waiting_capacity:
+        parts.append(f"мест ожидания {before.waiting_capacity} → {after.waiting_capacity}")
+    if after.walk_m is not None and before.walk_m is not None and after.walk_m < before.walk_m - 0.05:
+        parts.append(f"путь до окон {before.walk_m} → {after.walk_m} м")
+    if after.moved_m < before.moved_m - 0.05:
+        parts.append(f"перенос {before.moved_m} → {after.moved_m} м")
+    if after.warnings < before.warnings:
+        parts.append(f"предупреждений {before.warnings} → {after.warnings}")
+    return ("Улучшение: " + ", ".join(parts) + ".") if parts else "План становится удобнее."
 
 
 def advise(plan: Plan) -> AssistantReport:

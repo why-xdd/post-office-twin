@@ -133,3 +133,34 @@ def test_search_leaves_no_slivers_between_object_and_wall(plan: Plan) -> None:
         gap = shape.exterior.distance(option.candidate.polygon)
         assert gap < 1e-6 or gap >= search.SETTLE_WALL_M - 1e-6, gap
         assert shape.contains(option.candidate.polygon.buffer(-1e-6))
+
+
+def test_objective_prefers_wider_entrance_and_seats(plan: Plan) -> None:
+    """Оценка расстановки должна ставить доступность и места ожидания выше мелких удобств."""
+    from app.assistant import objective
+
+    base = objective.score(plan)
+    narrow = plan.model_copy(deep=True)
+    # Скамья возвращается вплотную к входу: проход снова сужается.
+    bench = next(e for e in narrow.equipment if e.id == "eq_bench_1")
+    bench.position = (1.5, 6.5)
+    assert objective.score(narrow).total >= base.total
+
+    seats_gone = plan.model_copy(deep=True)
+    seats_gone.equipment = [e for e in seats_gone.equipment if e.id != "eq_bench_1"]
+    assert objective.score(seats_gone).waiting_capacity < base.waiting_capacity
+
+
+def test_improvement_does_not_make_the_plan_worse_overall(plan: Plan) -> None:
+    """Устранение нарушений не должно ухудшать план по остальным показателям."""
+    from app.assistant import objective
+
+    report = recommend.improve(plan, fixes_only=True)
+    improved = Plan.model_validate(report.improved_plan)
+    before = objective.score(plan)
+    after = objective.score(improved, plan)
+    assert after.total < before.total
+    assert after.errors == 0
+    # Путь посетителя до окон не должен вырасти ради снятия ошибок.
+    assert after.walk_m is not None and before.walk_m is not None
+    assert after.walk_m <= before.walk_m + 0.5

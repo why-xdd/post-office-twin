@@ -560,3 +560,51 @@ button.ws-rail__version:hover {
   flex-wrap: wrap;
   gap: var(--s-2);
 }
+
+/* Горячие клавиши */
+.ws-hotkeys {
+  position: absolute;
+  top: var(--s-4);
+  right: var(--s-4);
+  z-index: 5;
+  width: 330px;
+  padding: var(--s-4);
+  border-radius: var(--radius-plate);
+  color: var(--ink);
+  background: var(--label);
+  box-shadow: var(--lift-shadow);
+  animation: notice-in var(--dur-base) var(--ease-drawer) both;
+}
+
+.ws-hotkeys__title {
+  margin-bottom: var(--s-2);
+  font-size: var(--text-14);
+  font-weight: 660;
+}
+
+.ws-hotkeys dl {
+  display: flex;
+  flex-direction: column;
+  margin: 0 0 var(--s-3);
+}
+
+.ws-hotkeys dl > div {
+  display: grid;
+  grid-template-columns: 148px 1fr;
+  gap: var(--s-2);
+  padding: 4px 0;
+  border-bottom: 1px dashed var(--label-edge);
+  font-size: var(--text-12);
+}
+
+.ws-hotkeys dt {
+  color: var(--ink);
+  font-family: var(--font-plate);
+  font-stretch: 70%;
+  font-weight: 620;
+}
+
+.ws-hotkeys dd {
+  margin: 0;
+  color: var(--ink-2);
+}

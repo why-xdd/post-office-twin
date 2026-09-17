@@ -10,6 +10,8 @@ import {
   ChevronDown,
   CornerDownLeft,
   Download,
+  Image,
+  Keyboard,
   LoaderCircle,
   Maximize,
   PanelsTopLeft,
@@ -29,7 +31,9 @@ import { sortFindings } from '../lib/plainFindings';
 import { withTransform } from '../lib/equipmentOps';
 import { fitsRoom } from '../lib/room';
 import { navigate } from '../lib/router';
+import { clearDraft, readDraft, saveDraft } from '../lib/draft';
 import { downloadJson } from '../lib/download';
+import { downloadPlanSvg } from '../lib/planSvg';
 import { Assistant } from '../panels/Assistant';
 import { Checks } from '../panels/Checks';
 import { Inventory } from '../panels/Inventory';
@@ -47,6 +51,20 @@ interface WorkspaceProps {
 type LoadState = { kind: 'loading' } | { kind: 'ready' } | { kind: 'error'; message: string };
 
 const VALIDATE_DELAY_MS = 450;
+
+const HOTKEYS: [string, string][] = [
+  ['V · W · O · Z', 'выбор · перегородка · контур · зона'],
+  ['Ctrl + S', 'сохранить версию'],
+  ['Ctrl + Z · Ctrl + Y', 'отменить · повторить'],
+  ['Ctrl + D', 'дублировать объект'],
+  ['R · Shift + R', 'повернуть на 90° · на 15°'],
+  ['Стрелки · Shift + стрелки', 'сдвинуть на 5 см · на 25 см'],
+  ['Ctrl при перетаскивании', 'без привязки к стенам'],
+  ['Del', 'удалить выделенное'],
+  ['F', 'вписать план в экран'],
+  ['/', 'перейти по адресу'],
+  ['Esc', 'отменить действие, снять выделение'],
+];
 
 const MODES: { id: Mode; label: string; hint: string }[] = [
   { id: 'review', label: 'Обзор', hint: 'Нарушения и исправление в один шаг' },
@@ -95,6 +113,8 @@ export function Workspace({ planId }: WorkspaceProps) {
   const [versions, setVersions] = useState<PlanVersion[] | null>(null);
   const [versionsOpen, setVersionsOpen] = useState(false);
   const [leaving, setLeaving] = useState(false);
+  const [draft, setDraft] = useState<{ savedAt: number } | null>(null);
+  const [hotkeys, setHotkeys] = useState(false);
   const addressInput = useRef<HTMLInputElement>(null);
 
   // Загрузка плана
@@ -114,6 +134,11 @@ export function Workspace({ planId }: WorkspaceProps) {
         if ((document.equipment ?? []).length === 0) useWorkspace.getState().setMode('design');
         setRules(ruleList);
         setLoad({ kind: 'ready' });
+        // Незаконченная правка пережила перезагрузку: предлагаем вернуть её.
+        const stored = readDraft(planId);
+        if (stored && JSON.stringify(stored.document) !== JSON.stringify(document)) {
+          setDraft({ savedAt: stored.savedAt });
+        }
         const dictionaries = await api.dictionaries(document).catch(() => null);
         if (!cancelled && dictionaries) {
           setTypes(dictionaries.equipment_types);
@@ -132,6 +157,16 @@ export function Workspace({ planId }: WorkspaceProps) {
       cancelled = true;
     };
   }, [planId, open]);
+
+  // Черновик в браузере: правка переживает перезагрузку вкладки.
+  useEffect(() => {
+    if (!doc || load.kind !== 'ready') return;
+    const timer = window.setTimeout(() => {
+      if (isDirty(useWorkspace.getState())) saveDraft(planId, doc, version);
+      else clearDraft(planId);
+    }, 800);
+    return () => window.clearTimeout(timer);
+  }, [doc, planId, version, load.kind]);
 
   // Проверка по нормам после каждой правки
   useEffect(() => {
@@ -190,6 +225,8 @@ export function Workspace({ planId }: WorkspaceProps) {
     try {
       const ref = await api.savePlan(state.planId, state.doc, 'Сохранено из редактора', state.doc.ops.name);
       markSaved(ref.id, ref.version);
+      clearDraft(ref.id);
+      setDraft(null);
       setVersions(null);
       setNotice(`Сохранено как версия ${ref.version}`);
     } catch (error) {
@@ -246,12 +283,19 @@ export function Workspace({ planId }: WorkspaceProps) {
         state.redo();
         return;
       }
+      if (event.key === '?' || (event.key === '/' && event.shiftKey)) {
+        event.preventDefault();
+        setHotkeys((open) => !open);
+        return;
+      }
       if (event.key === '/') {
         event.preventDefault();
         addressInput.current?.focus();
         return;
       }
       if (event.key === 'Escape') {
+        setHotkeys(false);
+        setLeaving(false);
         state.setActiveFinding(null);
         state.highlight([]);
         state.setPreview(null);
@@ -550,6 +594,22 @@ export function Workspace({ planId }: WorkspaceProps) {
                 <Download size={17} aria-hidden="true" />
                 <span className="visually-hidden">Скачать план</span>
               </button>
+              <button
+                type="button"
+                className="icon-btn"
+                onClick={() => {
+                  downloadPlanSvg(doc);
+                  setNotice('Чертёж сохранён файлом SVG в загрузки');
+                }}
+                title="Скачать чертёж картинкой SVG"
+              >
+                <Image size={17} aria-hidden="true" />
+                <span className="visually-hidden">Скачать чертёж</span>
+              </button>
+              <button type="button" className="icon-btn" onClick={() => setHotkeys((open) => !open)} title="Клавиши — ?">
+                <Keyboard size={17} aria-hidden="true" />
+                <span className="visually-hidden">Горячие клавиши</span>
+              </button>
             </>
           )}
           <button type="button" className="btn btn--label ws-rail__save" onClick={() => void save()} disabled={saving || !dirty}>
@@ -587,6 +647,54 @@ export function Workspace({ planId }: WorkspaceProps) {
         {notice && (
           <div className="ws-notice" role="status">
             {notice}
+          </div>
+        )}
+        {draft && (
+          <div className="ws-confirm" role="alertdialog" aria-label="Незаконченная правка">
+            <p>
+              В этом браузере остались несохранённые изменения от{' '}
+              {new Date(draft.savedAt).toLocaleString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}.
+            </p>
+            <div className="ws-confirm__actions">
+              <button
+                type="button"
+                className="btn btn--label"
+                onClick={() => {
+                  const stored = readDraft(planId);
+                  if (stored) restoreVersion(stored.document);
+                  setDraft(null);
+                  setNotice('Черновик восстановлен. Отменить — Ctrl+Z');
+                }}
+              >
+                Вернуть изменения
+              </button>
+              <button
+                type="button"
+                className="btn btn--steel"
+                onClick={() => {
+                  clearDraft(planId);
+                  setDraft(null);
+                }}
+              >
+                Открыть сохранённую версию
+              </button>
+            </div>
+          </div>
+        )}
+        {hotkeys && (
+          <div className="ws-hotkeys" role="dialog" aria-label="Горячие клавиши">
+            <p className="ws-hotkeys__title">Клавиши</p>
+            <dl>
+              {HOTKEYS.map(([keys, what]) => (
+                <div key={keys}>
+                  <dt>{keys}</dt>
+                  <dd>{what}</dd>
+                </div>
+              ))}
+            </dl>
+            <button type="button" className="btn btn--steel" onClick={() => setHotkeys(false)}>
+              Закрыть
+            </button>
           </div>
         )}
         {leaving && (

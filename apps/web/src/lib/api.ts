@@ -36,6 +36,26 @@ interface ValidationDetail {
   'что проверить'?: { 'поле': string; 'проблема': string }[];
 }
 
+/** Проверка на сервере отвечает по-английски; человеку нужно по-русски. */
+const PROBLEMS: [RegExp, string][] = [
+  [/^Field required$/i, 'поле обязательно'],
+  [/^Input should be a valid list$/i, 'должно быть списком'],
+  [/^Input should be a valid (number|integer)/i, 'должно быть числом'],
+  [/^Input should be a valid string$/i, 'должно быть текстом'],
+  [/^Input should be a valid dictionary/i, 'должно быть объектом'],
+  [/^Input should be greater than 0$/i, 'должно быть больше нуля'],
+  [/^Input should be greater than or equal to 0$/i, 'не может быть отрицательным'],
+  [/^List should have at least (\d+) items?/i, 'нужно не меньше $1 значений'],
+  [/^Value error, /i, ''],
+];
+
+function translateProblem(problem: string): string {
+  for (const [pattern, replacement] of PROBLEMS) {
+    if (pattern.test(problem)) return problem.replace(pattern, replacement) || problem;
+  }
+  return problem;
+}
+
 async function toError(response: Response): Promise<ApiError> {
   let message = `Сервер ответил кодом ${response.status}`;
   let details: string[] = [];
@@ -47,7 +67,7 @@ async function toError(response: Response): Promise<ApiError> {
     } else if (detail && typeof detail === 'object') {
       message = detail['сообщение'] ?? message;
       details = (detail['что проверить'] ?? []).map(
-        (item) => `${item['поле']}: ${item['проблема']}`,
+        (item) => `${item['поле']}: ${translateProblem(item['проблема'])}`,
       );
     }
   } catch {

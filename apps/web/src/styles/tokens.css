@@ -1,0 +1,120 @@
+/*
+ * Токены мира «Абонентский шкаф».
+ *
+ * Сцена: проектировщик в офисе днём, долгая работа за монитором — светлый лист плана,
+ * обрамлённый стальной эмалью корпуса. Латунь зарезервирована за одним действием,
+ * меняющим план: «Принять рекомендацию».
+ */
+
+:root {
+  /* Стальная эмаль корпуса */
+  --steel-950: #1f2527;
+  --steel-900: #2b3336;
+  --steel-850: #333c3f;
+  --steel-800: #3a4447;
+  --steel-700: #4b5659;
+  --steel-600: #5e6b6e;
+  --steel-500: #76827f;
+  --steel-400: #8b9699;
+  --steel-300: #a9b1b1;
+  --steel-200: #c5cbcb;
+
+  /* Бумага этикеток и лист плана */
+  --label: #e9e4d6;
+  --label-strong: #ddd6c3;
+  --label-edge: #c9c1ab;
+  --sheet: #f4f1e8;
+  --sheet-grid: #e4dfd1;
+  --sheet-grid-major: #d3cdbb;
+
+  /* Алюминий рамок */
+  --alu: #b7bcb9;
+  --alu-hi: #dfe2df;
+  --alu-lo: #8d9391;
+
+  /* Тушь */
+  --ink: #1c2023;
+  --ink-2: #41474a;
+  --ink-3: #5c6265;
+
+  /* Текст на эмали */
+  --on-steel: #ece8dc;
+  --on-steel-2: #bcc3c2;
+  --on-steel-3: #97a09f;
+
+  /* Латунь — только «Принять» */
+  --brass: #b8893a;
+  --brass-hi: #d0a453;
+  --brass-lo: #8e6621;
+
+  /* Состояния проверки: цвет всегда дублируется формой знака */
+  --signal: #b3391f;
+  --signal-bg: #f1d7cc;
+  --signal-line: #d9876f;
+  --caution: #845a08;
+  --caution-bg: #f0e1bc;
+  --notice: #2c5a74;
+  --notice-bg: #d6e2e8;
+  --ok: #2d6843;
+  --ok-bg: #d3e4d6;
+
+  /* Зоны на плане */
+  --zone-client: rgba(94, 107, 110, 0.07);
+  --zone-waiting: rgba(44, 90, 116, 0.11);
+  --zone-queue: rgba(184, 137, 58, 0.13);
+  --zone-back: rgba(43, 51, 54, 0.05);
+  --zone-edge: rgba(28, 32, 35, 0.35);
+
+  /* Оборудование на плане */
+  --equip-fill: #fbf9f3;
+  --equip-stroke: #1c2023;
+  --equip-wall-mounted: #5c6265;
+
+  /* Типографика */
+  --font-ui: 'Golos Text Variable', 'Golos Text', system-ui, sans-serif;
+  --font-plate: 'Roboto Flex Variable', 'Roboto Flex', 'Golos Text Variable', sans-serif;
+
+  --text-11: 0.6875rem;
+  --text-12: 0.75rem;
+  --text-13: 0.8125rem;
+  --text-14: 0.875rem;
+  --text-16: 1rem;
+  --text-20: 1.25rem;
+  --text-26: 1.625rem;
+  --text-34: 2.125rem;
+
+  /* Пространство: шаг 4 px */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+  --s-10: 40px;
+  --s-12: 48px;
+
+  --radius-plate: 2px;
+  --radius-door: 3px;
+
+  /* Глубина: выбитость и утопленность, а не свечение */
+  --emboss: inset 0 1px 0 rgba(255, 255, 255, 0.14), inset 0 -1px 0 rgba(0, 0, 0, 0.28);
+  --recess: inset 0 1px 2px rgba(0, 0, 0, 0.35), inset 0 -1px 0 rgba(255, 255, 255, 0.06);
+  --door-shadow: 0 1px 0 rgba(255, 255, 255, 0.05), 0 2px 6px rgba(0, 0, 0, 0.28);
+  --lift-shadow: 0 10px 24px rgba(20, 24, 26, 0.28), 0 2px 6px rgba(20, 24, 26, 0.2);
+
+  /* Движение: выдвижение ящика и защёлкивание */
+  --ease-drawer: cubic-bezier(0.16, 0.84, 0.12, 1);
+  --ease-latch: cubic-bezier(0.3, 1.35, 0.4, 1);
+  --dur-fast: 140ms;
+  --dur-base: 220ms;
+  --dur-drawer: 380ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur-base: 0ms;
+    --dur-drawer: 0ms;
+  }
+}

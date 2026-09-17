@@ -1,0 +1,48 @@
+.server-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  font-size: var(--text-13);
+  color: var(--on-steel-2);
+}
+
+.server-badge--ready svg {
+  color: #9ec9a8;
+}
+
+.server-badge--offline {
+  color: #f0b9a8;
+}
+
+.server-badge__spin {
+  animation: server-spin 1s linear infinite;
+}
+
+.server-badge__retry {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: var(--s-2);
+  padding: 4px 10px;
+  border: 0;
+  border-radius: var(--radius-plate);
+  color: var(--on-steel);
+  background: var(--steel-700);
+  box-shadow: var(--emboss);
+}
+
+.server-badge__retry:hover {
+  background: var(--steel-600);
+}
+
+@keyframes server-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .server-badge__spin {
+    animation: none;
+  }
+}

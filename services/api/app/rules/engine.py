@@ -417,8 +417,8 @@ def structural_findings(plan: Plan) -> list[Finding]:
     base = dict(
         severity=Severity.ERROR,
         category=Category.GEOMETRY,
-        source="Требования задачи",
-        clause="Проверка корректности",
+        source="Проверка целостности плана",
+        clause="данные и геометрия плана",
     )
 
     from app.models import duplicate_ids

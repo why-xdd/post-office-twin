@@ -5,7 +5,17 @@
  * неверного формата, должен увидеть, что именно не так, а не код состояния.
  */
 
-import type { Plan, PlanMetrics, Rule, ValidationReport } from './plan';
+import type {
+  AssistantReport,
+  CapacityReport,
+  DictionariesInfo,
+  ImprovementReport,
+  Plan,
+  PlanMetrics,
+  Recommendation,
+  Rule,
+  ValidationReport,
+} from './plan';
 
 const BASE_URL = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/$/, '');
 
@@ -127,5 +137,29 @@ export const api = {
     request<PlanMetrics>('/api/metrics', {
       method: 'POST',
       body: JSON.stringify({ document }),
+    }),
+
+  dictionaries: (document: Plan) =>
+    request<DictionariesInfo>('/api/dictionaries', {
+      method: 'POST',
+      body: JSON.stringify({ document }),
+    }),
+
+  capacity: (document: Plan) =>
+    request<CapacityReport>('/api/capacity', { method: 'POST', body: JSON.stringify({ document }) }),
+
+  assistant: (document: Plan) =>
+    request<AssistantReport>('/api/assistant', { method: 'POST', body: JSON.stringify({ document }) }),
+
+  improve: (document: Plan) =>
+    request<ImprovementReport>('/api/assistant/improve', {
+      method: 'POST',
+      body: JSON.stringify({ document }),
+    }),
+
+  place: (document: Plan, equipmentType: string, zoneId?: string) =>
+    request<Recommendation>('/api/assistant/place', {
+      method: 'POST',
+      body: JSON.stringify({ document, equipment_type: equipmentType, zone_id: zoneId ?? null }),
     }),
 };

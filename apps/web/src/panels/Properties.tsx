@@ -1,0 +1,378 @@
+/**
+ * Свойства выделенного: объекта, зоны, стены, проёма — или всего плана, если ничего не выбрано.
+ */
+
+import { Copy, RotateCw, Trash2 } from 'lucide-react';
+import { NumberField, ReadonlyField, SelectField, TextField } from '../components/fields';
+import { Plate } from '../components/Plate';
+import type { AddressBook } from '../lib/addresses';
+import { key } from '../lib/addresses';
+import { round3, uniqueId, zoneAt } from '../lib/geometry';
+import type { Equipment, EquipmentTypeInfo, Plan, ZoneTypeInfo } from '../lib/plan';
+import { formatNumber, planArea, polygonArea } from '../lib/planFacts';
+import { useWorkspace } from '../state/store';
+import { glyphFor } from '../canvas/glyphs';
+import '../components/fields.css';
+import './panels.css';
+
+interface PropertiesProps {
+  book: AddressBook;
+  types: Map<string, EquipmentTypeInfo>;
+  zoneTypes: ZoneTypeInfo[];
+}
+
+const SERVICE_TYPES = new Set(['cashier_window', 'pvz_counter', 'payment_terminal_stand']);
+
+export function Properties({ book, types, zoneTypes }: PropertiesProps) {
+  const doc = useWorkspace((s) => s.doc);
+  const selection = useWorkspace((s) => s.selection);
+  const commit = useWorkspace((s) => s.commit);
+  const updateEquipment = useWorkspace((s) => s.updateEquipment);
+  const updateZone = useWorkspace((s) => s.updateZone);
+  const removeSelection = useWorkspace((s) => s.removeSelection);
+  const select = useWorkspace((s) => s.select);
+
+  if (!doc) return null;
+
+  if (selection?.kind === 'equipment') {
+    const item = doc.equipment?.find((e) => e.id === selection.id);
+    if (!item) return <PlanProperties doc={doc} />;
+    const info = types.get(item.type);
+    const Glyph = glyphFor(item.type);
+    const typeOptions = [...types.values()].map((t) => ({ value: t.code, label: t.label }));
+    const zoneOptions = (doc.zones ?? []).map((z) => ({ value: z.id, label: `${book.byId.get(key('zone', z.id)) ?? ''} ${z.label ?? z.type}` }));
+    const schema = info?.attribute_schema ?? {};
+    return (
+      <div className="props">
+        <header className="props__head">
+          <span className="props__glyph">
+            <Glyph size={20} aria-hidden="true" />
+          </span>
+          <div>
+            <Plate surface="label" size="sm">
+              {book.byId.get(key('equipment', item.id)) ?? ''}
+            </Plate>
+            <h2>{item.label || info?.label || item.type}</h2>
+            <p className="props__id">{item.id}</p>
+          </div>
+        </header>
+
+        <div className="fields">
+          <TextField label="Подпись" wide value={item.label} placeholder={info?.label} onCommit={(label) => updateEquipment(item.id, { label: label || undefined })} />
+          <SelectField label="Тип" wide value={item.type} options={typeOptions} onCommit={(type) => updateEquipment(item.id, { type })} />
+          <NumberField label="X центра" unit="м" value={item.position[0]} onCommit={(v) => v !== null && moveTo(item.id, [v, item.position[1]])} />
+          <NumberField label="Y центра" unit="м" value={item.position[1]} onCommit={(v) => v !== null && moveTo(item.id, [item.position[0], v])} />
+          <NumberField label="Длина по X" unit="м" min={0.05} max={30} value={item.size_m[0]} onCommit={(v) => v !== null && updateEquipment(item.id, { size_m: [v, item.size_m[1]] })} />
+          <NumberField label="Длина по Y" unit="м" min={0.05} max={30} value={item.size_m[1]} onCommit={(v) => v !== null && updateEquipment(item.id, { size_m: [item.size_m[0], v] })} />
+          <NumberField label="Поворот" unit="°" step={15} min={0} max={359} value={item.rotation_deg ?? 0} onCommit={(v) => updateEquipment(item.id, { rotation_deg: v ?? 0 })} />
+          <SelectField
+            label="Зона"
+            value={item.zone}
+            emptyLabel="Вне зон"
+            options={zoneOptions}
+            hint={zoneHint(doc, item.id)}
+            onCommit={(zone) => updateEquipment(item.id, { zone: zone || undefined })}
+          />
+          {SERVICE_TYPES.has(item.type) && (
+            <NumberField
+              label="Высота низа окна"
+              unit="м"
+              min={0.3}
+              max={1.5}
+              allowEmpty
+              value={item.counter_height_m}
+              hint="Для МГН — не выше 0,85 м"
+              onCommit={(v) => updateEquipment(item.id, { counter_height_m: v ?? undefined })}
+            />
+          )}
+          {(item.type === 'waiting_seat' || info?.capacity_persons) && (
+            <NumberField
+              label="Вместимость"
+              unit="чел."
+              step={1}
+              min={0}
+              max={200}
+              allowEmpty
+              value={item.capacity_persons}
+              onCommit={(v) => updateEquipment(item.id, { capacity_persons: v === null ? undefined : Math.round(v) })}
+            />
+          )}
+          {Object.entries(schema).map(([name, kind]) => (
+            <TextField
+              key={name}
+              label={ATTRIBUTE_LABEL[name] ?? name}
+              value={readAttribute(item, name)}
+              placeholder={kind === 'date' ? 'ГГГГ-ММ-ДД' : undefined}
+              onCommit={(value) => writeAttribute(item.id, name, value)}
+            />
+          ))}
+        </div>
+
+        <div className="props__actions">
+          <button type="button" className="action" onClick={() => updateEquipment(item.id, { rotation_deg: (((item.rotation_deg ?? 0) + 90) % 360) })}>
+            <RotateCw size={15} aria-hidden="true" />
+            Повернуть на 90°
+            <kbd>R</kbd>
+          </button>
+          <button type="button" className="action" onClick={() => duplicate(item.id)}>
+            <Copy size={15} aria-hidden="true" />
+            Дублировать
+            <kbd>Ctrl D</kbd>
+          </button>
+          <button type="button" className="action action--danger" onClick={removeSelection}>
+            <Trash2 size={15} aria-hidden="true" />
+            Удалить
+            <kbd>Del</kbd>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (selection?.kind === 'zone') {
+    const zone = doc.zones?.find((z) => z.id === selection.id);
+    if (!zone) return <PlanProperties doc={doc} />;
+    const contained = (doc.equipment ?? []).filter((e) => e.zone === zone.id);
+    return (
+      <div className="props">
+        <header className="props__head">
+          <div>
+            <Plate surface="label" size="sm">
+              {book.byId.get(key('zone', zone.id)) ?? ''}
+            </Plate>
+            <h2>{zone.label || 'Зона'}</h2>
+            <p className="props__id">{zone.id}</p>
+          </div>
+        </header>
+        <div className="fields">
+          <TextField label="Название" wide value={zone.label} onCommit={(label) => updateZone(zone.id, { label })} />
+          <SelectField
+            label="Тип зоны"
+            wide
+            value={zone.type}
+            options={zoneTypes.map((t) => ({ value: t.code, label: t.label }))}
+            hint={zoneTypes.find((t) => t.code === zone.type)?.public ? 'Доступна посетителям' : 'Служебная, посетителей нет'}
+            onCommit={(type) => updateZone(zone.id, { type })}
+          />
+          <ReadonlyField label="Площадь" value={`${formatNumber(polygonArea(zone.polygon))} м²`} />
+          <ReadonlyField label="Вершин" value={zone.polygon.length} />
+          <NumberField
+            label="Расчётная вместимость"
+            unit="чел."
+            step={1}
+            min={0}
+            allowEmpty
+            value={zone.expected_capacity_persons}
+            onCommit={(v) => updateZone(zone.id, { expected_capacity_persons: v === null ? undefined : Math.round(v) })}
+          />
+          <ReadonlyField label="Объектов в зоне" value={contained.length} />
+        </div>
+        <div className="props__actions">
+          <button type="button" className="action action--danger" onClick={removeSelection}>
+            <Trash2 size={15} aria-hidden="true" />
+            Удалить зону
+            <kbd>Del</kbd>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (selection?.kind === 'wall') {
+    const wall = doc.walls?.find((w) => w.id === selection.id);
+    if (!wall) return <PlanProperties doc={doc} />;
+    const length = Math.hypot(wall.to[0] - wall.from[0], wall.to[1] - wall.from[1]);
+    return (
+      <div className="props">
+        <header className="props__head">
+          <div>
+            <Plate surface="label" size="sm">
+              {book.byId.get(key('wall', wall.id)) ?? ''}
+            </Plate>
+            <h2>{wall.label || (wall.type === 'outer' ? 'Наружная стена' : 'Перегородка')}</h2>
+            <p className="props__id">{wall.id}</p>
+          </div>
+        </header>
+        <div className="fields">
+          <SelectField
+            label="Тип"
+            wide
+            value={wall.type ?? 'outer'}
+            options={[
+              { value: 'outer', label: 'Наружная стена' },
+              { value: 'partition', label: 'Перегородка' },
+            ]}
+            onCommit={(type) => commit((draft) => { const w = draft.walls?.find((x) => x.id === wall.id); if (w) w.type = type; })}
+          />
+          <ReadonlyField label="Длина" value={`${formatNumber(length)} м`} />
+          <ReadonlyField label="Направление" value={Math.abs(wall.from[0] - wall.to[0]) < 1e-6 ? 'вертикально' : Math.abs(wall.from[1] - wall.to[1]) < 1e-6 ? 'горизонтально' : 'под углом'} />
+        </div>
+        <div className="props__actions">
+          <button type="button" className="action action--danger" onClick={removeSelection}>
+            <Trash2 size={15} aria-hidden="true" />
+            Удалить стену
+            <kbd>Del</kbd>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (selection?.kind === 'door') {
+    const door = doc.doors?.find((d) => d.id === selection.id);
+    if (!door) return <PlanProperties doc={doc} />;
+    return (
+      <div className="props">
+        <header className="props__head">
+          <div>
+            <Plate surface="label" size="sm">
+              {book.byId.get(key('door', door.id)) ?? ''}
+            </Plate>
+            <h2>{door.label || 'Дверной проём'}</h2>
+            <p className="props__id">{door.id}</p>
+          </div>
+        </header>
+        <div className="fields">
+          <SelectField
+            label="Назначение"
+            wide
+            value={door.type ?? 'internal'}
+            options={[
+              { value: 'entrance', label: 'Главный вход для посетителей' },
+              { value: 'service', label: 'Служебный вход' },
+              { value: 'internal', label: 'Внутренняя дверь' },
+            ]}
+            onCommit={(type) => commit((draft) => { const d = draft.doors?.find((x) => x.id === door.id); if (d) d.type = type; })}
+          />
+          <ReadonlyField label="Ширина проёма" value={`${formatNumber(door.width_m)} м`} />
+        </div>
+        <div className="props__actions">
+          <button type="button" className="action action--danger" onClick={() => { removeSelection(); select(null); }}>
+            <Trash2 size={15} aria-hidden="true" />
+            Удалить проём
+            <kbd>Del</kbd>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return <PlanProperties doc={doc} />;
+
+  function moveTo(id: string, position: [number, number]) {
+    commit((draft) => {
+      const target = draft.equipment?.find((e) => e.id === id);
+      if (!target) return;
+      target.position = [round3(position[0]), round3(position[1])];
+      const zone = zoneAt(draft, target.position);
+      if (zone) target.zone = zone.id;
+      else delete target.zone;
+    });
+  }
+
+  function duplicate(id: string) {
+    const source = doc?.equipment?.find((e) => e.id === id);
+    if (!source) return;
+    const copyId = uniqueId((doc?.equipment ?? []).map((e) => e.id), source.type);
+    commit((draft) => {
+      draft.equipment = [
+        ...(draft.equipment ?? []),
+        { ...structuredClone(source), id: copyId, position: [round3(source.position[0] + 0.5), round3(source.position[1] - 0.5)] },
+      ];
+    });
+    select({ kind: 'equipment', id: copyId });
+  }
+
+  function writeAttribute(id: string, name: string, value: string) {
+    commit((draft) => {
+      const target = draft.equipment?.find((e) => e.id === id);
+      if (!target) return;
+      if (INVENTORY_FIELDS.has(name)) {
+        target.inventory = { ...(target.inventory ?? {}), [name]: value || undefined };
+      } else {
+        target.attributes = { ...(target.attributes ?? {}), [name]: value || undefined };
+      }
+    });
+  }
+}
+
+const INVENTORY_FIELDS = new Set(['serial_number', 'vendor', 'model', 'last_inspection', 'next_inspection']);
+
+const ATTRIBUTE_LABEL: Record<string, string> = {
+  serial_number: 'Серийный номер',
+  last_inspection: 'Последний осмотр',
+  next_inspection: 'Следующий осмотр',
+  vendor: 'Производитель',
+  model: 'Модель',
+  ip_address: 'IP-адрес',
+  status: 'Статус',
+};
+
+function readAttribute(item: Equipment, name: string): string {
+  const value = INVENTORY_FIELDS.has(name)
+    ? (item.inventory as Record<string, unknown> | undefined)?.[name]
+    : item.attributes?.[name];
+  return value === undefined || value === null ? '' : String(value);
+}
+
+function zoneHint(doc: Plan, id: string): string | undefined {
+  const item = doc.equipment?.find((e) => e.id === id);
+  if (!item) return undefined;
+  const actual = zoneAt(doc, item.position);
+  if (actual && item.zone && actual.id !== item.zone) return `Центр объекта лежит в зоне «${actual.label ?? actual.id}»`;
+  return undefined;
+}
+
+function PlanProperties({ doc }: { doc: Plan }) {
+  const commit = useWorkspace((s) => s.commit);
+  const setOps = (patch: Partial<Plan['ops']>) => commit((draft) => Object.assign(draft.ops, patch));
+  const setFlow = (patch: Partial<NonNullable<Plan['flow_hints']>>) =>
+    commit((draft) => {
+      draft.flow_hints = { ...(draft.flow_hints ?? {}), ...patch };
+    });
+  return (
+    <div className="props">
+      <header className="props__head">
+        <div>
+          <h2>{doc.ops.name || 'План отделения'}</h2>
+          <p className="props__id">Ничего не выбрано — свойства всего плана</p>
+        </div>
+      </header>
+      <div className="fields">
+        <TextField label="Название отделения" wide value={doc.ops.name} onCommit={(name) => setOps({ name })} />
+        <TextField label="Тип отделения" wide value={doc.ops.type_label} placeholder="Городское малое отделение" onCommit={(type_label) => setOps({ type_label })} />
+        <ReadonlyField label="Площадь по контуру" value={`${formatNumber(planArea(doc))} м²`} />
+        <NumberField label="Высота потолка" unit="м" min={2} max={8} allowEmpty value={doc.ops.ceiling_height_m} onCommit={(v) => setOps({ ceiling_height_m: v ?? undefined })} />
+        <NumberField
+          label="Население пункта"
+          unit="тыс."
+          step={1}
+          min={0}
+          allowEmpty
+          value={doc.ops.settlement_population}
+          hint="Для проверки охвата по Приказу № 538"
+          onCommit={(v) => setOps({ settlement_population: v === null ? undefined : Math.round(v) })}
+        />
+        <NumberField
+          label="Посетителей в день"
+          unit="чел."
+          step={10}
+          min={0}
+          allowEmpty
+          value={doc.flow_hints?.avg_daily_visitors}
+          hint="Для расчёта очереди в час пик"
+          onCommit={(v) => setFlow({ avg_daily_visitors: v === null ? undefined : Math.round(v) })}
+        />
+        <NumberField
+          label="Средний визит"
+          unit="мин"
+          step={0.5}
+          min={0.5}
+          allowEmpty
+          value={doc.flow_hints?.typical_visit_duration_min}
+          onCommit={(v) => setFlow({ typical_visit_duration_min: v ?? undefined })}
+        />
+      </div>
+    </div>
+  );
+}

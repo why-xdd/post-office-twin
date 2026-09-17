@@ -1,0 +1,87 @@
+.fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s-3) var(--s-3);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.field--wide {
+  grid-column: 1 / -1;
+}
+
+.field__label {
+  color: var(--ink-3);
+  font-size: var(--text-12);
+  font-weight: 540;
+}
+
+.field__control {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 var(--s-2);
+  background: #fbf9f3;
+  border-radius: 2px;
+  box-shadow:
+    inset 0 0 0 1px var(--label-edge),
+    inset 0 1px 2px rgba(0, 0, 0, 0.08);
+  transition: box-shadow var(--dur-fast) ease-out;
+}
+
+.field__control:focus-within {
+  box-shadow:
+    inset 0 0 0 2px var(--ink),
+    inset 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.field__control--error {
+  box-shadow: inset 0 0 0 2px var(--signal);
+}
+
+.field__control input,
+.field__control select {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-size: var(--text-14);
+  font-variant-numeric: tabular-nums;
+}
+
+.field__control select {
+  cursor: pointer;
+}
+
+.field__unit {
+  flex: none;
+  margin-left: var(--s-1);
+  color: var(--ink-3);
+  font-size: var(--text-12);
+}
+
+.field__hint {
+  color: var(--ink-3);
+  font-size: var(--text-12);
+}
+
+.field__control--error ~ .field__hint {
+  color: var(--signal);
+  font-weight: 540;
+}
+
+.field__readonly {
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+  font-weight: 560;
+  font-variant-numeric: tabular-nums;
+}

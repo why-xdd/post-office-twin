@@ -180,6 +180,7 @@ export interface ValidationReport {
   infos: number;
   checked_rules: string[];
   skipped_rules: string[];
+  skipped_reasons?: Record<string, string>;
 }
 
 export interface PlanMetrics {
@@ -246,4 +247,114 @@ export function planBounds(plan: Plan): { minX: number; minY: number; maxX: numb
     maxX: Math.max(...xs),
     maxY: Math.max(...ys),
   };
+}
+
+export interface ZoneTypeInfo {
+  code: string;
+  label: string;
+  public: boolean;
+}
+
+export interface EquipmentTypeInfo {
+  code: string;
+  label: string;
+  group: string;
+  default_size_m: [number, number];
+  floor_object: boolean;
+  allowed_zones: string[];
+  capacity_persons?: number | null;
+  attribute_schema: Record<string, string>;
+}
+
+export interface DictionariesInfo {
+  zone_types: ZoneTypeInfo[];
+  equipment_types: EquipmentTypeInfo[];
+}
+
+export interface Reason {
+  text: string;
+  source?: string | null;
+  clause?: string | null;
+}
+
+export interface Effect {
+  key: string;
+  label: string;
+  before: number | null;
+  after: number | null;
+  unit: string;
+  improved: boolean | null;
+}
+
+export interface RecommendationChange {
+  op: 'add' | 'move' | 'remove';
+  object_id: string;
+  equipment_type: string;
+  label?: string | null;
+  position?: [number, number] | null;
+  rotation_deg?: number | null;
+  size_m?: [number, number] | null;
+  zone?: string | null;
+  operator_position?: [number, number] | null;
+  previous_position?: [number, number] | null;
+  previous_rotation_deg?: number | null;
+}
+
+export interface Recommendation {
+  id: string;
+  scenario: 'fix' | 'missing' | 'excess' | 'capacity' | 'placement' | string;
+  priority: number;
+  title: string;
+  summary: string;
+  changes: RecommendationChange[];
+  reasons: Reason[];
+  assumptions: string[];
+  effects: Effect[];
+  objects: string[];
+  zones: string[];
+  alternatives: RecommendationChange[];
+}
+
+export interface QueueGroup {
+  name: string;
+  windows: string[];
+  arrivals_per_hour: number;
+  service_min: number;
+  utilization: number;
+  stable: boolean;
+  wait_probability?: number | null;
+  mean_wait_min?: number | null;
+  mean_queue?: number | null;
+  queue_p95?: number | null;
+  windows_needed: number;
+  service_threshold_min?: number | null;
+  reserve_percent?: number | null;
+}
+
+export interface CapacityReport {
+  available: boolean;
+  reason?: string | null;
+  daily_visitors?: number | null;
+  peak_arrivals_per_hour?: number | null;
+  groups: QueueGroup[];
+  waiting_capacity_persons?: number | null;
+  peak_queue_persons?: number | null;
+  fits_waiting_area?: boolean | null;
+  assumptions: string[];
+}
+
+export interface AssistantReport {
+  recommendations: Recommendation[];
+  capacity: CapacityReport;
+  summary: Record<string, unknown>;
+  elapsed_ms: number;
+}
+
+export interface ImprovementReport {
+  initial: Record<string, unknown>;
+  final: Record<string, unknown>;
+  steps: { recommendation: Recommendation; errors_after: number; warnings_after: number }[];
+  improved_plan: Plan;
+  effects: Effect[];
+  elapsed_ms: number;
 }

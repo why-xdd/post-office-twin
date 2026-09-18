@@ -30,7 +30,7 @@ from app.geometry import core, passability
 from app.models import Equipment, Plan
 from app.rules.catalog import rules_by_id
 from app.assistant import accelerator, objective
-from app.rules.engine import SERVICE_WINDOW_TYPES, validate
+from app.rules.engine import SERVICE_WINDOW_TYPES, VISITOR_TARGET_TYPES, validate
 
 GRID_STEP = 0.25
 DEFAULT_TOP_K = 24
@@ -213,6 +213,101 @@ def _operator_side(plan: Plan, poly: Polygon, rotation: float, size: tuple[float
 FitnessFn = Callable[[Plan, Polygon, float, tuple[float, float]], float]
 
 
+@dataclass
+class _FeatureContext:
+    """Данные плана, общие для всех кандидатов одного поиска."""
+
+    plan: Plan
+    type_code: str
+    type_def: EquipmentType
+    walls: list[LineString]
+    partitions: list[Polygon]
+    obstacles: list[Polygon]
+    windows: list[Polygon]
+    door_squares: list[Polygon]
+    entrance: tuple[float, float] | None
+    shape: Polygon | None
+    region: Polygon
+    occupied: Polygon | None
+    size: tuple[float, float]
+
+
+# Виды оборудования, которые модель различает отдельно: у каждого своя логика размещения.
+TYPE_FLAGS = (
+    "cashier_window",
+    "pvz_counter",
+    "storage_rack",
+    "waiting_seat",
+    "self_service_kiosk",
+    "atm",
+    "info_stand",
+    "package_drop_box",
+)
+FREE_SPACE_RADIUS_M = 1.2
+
+
+def _features(poly: Polygon, rotation: float, score: float, ctx: _FeatureContext) -> dict[str, float]:
+    """Признаки позиции для обучаемого ускорителя.
+
+    Всё, что здесь считается, должно быть дешевле полной проверки на порядок: иначе ускоритель
+    перестаёт ускорять. Дорогие величины (ширина пути, зоны разворота) сюда не попадают —
+    именно их модель и предсказывает по косвенным признакам.
+    """
+    centre = poly.centroid
+    zone = core.zone_of_point(ctx.plan, (centre.x, centre.y))
+    zone_object = next((z for z in ctx.plan.zones if z.id == zone), None) if zone else None
+    zone_poly = core.zone_polygon(zone_object) if zone_object else None
+    zone_types_map = zone_types(ctx.plan)
+    free_circle = centre.buffer(FREE_SPACE_RADIUS_M)
+    if ctx.shape is not None:
+        free_circle = free_circle.intersection(ctx.shape)
+    free_area = free_circle.area
+    if ctx.occupied is not None and free_area > 0:
+        free_area = free_circle.difference(ctx.occupied).area
+    entrance_point = Point(ctx.entrance) if ctx.entrance else None
+    window_axis = 10.0
+    if entrance_point is not None and ctx.windows:
+        # Расстояние до линии «вход — окно обслуживания»: объект на этой линии мешает проходу.
+        window_axis = min(
+            LineString([entrance_point, w.centroid]).distance(poly) for w in ctx.windows
+        )
+    features: dict[str, float] = {
+        "fitness": score,
+        "wall_distance": min((w.distance(poly) for w in ctx.walls), default=0.0),
+        "entrance_distance": poly.distance(entrance_point) if entrance_point else 0.0,
+        "nearest_obstacle": min((o.distance(poly) for o in ctx.obstacles), default=10.0),
+        "rotation": rotation,
+        "area": poly.area,
+        "boundary_distance": ctx.shape.exterior.distance(poly) if ctx.shape is not None else 0.0,
+        "door_distance": min((sq.distance(poly) for sq in ctx.door_squares), default=10.0),
+        "width": ctx.size[0],
+        "depth": ctx.size[1],
+        "aspect": ctx.size[0] / ctx.size[1] if ctx.size[1] else 1.0,
+        "partition_distance": min((p.distance(poly) for p in ctx.partitions), default=10.0),
+        "window_distance": min((w.distance(poly) for w in ctx.windows), default=10.0),
+        "entrance_axis_distance": window_axis,
+        "free_around": free_area / (math.pi * FREE_SPACE_RADIUS_M**2),
+        "zone_public": 1.0 if zone_object and zone_types_map.get(zone_object.type, None) and zone_types_map[zone_object.type].public else 0.0,
+        "zone_area": zone_poly.area if zone_poly is not None else 0.0,
+        "zone_free_ratio": (
+            max(0.0, zone_poly.difference(ctx.occupied).area / zone_poly.area)
+            if zone_poly is not None and zone_poly.area > 0 and ctx.occupied is not None
+            else 1.0
+        ),
+        "plan_area": ctx.shape.area if ctx.shape is not None else 0.0,
+        "plan_objects": float(len(ctx.plan.equipment)),
+        "plan_density": (
+            sum(o.area for o in ctx.obstacles) / ctx.shape.area if ctx.shape is not None and ctx.shape.area else 0.0
+        ),
+        "region_area": ctx.region.area,
+        "floor_object": 1.0 if ctx.type_def.floor_object else 0.0,
+        "operator_workplace": 1.0 if getattr(ctx.type_def, "operator_workplace", False) else 0.0,
+    }
+    for flag in TYPE_FLAGS:
+        features[f"type_{flag}"] = 1.0 if ctx.type_code == flag else 0.0
+    return features
+
+
 def _fitness_for(type_code: str, type_def: EquipmentType) -> FitnessFn:
     """Оценка уместности позиции: чем меньше, тем лучше."""
 
@@ -312,6 +407,23 @@ def generate(
     fitness = _fitness_for(type_code, type_def)
     shape = core.outline(plan)
 
+    # Всё, что нужно признакам кандидата, считается один раз на план, а не на каждую позицию.
+    context = _FeatureContext(
+        plan=plan,
+        type_code=type_code,
+        type_def=type_def,
+        walls=walls,
+        partitions=partitions,
+        obstacles=obstacles,
+        windows=windows,
+        door_squares=door_squares,
+        entrance=entrance,
+        shape=shape,
+        region=region,
+        occupied=unary_union(obstacles) if obstacles else None,
+        size=size,
+    )
+
     min_x, min_y, max_x, max_y = region.bounds
     generated = 0
     result: list[Candidate] = []
@@ -368,16 +480,7 @@ def generate(
             polygon=poly,
             fitness=score,
             operator_position=operator,
-            features={
-                "fitness": score,
-                "wall_distance": min((w.distance(poly) for w in walls), default=0.0),
-                "entrance_distance": poly.distance(Point(entrance)) if entrance else 0.0,
-                "nearest_obstacle": min((o.distance(poly) for o in obstacles), default=10.0),
-                "rotation": rotation,
-                "area": poly.area,
-                "boundary_distance": shape.exterior.distance(poly) if shape is not None else 0.0,
-                "door_distance": min((sq.distance(poly) for sq in door_squares), default=10.0),
-            },
+            features=_features(poly, rotation, score, context),
         )
 
     for rotation in rotations:
@@ -423,7 +526,7 @@ def with_equipment(plan: Plan, item: Equipment, replace_id: str | None = None) -
 def evaluate(plan: Plan, candidate_plan: Plan, candidate: Candidate, baseline_errors: int) -> Evaluated:
     """Полная оценка варианта: нормы плюс все прочие стороны качества расстановки."""
     report = validate(candidate_plan, explain=False)
-    width = _route_floor(candidate_plan)
+    width, widest = passability.route_summary(candidate_plan, VISITOR_TARGET_TYPES)
     return Evaluated(
         candidate=candidate,
         plan=candidate_plan,
@@ -432,7 +535,13 @@ def evaluate(plan: Plan, candidate_plan: Plan, candidate: Candidate, baseline_er
         min_route_width=width,
         accepted=report.errors <= baseline_errors,
         score=objective.score(
-            candidate_plan, plan, errors=report.errors, warnings=report.warnings
+            candidate_plan,
+            plan,
+            errors=report.errors,
+            warnings=report.warnings,
+            entrance_width=widest,
+            narrowest_route=width,
+            with_queue=False,
         ),
     )
 

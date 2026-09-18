@@ -209,6 +209,22 @@ def client_route_widths(plan: Plan, target_types: tuple[str, ...]) -> list[Route
     return results
 
 
+def route_summary(plan: Plan, target_types: tuple[str, ...]) -> tuple[float | None, float | None]:
+    """Самое узкое и самое широкое место путей от входа за один расчёт маршрутов.
+
+    Оба числа нужны вместе: узкое показывает, доберётся ли посетитель до конкретного окна,
+    широкое — пропускную ширину общего участка у входа. Считать их двумя вызовами дорого.
+    """
+    routes = client_route_widths(plan, target_types)
+    if not routes:
+        return None, None
+    reachable = [r.width_m for r in routes if r.reachable]
+    if not reachable:
+        return 0.0, None
+    narrowest = min(reachable) if len(reachable) == len(routes) else 0.0
+    return narrowest, max(reachable)
+
+
 def widest_route_width(plan: Plan, target_types: tuple[str, ...]) -> float | None:
     """Ширина самого свободного из маршрутов от входа.
 

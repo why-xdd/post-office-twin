@@ -165,3 +165,13 @@ def test_operator_seat_in_doorway_blocks_the_door(sample_plan: Plan) -> None:
     blocked = [f for f in validate(plan).findings if f.rule_id == "doors_not_blocked"]
     assert blocked and blocked[0].objects == ["eq_cashier_2"]
     assert blocked[0].severity is Severity.ERROR
+
+
+def test_narrow_path_is_one_finding_per_severity(sample_plan: Plan) -> None:
+    """Узкий проход — одна проблема плана: иначе счётчик нарушений скачет без причины."""
+    findings = [f for f in validate(sample_plan).findings if f.rule_id == "movement_path_width"]
+    assert len(findings) == 1
+    assert findings[0].severity is Severity.ERROR
+    # В находке перечислены все цели, до которых путь узок, и виновники сужения.
+    assert "eq_cashier_1" in findings[0].message
+    assert findings[0].objects

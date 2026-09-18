@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field, ValidationError
 from app.assistant import capacity as capacity_model
 from app.cache import assistant_cache, fingerprint, validation_cache
 from app.concurrency import heavy_slot
-from app.assistant import recommend
+from app.assistant import conclusion, llm, recommend
 from app.assistant.capacity import CapacityReport
 from app.assistant.recommend import AssistantReport, ImprovementReport, Recommendation
 from app.dictionaries import equipment_types, zone_types
@@ -308,6 +308,42 @@ def assistant_improve(payload: SaveVersionRequest, fixes_only: bool = False) -> 
             lambda: recommend.improve(_parse_plan(payload.document), fixes_only=fixes_only),
         ),
     )
+
+
+class CommandRequest(BaseModel):
+    document: dict[str, Any]
+    text: str = Field(min_length=1, max_length=500, description="Команда словами, например «поставь две кассы у перегородки»")
+
+
+@app.post("/api/assistant/command", response_model=recommend.CommandResult, summary="Команда словами")
+def assistant_command(payload: CommandRequest) -> recommend.CommandResult:
+    """Разбирает фразу и готовит рекомендации: план меняется только после согласия человека."""
+    plan = _parse_plan(payload.document)
+    key = fingerprint("command", payload.document, payload.text)
+    return assistant_cache.get_or_compute(
+        key, lambda: _with_slot("разбор команды", lambda: recommend.run_command(plan, payload.text))
+    )
+
+
+@app.post("/api/assistant/conclusion", response_model=conclusion.Conclusion, summary="Заключение по плану")
+def assistant_conclusion(payload: SaveVersionRequest, use_model: bool = True) -> conclusion.Conclusion:
+    """Текст для сдачи: что проверено, что нарушено, что предлагается и каким будет эффект."""
+    plan = _parse_plan(payload.document)
+    key = fingerprint("conclusion", payload.document, use_model)
+    return assistant_cache.get_or_compute(
+        key, lambda: _with_slot("подготовку заключения", lambda: conclusion.build(plan, use_model))
+    )
+
+
+@app.get("/api/assistant/language", summary="Состояние языковой модели")
+def assistant_language() -> dict[str, Any]:
+    """Подключена ли языковая модель. Без неё сервис работает полностью, но фразы разбирает сам."""
+    state = llm.availability()
+    return {
+        "модель_подключена": state.ready,
+        "почему_нет": state.reason,
+        "модель": state.model if state.ready else None,
+    }
 
 
 @app.post("/api/assistant/place", response_model=Recommendation, summary="Найти место для объекта")

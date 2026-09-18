@@ -21,8 +21,10 @@ from app.rules.engine import SERVICE_WINDOW_TYPES, VISITOR_TARGET_TYPES, validat
 # Цена единицы каждой стороны качества, в условных баллах.
 ERROR_COST = 100.0
 WARNING_COST = 6.0
-"""Метр недостающей ширины прохода: посетитель на кресле-коляске либо проходит, либо нет."""
+"""Метр недостающей ширины общего прохода у входа: коляска либо проходит, либо нет."""
 NARROW_PATH_COST = 60.0
+"""Метр недостающей ширины подхода к конкретному окну — та же беда, но у одной цели."""
+NARROW_ROUTE_COST = 45.0
 """Одно потерянное место ожидания — примерно как одно предупреждение."""
 SEAT_COST = 5.0
 """Метр среднего пути посетителя от входа до окна обслуживания."""
@@ -38,6 +40,7 @@ class Score:
     errors: int
     warnings: int
     entrance_width_m: float | None
+    narrowest_route_m: float | None
     waiting_capacity: int | None
     waiting_needed: int | None
     walk_m: float | None
@@ -79,24 +82,33 @@ def score(
     errors: int | None = None,
     warnings: int | None = None,
     entrance_width: float | None = None,
+    narrowest_route: float | None = None,
+    with_queue: bool = True,
 ) -> Score:
-    """Оценка расстановки. Готовые значения передаются, чтобы не считать их дважды."""
+    """Оценка расстановки. Готовые значения передаются, чтобы не считать их дважды.
+
+    with_queue=False пропускает расчёт очереди по Эрлангу: при переборе сотен кандидатов он
+    стоит дороже всего остального вместе взятого, а сравнивать варианты можно и по числу мест.
+    """
     if errors is None or warnings is None:
         report = validate(plan, explain=False)
         errors = report.errors if errors is None else errors
         warnings = report.warnings if warnings is None else warnings
-    if entrance_width is None:
-        entrance_width = passability.widest_route_width(plan, VISITOR_TARGET_TYPES)
+    if entrance_width is None or narrowest_route is None:
+        computed_narrow, computed_wide = passability.route_summary(plan, VISITOR_TARGET_TYPES)
+        entrance_width = computed_wide if entrance_width is None else entrance_width
+        narrowest_route = computed_narrow if narrowest_route is None else narrowest_route
 
     seats = capacity_model.waiting_capacity(plan, [])
-    report = capacity_model.analyze(plan)
-    needed = report.peak_queue_persons
+    needed = capacity_model.analyze(plan).peak_queue_persons if with_queue else None
     walk = walk_distance(plan)
     moved = moved_distance(plan, reference)
 
     total = ERROR_COST * errors + WARNING_COST * warnings
     if entrance_width is not None:
         total += NARROW_PATH_COST * max(0.0, MIN_PATH_WITH_POCKETS_M - entrance_width)
+    if narrowest_route is not None:
+        total += NARROW_ROUTE_COST * max(0.0, MIN_PATH_WITH_POCKETS_M - narrowest_route)
     if seats is not None and needed is not None:
         total += SEAT_COST * max(0, needed - seats)
     elif seats is not None:
@@ -110,6 +122,7 @@ def score(
         errors=errors,
         warnings=warnings,
         entrance_width_m=entrance_width,
+        narrowest_route_m=narrowest_route,
         waiting_capacity=seats,
         waiting_needed=needed,
         walk_m=walk,

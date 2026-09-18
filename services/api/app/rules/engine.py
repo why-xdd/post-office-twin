@@ -242,54 +242,63 @@ def _check_path_width(plan: Plan, rule: Rule, explain: bool = True) -> list[Find
     if rule.value is None:
         return []
     unreachable: list[str] = []
-    # Маршруты с одинаковой шириной узкого места почти всегда упираются в одно и то же
-    # сужение, поэтому они объединяются в одну находку, а не повторяются по каждому объекту.
-    narrow: dict[float, list[str]] = {}
+    # Узкий проход — одна проблема плана, а не отдельная на каждый маршрут: иначе число
+    # нарушений скачет от того, как именно разошлись ширины у разных окон.
+    narrow: dict[str, float] = {}
     for route in passability.client_route_widths(plan, VISITOR_TARGET_TYPES):
         if not route.reachable:
             unreachable.append(route.target_id)
         elif route.width_m < rule.value:
-            narrow.setdefault(route.width_m, []).append(route.target_id)
+            narrow[route.target_id] = route.width_m
 
     findings: list[Finding] = []
     if unreachable:
         findings.append(
             _finding(
                 rule,
-                f"От входа нельзя дойти до: {', '.join(unreachable)} — путь перекрыт оборудованием.",
+                "От входа нельзя дойти до: "
+                + ", ".join(f"«{t}»" for t in unreachable)
+                + " — путь перекрыт оборудованием.",
                 unreachable,
                 0.0,
                 severity=Severity.ERROR,
             )
         )
+    if not narrow:
+        return findings
+
     # Находка ссылается на объекты, создающие сужение: переставлять нужно их, а не цели маршрута.
     blockers = (
         passability.bottleneck_blockers(plan, VISITOR_TARGET_TYPES, MIN_PATH_WITH_POCKETS_M)
-        if narrow and explain
+        if explain
         else {}
     )
-    for width, targets in sorted(narrow.items()):
-        names = ", ".join(f"«{t}»" for t in targets)
-        culprits = blockers.get(width, [])
-        cause = (
-            f" Сужение создают: {', '.join(f'«{c}»' for c in culprits)}."
-            if culprits
-            else ""
-        )
-        if width < MIN_PATH_WITH_POCKETS_M:
+    for limit, severity in ((MIN_PATH_WITH_POCKETS_M, Severity.ERROR), (rule.value, Severity.WARNING)):
+        group = {target: width for target, width in narrow.items() if width < limit}
+        if not group:
+            continue
+        for target in group:
+            narrow.pop(target, None)
+        width = min(group.values())
+        names = ", ".join(f"«{t}»" for t in sorted(group))
+        culprits: list[str] = []
+        for candidates in blockers.values():
+            for candidate in candidates:
+                if candidate not in culprits:
+                    culprits.append(candidate)
+        cause = f" Сужение создают: {', '.join(f'«{c}»' for c in culprits)}." if culprits else ""
+        if severity is Severity.ERROR:
             message = (
                 f"Путь от входа сужается до {width} м — к {names}. Норма {rule.value} м, даже с "
                 f"карманами для разъезда — не менее {MIN_PATH_WITH_POCKETS_M} м: посетитель на "
                 f"кресле-коляске не пройдёт.{cause}"
             )
-            severity = Severity.ERROR
         else:
             message = (
                 f"Путь от входа сужается до {width} м — к {names}. Это допустимо только при "
                 f"карманах для разъезда длиной не менее 2 м.{cause}"
             )
-            severity = Severity.WARNING
-        findings.append(_finding(rule, message, culprits or targets, width, severity=severity))
+        findings.append(_finding(rule, message, culprits or sorted(group), width, severity=severity))
     return findings
 
 

@@ -19,12 +19,25 @@ def plan() -> Plan:
 
 
 def test_model_is_shipped_and_reports_its_quality() -> None:
+    """Модель едет вместе с сервисом и честно сообщает, на чём и с каким качеством обучена."""
     accelerator.reset()
     model = accelerator.load()
-    assert model is not None, "файл весов должен поставляться вместе с сервисом"
-    assert model.samples >= 100
-    assert model.metrics["площадь под ROC"] > 0.6
+    assert model is not None, "файл модели должен поставляться вместе с сервисом"
+    assert model.samples >= 1000
+    assert model.trees
+    assert model.metrics["площадь под ROC"] > 0.8
+    # Ради этого модель и нужна: в первых десяти местах подходящих должно быть больше,
+    # чем при прежнем порядке по написанной вручную оценке уместности.
+    assert model.metrics["подходящих в первых 10 — модель"] >= model.metrics["подходящих в первых 10 — прежний порядок"]
     assert len(model.explain()) == len(accelerator.FEATURES)
+
+
+def test_probability_is_a_probability(plan: Plan) -> None:
+    candidates, _ = search.generate(plan, "storage_rack")
+    probabilities = accelerator.rank([c.features for c in candidates[:50]])
+    assert probabilities is not None
+    assert all(0.0 <= p <= 1.0 for p in probabilities)
+    assert len(set(round(p, 6) for p in probabilities)) > 1, "модель обязана различать позиции"
 
 
 def test_search_works_without_the_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, plan: Plan) -> None:

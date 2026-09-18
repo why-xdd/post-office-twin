@@ -357,6 +357,26 @@ export interface AssistantReport {
   elapsed_ms: number;
 }
 
+export interface CommandResult {
+  understood: string[];
+  unknown: string[];
+  source: string;
+  recommendations: Recommendation[];
+  elapsed_ms: number;
+}
+
+export interface Conclusion {
+  text: string;
+  source: string;
+  facts: Record<string, unknown>;
+}
+
+export interface LanguageState {
+  'модель_подключена': boolean;
+  'почему_нет': string;
+  'модель': string | null;
+}
+
 export interface ImprovementReport {
   initial: Record<string, unknown>;
   final: Record<string, unknown>;

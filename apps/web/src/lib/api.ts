@@ -6,6 +6,9 @@
  */
 
 import type {
+  CommandResult,
+  Conclusion,
+  LanguageState,
   AssistantReport,
   CapacityReport,
   DictionariesInfo,
@@ -177,6 +180,20 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ document }),
     }),
+
+  command: (document: Plan, text: string) =>
+    request<CommandResult>('/api/assistant/command', {
+      method: 'POST',
+      body: JSON.stringify({ document, text }),
+    }),
+
+  conclusion: (document: Plan, useModel = true) =>
+    request<Conclusion>(`/api/assistant/conclusion?use_model=${useModel}`, {
+      method: 'POST',
+      body: JSON.stringify({ document }),
+    }),
+
+  languageState: () => request<LanguageState>('/api/assistant/language'),
 
   place: (document: Plan, equipmentType: string, zoneId?: string) =>
     request<Recommendation>('/api/assistant/place', {

@@ -164,3 +164,44 @@ def test_improvement_does_not_make_the_plan_worse_overall(plan: Plan) -> None:
     # Путь посетителя до окон не должен вырасти ради снятия ошибок.
     assert after.walk_m is not None and before.walk_m is not None
     assert after.walk_m <= before.walk_m + 0.5
+
+
+def test_command_in_plain_russian_becomes_recommendations(plan: Plan) -> None:
+    """Фраза словами превращается в те же рекомендации, что и панель ассистента."""
+    result = recommend.run_command(plan, "поставь две кассы у перегородки")
+    assert result.source == "разбор фразы"
+    assert result.understood and "Окно" in result.understood[0]
+    assert len(result.recommendations) == 2
+    assert all(rec.changes for rec in result.recommendations)
+    # Места разные: второй объект не встаёт на место первого.
+    positions = {tuple(rec.changes[0].position or ()) for rec in result.recommendations}
+    assert len(positions) == 2
+
+
+def test_command_reports_what_it_did_not_understand(plan: Plan) -> None:
+    result = recommend.run_command(plan, "сделай красиво и современно")
+    assert not result.recommendations
+    assert result.unknown
+
+
+def test_remove_command_shows_the_effect(plan: Plan) -> None:
+    result = recommend.run_command(plan, "убери банкомат")
+    assert len(result.recommendations) == 1
+    recommendation = result.recommendations[0]
+    assert recommendation.changes[0].op == "remove"
+    errors = next(e for e in recommendation.effects if e.key == "errors")
+    assert errors.after is not None and errors.before is not None and errors.after < errors.before
+
+
+def test_conclusion_is_built_from_computed_numbers(plan: Plan) -> None:
+    """Заключение собирается по посчитанным числам и без языковой модели."""
+    from app.assistant import conclusion
+
+    result = conclusion.build(plan, use_model=False)
+    assert result.source == "шаблон по посчитанным числам"
+    assert "ОПС-1" in result.text
+    assert "нарушени" in result.text
+    # Внутренние идентификаторы в текст для заказчика не попадают.
+    assert "eq_" not in result.text
+    assert result.facts["нарушений"] == 7
+    assert result.facts["после_исправления"]["нарушений"] == 0

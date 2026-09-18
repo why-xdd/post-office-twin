@@ -15,6 +15,9 @@ import {
   EyeOff,
   LoaderCircle,
   MapPinned,
+  Copy,
+  FileText,
+  MessageSquare,
   Sparkles,
   TriangleAlert,
   Users,
@@ -29,6 +32,9 @@ import { mergeSteps } from '../lib/fixProposal';
 import { humanize } from '../lib/humanize';
 import type {
   CapacityReport,
+  CommandResult,
+  Conclusion as ConclusionText,
+  LanguageState,
   Effect,
   EquipmentTypeInfo,
   ImprovementReport,
@@ -46,7 +52,7 @@ interface AssistantProps {
   onNotice: (text: string) => void;
 }
 
-type Job = 'advise' | 'improve' | 'place' | null;
+type Job = 'advise' | 'improve' | 'place' | 'command' | 'conclusion' | null;
 
 const SCENARIO_LABEL: Record<string, string> = {
   fix: 'Исправление',
@@ -71,6 +77,10 @@ export function Assistant({ book, types, onFocusObject, onNotice }: AssistantPro
   const [placeResult, setPlaceResult] = useState<Recommendation | null>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [stale, setStale] = useState(false);
+  const [command, setCommand] = useState('');
+  const [commandResult, setCommandResult] = useState<CommandResult | null>(null);
+  const [conclusion, setConclusion] = useState<ConclusionText | null>(null);
+  const [language, setLanguage] = useState<LanguageState | null>(null);
   const docAtRun = useRef<string>('');
   const [elapsed, setElapsed] = useState(0);
 
@@ -89,6 +99,11 @@ export function Assistant({ book, types, onFocusObject, onNotice }: AssistantPro
   }, [job]);
 
   useEffect(() => () => setPreview(null), [setPreview]);
+
+  // Подключена ли языковая модель — от этого зависит подсказка у поля команды.
+  useEffect(() => {
+    api.languageState().then(setLanguage).catch(() => setLanguage(null));
+  }, []);
 
   const run = async <T,>(kind: Job, request: () => Promise<T>, onResult: (result: T) => void) => {
     if (!doc) return;
@@ -119,6 +134,20 @@ export function Assistant({ book, types, onFocusObject, onNotice }: AssistantPro
     run('improve', () => api.improve(doc!), (result) => {
       setImprovement(result);
     });
+
+  const runCommand = () => {
+    const text = command.trim();
+    if (!text) return;
+    void run('command', () => api.command(doc!, text), (result) => {
+      setCommandResult(result);
+      // Рекомендации команды показываются тем же списком: у них та же карточка и то же «Принять».
+      setRecommendations(result.recommendations);
+      setImprovement(null);
+    });
+  };
+
+  const buildConclusion = () =>
+    run('conclusion', () => api.conclusion(doc!), (result) => setConclusion(result));
 
   const place = () =>
     run('place', () => api.place(doc!, placeType), (result) => {
@@ -159,6 +188,34 @@ export function Assistant({ book, types, onFocusObject, onNotice }: AssistantPro
           Рекомендации рассчитаны по геометрии плана и нормам: каждая показывает изменение на плане, основание со
           ссылкой на документ и эффект до и после.
         </p>
+        <form
+          className="assistant__command"
+          onSubmit={(event) => {
+            event.preventDefault();
+            runCommand();
+          }}
+        >
+          <label htmlFor="assistant-command">Скажите, что сделать</label>
+          <div className="assistant__command-row">
+            <input
+              id="assistant-command"
+              value={command}
+              placeholder="поставь две кассы у перегородки"
+              onChange={(event) => setCommand(event.target.value)}
+              disabled={job !== null}
+            />
+            <button type="submit" className="btn btn--steel-light" disabled={job !== null || !command.trim()}>
+              {job === 'command' ? <LoaderCircle size={16} className="spin" aria-hidden="true" /> : <MessageSquare size={16} aria-hidden="true" />}
+              Понять
+            </button>
+          </div>
+          <p className="assistant__hint">
+            {language?.['модель_подключена']
+              ? 'Фразу разбирает сервис, а непонятное уточняет языковая модель. План меняется только после «Принять».'
+              : 'Фразу разбирает сервис. План меняется только после «Принять».'}
+          </p>
+        </form>
+
         <div className="assistant__run">
           <button type="button" className="btn btn--steel-light" onClick={advise} disabled={job !== null || !doc}>
             {job === 'advise' ? <LoaderCircle size={16} className="spin" aria-hidden="true" /> : <Sparkles size={16} aria-hidden="true" />}
@@ -169,6 +226,19 @@ export function Assistant({ book, types, onFocusObject, onNotice }: AssistantPro
             Улучшить пошагово
           </button>
         </div>
+        {commandResult && (
+          <div className="assistant__understood">
+            {commandResult.understood.length > 0 && (
+              <p>
+                <b>Понято:</b> {humanize(commandResult.understood.join('; '), doc, book)}{' '}
+                <span>({commandResult.source})</span>
+              </p>
+            )}
+            {commandResult.unknown.length > 0 && (
+              <p className="assistant__unknown">Не понято: {commandResult.unknown.join('; ')}</p>
+            )}
+          </div>
+        )}
         {job && (
           <p className="assistant__working" role="status">
             {job === 'improve'
@@ -189,6 +259,41 @@ export function Assistant({ book, types, onFocusObject, onNotice }: AssistantPro
               Пересчитать
             </button>
           </p>
+        )}
+      </section>
+
+      <section className="assistant__section">
+        <div className="assistant__section-head">
+          <h3>
+            <FileText size={15} aria-hidden="true" /> Заключение по плану
+          </h3>
+        </div>
+        <p className="assistant__hint">
+          Связный текст для сдачи: что проверено, что нарушено, что предлагается и каким будет эффект. Все числа берутся
+          из отчёта проверки.
+        </p>
+        <button type="button" className="btn btn--outline" onClick={buildConclusion} disabled={job !== null || !doc}>
+          {job === 'conclusion' ? <LoaderCircle size={16} className="spin" aria-hidden="true" /> : <FileText size={16} aria-hidden="true" />}
+          Собрать заключение
+        </button>
+        {conclusion && (
+          <div className="conclusion">
+            <p className="conclusion__text">{conclusion.text}</p>
+            <div className="conclusion__foot">
+              <span>{conclusion.source}</span>
+              <button
+                type="button"
+                className="btn btn--outline"
+                onClick={() => {
+                  void navigator.clipboard?.writeText(conclusion.text);
+                  onNotice('Заключение скопировано');
+                }}
+              >
+                <Copy size={14} aria-hidden="true" />
+                Скопировать
+              </button>
+            </div>
+          </div>
         )}
       </section>
 

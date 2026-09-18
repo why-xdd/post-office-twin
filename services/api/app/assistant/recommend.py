@@ -18,6 +18,8 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from app.assistant import capacity as capacity_model
+from app.assistant import language
+from app.assistant import llm
 from app.assistant import objective
 from app.assistant import completeness as completeness_model
 from app.assistant import search
@@ -126,6 +128,7 @@ def summarize(plan: Plan) -> dict[str, Any]:
         "equipment_total": len(plan.equipment),
         "equipment_by_type": counts,
         "min_route_width": min((r.width_m for r in routes), default=None),
+        "walk_m": objective.walk_distance(plan),
         "entrance_route_width": max((r.width_m for r in routes if r.reachable), default=None),
         "narrowest_targets": _narrowest_targets(routes),
         "waiting_capacity": capacity.waiting_capacity_persons,
@@ -394,11 +397,29 @@ def recommend_fixes(plan: Plan, before: dict[str, Any], limit: int | None = None
             keep=2,
             prefer_near=item.position,
         )
-        improving = [e for e in found.best if e.errors < before["errors"]]
+        # Вариант принимается, если план в целом становится лучше и ошибок не прибавилось:
+        # расширение прохода с 0,64 до 0,9 м ошибку пока не снимает, но уже полезно.
+        here = objective.score(
+            plan,
+            errors=before["errors"],
+            warnings=before["warnings"],
+            entrance_width=before.get("entrance_route_width"),
+            narrowest_route=before.get("min_route_width"),
+            with_queue=False,
+        )
+
+        def better(options: list[search.Evaluated]) -> list[search.Evaluated]:
+            return [
+                e
+                for e in options
+                if e.errors <= before["errors"] and e.score is not None and e.score.better_than(here, margin=0.5)
+            ]
+
+        improving = better(found.best)
         if not improving:
             # Рядом с текущим местом подходящего нет — проверяется больше мест по всей зоне.
             found = search.place(plan, item.type, new_id=item.id, template=item, top_k=FIX_WIDE_TOP_K, keep=2)
-            improving = [e for e in found.best if e.errors < before["errors"]]
+            improving = better(found.best)
         if not improving:
             continue
         best = improving[0]
@@ -774,6 +795,18 @@ def apply_changes(plan: Plan, changes: list[Change]) -> Plan:
     return Plan.model_validate(document)
 
 
+def _score_of(state: dict[str, Any], plan: Plan, reference: Plan) -> objective.Score:
+    """Оценка по уже посчитанной сводке: сводка знает всё, кроме величины переноса."""
+    return objective.score(
+        plan,
+        reference,
+        errors=state["errors"],
+        warnings=state["warnings"],
+        entrance_width=state.get("entrance_route_width"),
+        narrowest_route=state.get("min_route_width"),
+    )
+
+
 def _step_key(rec: Recommendation) -> str:
     places = ";".join(f"{c.op}:{c.object_id}@{c.position}/{c.rotation_deg}" for c in rec.changes)
     return f"{rec.id}|{places}"
@@ -818,10 +851,16 @@ def improve(plan: Plan, max_steps: int = 12, fixes_only: bool = False) -> Improv
         next_plan = apply_changes(current, chosen.changes)
         next_state = summarize(next_plan)
         applied.add(_step_key(chosen))
-        # Повторная перестановка допустима только с явным выигрышем, иначе объекты начнут
-        # ходить по кругу между равноценными местами.
+        # Шаг принимается по общей оценке плана, а не только по числу ошибок: расширение
+        # прохода с 0,64 до 0,9 м ошибку пока не снимает, но план уже лучше.
+        here = _score_of(state, current, plan)
+        there = _score_of(next_state, next_plan, plan)
         repeated = chosen.id in touched
-        if next_state["errors"] > state["errors"] or (repeated and next_state["errors"] >= state["errors"]):
+        if next_state["errors"] > state["errors"]:
+            continue
+        if not there.better_than(here, margin=0.5) and not (next_state["errors"] < state["errors"]):
+            continue
+        if repeated and next_state["errors"] >= state["errors"] and not there.better_than(here, margin=2.0):
             continue
         touched.add(chosen.id)
         steps.append(
@@ -959,3 +998,161 @@ def advise(plan: Plan) -> AssistantReport:
         summary=before,
         elapsed_ms=round((time.perf_counter() - started) * 1000, 1),
     )
+
+
+class CommandResult(BaseModel):
+    """Ответ на команду словами: что поняли и что предлагаем сделать."""
+
+    understood: list[str] = Field(default_factory=list, description="Понятые действия человеческими словами")
+    unknown: list[str] = Field(default_factory=list, description="Части фразы, оставшиеся без ответа")
+    source: str = Field(default="разбор фразы", description="Чем разобрана фраза")
+    recommendations: list[Recommendation] = Field(default_factory=list)
+    elapsed_ms: float = 0.0
+
+
+def _action_words(action: language.Action, plan: Plan) -> str:
+    """Понятое действие обратно человеческими словами — чтобы было видно, что сервис понял."""
+    label = _label(plan, action.equipment_type) if action.equipment_type else None
+    where = ""
+    if action.zone_id:
+        where = f" в зону «{_zone_label(plan, action.zone_id)}»"
+    elif action.near_entrance:
+        where = " у входа"
+    elif action.near_partition:
+        where = " у перегородки"
+    elif action.near_wall:
+        where = " у стены"
+    if action.kind == "add":
+        count = f" × {action.count}" if action.count > 1 else ""
+        return f"поставить: {label}{count}{where}"
+    if action.kind == "move":
+        return f"переставить: {_object_name(plan, action.object_id) if action.object_id else label}{where}"
+    if action.kind == "remove":
+        return f"убрать: {_object_name(plan, action.object_id) if action.object_id else label}"
+    if action.kind == "fix":
+        return "исправить нарушения"
+    return "проверить план"
+
+
+def _remove_recommendation(plan: Plan, object_id: str) -> Recommendation | None:
+    item = next((e for e in plan.equipment if e.id == object_id), None)
+    if item is None:
+        return None
+    before = summarize(plan)
+    after_plan = apply_changes(plan, [Change(op="remove", object_id=object_id, equipment_type=item.type)])
+    after = summarize(after_plan)
+    return Recommendation(
+        id=f"command:remove:{object_id}",
+        scenario="excess",
+        priority=0,
+        title=f"Убрать: {_object_name(plan, object_id)}",
+        summary=(
+            f"Объект убирается с плана. Ошибок станет {after['errors']} вместо {before['errors']}, "
+            f"свободная площадь {before['free_area']} → {after['free_area']} м²."
+        ),
+        changes=[Change(op="remove", object_id=object_id, equipment_type=item.type, label=item.label)],
+        reasons=[Reason(text="Действие запрошено командой; проверка показывает, как изменится план.")],
+        effects=_effects(before, after, item.type),
+        objects=[object_id],
+    )
+
+
+def _move_recommendation(plan: Plan, action: language.Action) -> Recommendation | None:
+    object_id = action.object_id
+    if object_id is None and action.equipment_type:
+        candidates = [e for e in plan.equipment if e.type == action.equipment_type]
+        object_id = candidates[0].id if len(candidates) == 1 else None
+    if object_id is None:
+        return None
+    item = next((e for e in plan.equipment if e.id == object_id), None)
+    if item is None:
+        return None
+    before = summarize(plan)
+    prefer = passability.entrance_point(plan) if action.near_entrance else item.position
+    found = search.place(
+        plan,
+        item.type,
+        new_id=item.id,
+        template=item,
+        zone_id=action.zone_id,
+        top_k=FIX_TOP_K,
+        keep=2,
+        prefer_near=prefer,
+    )
+    if not found.best:
+        return None
+    best = found.best[0]
+    after = summarize(best.plan)
+    moved = next(e for e in best.plan.equipment if e.id == object_id)
+    return Recommendation(
+        id=f"command:move:{object_id}",
+        scenario="fix",
+        priority=0,
+        title=f"Переставить: {_object_name(plan, object_id)}",
+        summary=(
+            f"Новое место в зоне «{_zone_label(best.plan, moved.zone)}». "
+            f"Ошибок станет {after['errors']} вместо {before['errors']}."
+        ),
+        changes=[_change_from(plan, best, "move", object_id, item.type, template=item)],
+        reasons=[Reason(text="Место выбрано расчётом среди допустимых: оно не добавляет ошибок проверки.")],
+        assumptions=["Из подходящих мест выбрано лучшее по общей оценке плана."],
+        effects=_effects(before, after),
+        objects=[object_id],
+        zones=[moved.zone] if moved.zone else [],
+        alternatives=[_change_from(plan, alt, "move", object_id, item.type, template=item) for alt in found.best[1:]],
+        search=_stats(found),
+    )
+
+
+def run_command(plan: Plan, text: str) -> CommandResult:
+    """Выполняет команду словами: разбирает фразу и готовит рекомендации с предпросмотром."""
+    started = time.perf_counter()
+    understanding = language.understand(text, plan)
+    if not understanding.understood and understanding.unknown:
+        # Фразу не разобрали своими силами — пробуем языковую модель, если она подключена.
+        guessed = llm.understand(text, _catalogue(plan))
+        if guessed:
+            understanding = language.from_model(guessed, plan)
+
+    result = CommandResult(understood=[], unknown=list(understanding.unknown), source=understanding.source)
+    current = plan
+    for action in understanding.actions:
+        result.understood.append(_action_words(action, plan))
+        if action.kind == "add" and action.equipment_type:
+            for _ in range(min(action.count, 6)):
+                recommendation = place_equipment(current, action.equipment_type, action.zone_id)
+                result.recommendations.append(recommendation)
+                if recommendation.changes:
+                    current = apply_changes(current, recommendation.changes)
+        elif action.kind == "move":
+            recommendation = _move_recommendation(current, action)
+            if recommendation is not None:
+                result.recommendations.append(recommendation)
+                current = apply_changes(current, recommendation.changes)
+            else:
+                result.unknown.append(action.text)
+        elif action.kind == "remove":
+            object_id = action.object_id
+            if object_id is None and action.equipment_type:
+                same = [e for e in current.equipment if e.type == action.equipment_type]
+                object_id = same[0].id if len(same) == 1 else None
+            recommendation = _remove_recommendation(current, object_id) if object_id else None
+            if recommendation is not None:
+                result.recommendations.append(recommendation)
+                current = apply_changes(current, recommendation.changes)
+            else:
+                result.unknown.append(action.text)
+        elif action.kind == "fix":
+            state = summarize(current)
+            result.recommendations.extend(recommend_fixes(current, state, limit=3))
+    result.elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
+    return result
+
+
+def _catalogue(plan: Plan) -> dict[str, Any]:
+    """Справочник плана для языковой модели: коды типов, зон и объектов с их названиями."""
+    return {
+        "типы_оборудования": {code: t.label for code, t in equipment_types(plan).items()},
+        "зоны": {z.id: z.label or z.type for z in plan.zones},
+        "объекты": {e.id: e.label or e.type for e in plan.equipment},
+    }

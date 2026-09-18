@@ -7,11 +7,16 @@ import os
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Response
+import time
+import uuid
+
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, Field, ValidationError
 
 from app.assistant import capacity as capacity_model
+from app.cache import assistant_cache, fingerprint, validation_cache
 from app.concurrency import heavy_slot
 from app.assistant import recommend
 from app.assistant.capacity import CapacityReport
@@ -37,6 +42,38 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Планы и отчёты — текстовый JSON, он сжимается в разы: на медленной сети это заметно.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
+
+MAX_BODY_BYTES = int(os.environ.get("OPS_TWIN_MAX_BODY", 8 * 1024 * 1024))
+
+
+@app.middleware("http")
+async def trace_and_limit(request: Request, call_next):
+    """Отсекает слишком большие тела и помечает каждый ответ идентификатором и временем.
+
+    Идентификатор запроса попадает и в ответ, и в журнал: по нему разбирают жалобу «у меня
+    не сохранилось» без догадок. Время ответа в Server-Timing видно прямо в инструментах
+    разработчика браузера.
+    """
+    size = request.headers.get("content-length")
+    if size is not None and size.isdigit() and int(size) > MAX_BODY_BYTES:
+        return Response(
+            status_code=413,
+            content=json.dumps(
+                {"detail": f"Файл плана больше {MAX_BODY_BYTES // (1024 * 1024)} МБ — такой план не принимается."},
+                ensure_ascii=False,
+            ),
+            media_type="application/json",
+        )
+    request_id = request.headers.get("x-request-id") or uuid.uuid4().hex[:12]
+    started = time.perf_counter()
+    response = await call_next(request)
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    response.headers["X-Request-Id"] = request_id
+    response.headers["Server-Timing"] = f"total;dur={elapsed_ms:.1f}"
+    return response
+
 
 store = PlanStore(DB_PATH)
 
@@ -98,6 +135,11 @@ def get_rule(rule_id: str) -> Rule:
     if rule is None:
         raise HTTPException(status_code=404, detail=f"Правило {rule_id} не найдено")
     return rule
+
+
+def _with_slot(what: str, compute):
+    with heavy_slot(what):
+        return compute()
 
 
 @app.get("/api/plans", summary="Список планов")
@@ -179,7 +221,9 @@ def validate_document(payload: ValidateRequest) -> ValidationReport:
     Каждая находка содержит документ и пункт, на которых основан вывод.
     """
     plan = _parse_plan(payload.document)
-    return validate(plan, payload.rule_overrides or None)
+    # Один и тот же документ проверяется одинаково: повторный запрос берётся из памяти.
+    key = fingerprint("validate", payload.document, payload.rule_overrides)
+    return validation_cache.get_or_compute(key, lambda: validate(plan, payload.rule_overrides or None))
 
 
 @app.get(
@@ -243,8 +287,11 @@ def assistant_advise(payload: SaveVersionRequest) -> AssistantReport:
 
     Каждая содержит изменения для редактора, причины со ссылкой на норму, допущения и эффект.
     """
-    with heavy_slot("подбор рекомендаций"):
-        return recommend.advise(_parse_plan(payload.document))
+    key = fingerprint("advise", payload.document)
+    return assistant_cache.get_or_compute(
+        key,
+        lambda: _with_slot("подбор рекомендаций", lambda: recommend.advise(_parse_plan(payload.document))),
+    )
 
 
 @app.post(
@@ -253,8 +300,14 @@ def assistant_advise(payload: SaveVersionRequest) -> AssistantReport:
     summary="Пошаговое улучшение плана",
 )
 def assistant_improve(payload: SaveVersionRequest, fixes_only: bool = False) -> ImprovementReport:
-    with heavy_slot("подбор расстановки"):
-        return recommend.improve(_parse_plan(payload.document), fixes_only=fixes_only)
+    key = fingerprint("improve", payload.document, fixes_only)
+    return assistant_cache.get_or_compute(
+        key,
+        lambda: _with_slot(
+            "подбор расстановки",
+            lambda: recommend.improve(_parse_plan(payload.document), fixes_only=fixes_only),
+        ),
+    )
 
 
 @app.post("/api/assistant/place", response_model=Recommendation, summary="Найти место для объекта")

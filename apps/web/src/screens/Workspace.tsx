@@ -172,19 +172,25 @@ export function Workspace({ planId }: WorkspaceProps) {
   useEffect(() => {
     if (!doc) return;
     let cancelled = false;
+    // Правка идёт быстрее ответа сервера: прежний запрос отменяется, чтобы не занимать
+    // ни сеть, ни расчёт на сервере ответом, который уже никому не нужен.
+    const abort = new AbortController();
     setReport(useWorkspace.getState().report, 'checking');
     const timer = window.setTimeout(async () => {
       try {
-        const result = await api.validate(doc);
+        const result = await api.validate(doc, {}, abort.signal);
         // Порядок задаёт и номера меток, и адреса Н-01…: они совпадают с тем, что видно в списке.
         result.findings = sortFindings(result.findings);
         if (!cancelled) setReport(result, 'ready');
-      } catch {
-        if (!cancelled) setReport(useWorkspace.getState().report, 'error');
+      } catch (error) {
+        if (!cancelled && !(error instanceof DOMException && error.name === 'AbortError')) {
+          setReport(useWorkspace.getState().report, 'error');
+        }
       }
     }, VALIDATE_DELAY_MS);
     return () => {
       cancelled = true;
+      abort.abort();
       window.clearTimeout(timer);
     };
   }, [doc, setReport]);

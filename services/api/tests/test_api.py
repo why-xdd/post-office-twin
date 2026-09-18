@@ -230,3 +230,38 @@ def test_heavy_requests_answer_when_the_service_is_busy(client: TestClient, docu
 
     assert response.status_code == 503
     assert "занят" in response.json()["detail"]
+
+
+def test_repeated_validation_comes_from_cache(client: TestClient, document: dict) -> None:
+    """Повторная проверка того же документа не считается заново."""
+    from app import cache
+
+    cache.validation_cache.clear()
+    first = client.post("/api/validate", json={"document": document})
+    misses = cache.validation_cache.misses
+    second = client.post("/api/validate", json={"document": document})
+
+    assert first.json() == second.json()
+    assert cache.validation_cache.misses == misses
+    assert cache.validation_cache.hits >= 1
+
+
+def test_response_carries_request_id_and_timing(client: TestClient) -> None:
+    response = client.get("/health")
+    assert response.headers["X-Request-Id"]
+    assert response.headers["Server-Timing"].startswith("total;dur=")
+
+
+def test_oversized_plan_is_rejected(client: TestClient, document: dict) -> None:
+    """Слишком большой файл отсекается до разбора, чтобы не выедать память сервиса."""
+    from app import main
+
+    limit = main.MAX_BODY_BYTES
+    main.MAX_BODY_BYTES = 1024
+    try:
+        response = client.post("/api/validate", json={"document": document})
+    finally:
+        main.MAX_BODY_BYTES = limit
+
+    assert response.status_code == 413
+    assert "МБ" in response.json()["detail"]

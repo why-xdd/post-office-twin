@@ -29,7 +29,7 @@ from app.dictionaries import EquipmentType, equipment_types, zone_types
 from app.geometry import core, passability
 from app.models import Equipment, Plan
 from app.rules.catalog import rules_by_id
-from app.assistant import objective
+from app.assistant import accelerator, objective
 from app.rules.engine import SERVICE_WINDOW_TYPES, validate
 
 GRID_STEP = 0.25
@@ -439,6 +439,26 @@ def evaluate(plan: Plan, candidate_plan: Plan, candidate: Candidate, baseline_er
 
 Ranker = Callable[[list[Candidate]], list[Candidate]]
 
+# Насколько сильно предсказание модели сдвигает порядок относительно оценки уместности.
+MODEL_WEIGHT = 4.0
+
+
+def _prioritise(candidates: list[Candidate]) -> list[Candidate]:
+    """Порядок полной проверки: оценка уместности, уточнённая обученной моделью.
+
+    Модель предсказывает, пройдёт ли позиция полную проверку. Её предсказание вычитается из
+    оценки уместности, поэтому перспективные места проверяются первыми, а без файла весов
+    порядок остаётся прежним.
+    """
+    probabilities = accelerator.rank([c.features for c in candidates])
+    if probabilities is None:
+        return candidates
+    paired = sorted(
+        zip(candidates, probabilities),
+        key=lambda pair: pair[0].fitness - MODEL_WEIGHT * pair[1],
+    )
+    return [candidate for candidate, _ in paired]
+
 
 def place(
     plan: Plan,
@@ -467,7 +487,7 @@ def place(
         base_plan, type_code, size or (template.size_m if template else None), zone_id, exclude, prefer_near=prefer_near
     )
     passed = len(candidates)
-    ordered = ranker(candidates) if ranker is not None else candidates
+    ordered = ranker(candidates) if ranker is not None else _prioritise(candidates)
     shortlist = ordered[:top_k]
 
     types = equipment_types(plan)

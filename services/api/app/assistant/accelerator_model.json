@@ -1,0 +1,40 @@
+{
+  "weights": {
+    "fitness": -0.70276,
+    "wall_distance": 0.70016,
+    "entrance_distance": 0.17955,
+    "nearest_obstacle": 1.52919,
+    "rotation": -0.42002,
+    "area": -0.43229,
+    "boundary_distance": 0.48005,
+    "door_distance": -0.13257
+  },
+  "bias": 1.95601,
+  "mean": {
+    "fitness": 3.74979,
+    "wall_distance": 1.26573,
+    "entrance_distance": 6.22478,
+    "nearest_obstacle": 2.04442,
+    "rotation": 45.84151,
+    "area": 0.76622,
+    "boundary_distance": 1.47579,
+    "door_distance": 2.4694
+  },
+  "std": {
+    "fitness": 2.80212,
+    "wall_distance": 1.10799,
+    "entrance_distance": 2.92304,
+    "nearest_obstacle": 1.86464,
+    "rotation": 44.99213,
+    "area": 0.49919,
+    "boundary_distance": 1.2419,
+    "door_distance": 1.55292
+  },
+  "metrics": {
+    "доля верных ответов": 0.8566,
+    "площадь под ROC": 0.8482,
+    "доля подходящих мест в выборке": 0.7693
+  },
+  "trained_at": "2026-09-18",
+  "samples": 5401
+}

@@ -147,10 +147,11 @@ export const api = {
 
   deletePlan: (id: string) => request<void>(`/api/plans/${id}`, { method: 'DELETE' }),
 
-  validate: (document: Plan, ruleOverrides: Record<string, boolean> = {}) =>
+  validate: (document: Plan, ruleOverrides: Record<string, boolean> = {}, signal?: AbortSignal) =>
     request<ValidationReport>('/api/validate', {
       method: 'POST',
       body: JSON.stringify({ document, rule_overrides: ruleOverrides }),
+      signal,
     }),
 
   metrics: (document: Plan) =>

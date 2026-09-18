@@ -357,6 +357,13 @@ export interface AssistantReport {
   elapsed_ms: number;
 }
 
+export interface ImportResult {
+  document: Plan;
+  notes: string[];
+  stats: Record<string, string | number>;
+  labels_source: string;
+}
+
 export interface CommandResult {
   understood: string[];
   unknown: string[];

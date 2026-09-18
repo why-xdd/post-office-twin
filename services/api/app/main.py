@@ -10,7 +10,7 @@ from typing import Any
 import time
 import uuid
 
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, Field, ValidationError
@@ -23,6 +23,7 @@ from app.assistant.capacity import CapacityReport
 from app.assistant.recommend import AssistantReport, ImprovementReport, Recommendation
 from app.dictionaries import equipment_types, zone_types
 from app.geometry import core
+from app.importer import build as importer
 from app.models import Plan, duplicate_ids
 from app.rules.catalog import DEFAULT_RULES, Rule, rules_by_id
 from app.rules.engine import ValidationReport, validate
@@ -333,6 +334,43 @@ def assistant_conclusion(payload: SaveVersionRequest, use_model: bool = True) ->
     return assistant_cache.get_or_compute(
         key, lambda: _with_slot("подготовку заключения", lambda: conclusion.build(plan, use_model))
     )
+
+
+@app.post("/api/import/drawing", response_model=importer.ImportResult, summary="Импорт чертежа")
+def import_drawing(
+    file: UploadFile = File(description="Картинка чертежа или PDF"),
+    real_width_m: float = Form(gt=0.5, le=200, description="Действительная ширина помещения в метрах"),
+    name: str = Form(default="План с чертежа", max_length=200),
+    page: int = Form(default=0, ge=0, le=50, description="Страница PDF, считая с нуля"),
+    read_labels: bool = Form(default=True, description="Читать подписи языковой моделью"),
+) -> importer.ImportResult:
+    """Распознаёт чертёж и возвращает черновик плана: стены, проёмы, перегородки.
+
+    Ничего не сохраняет: пользователь сначала смотрит результат, правит его в редакторе и только
+    потом создаёт план.
+    """
+    data = file.file.read(MAX_BODY_BYTES + 1)
+    if len(data) > MAX_BODY_BYTES:
+        raise HTTPException(status_code=413, detail="Файл больше допустимого размера.")
+    if not data:
+        raise HTTPException(status_code=422, detail="Файл пустой.")
+    try:
+        with heavy_slot("распознавание чертежа"):
+            return importer.build(
+                data,
+                real_width_m=real_width_m,
+                page=page,
+                name=name,
+                media_type=file.content_type or "image/png",
+                read_labels=read_labels,
+            )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from None
+    except Exception:
+        raise HTTPException(
+            status_code=422,
+            detail="Не удалось прочитать файл: нужен рисунок плана в PNG, JPEG или PDF.",
+        ) from None
 
 
 @app.get("/api/assistant/language", summary="Состояние языковой модели")

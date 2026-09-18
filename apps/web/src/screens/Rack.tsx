@@ -209,6 +209,10 @@ export function Rack() {
               <a className="cabinet__link" href="#/new">
                 Создать своё помещение
               </a>
+              {' · '}
+              <a className="cabinet__link" href="#/import">
+                Загрузить чертёж картинкой
+              </a>
             </p>
           </div>
           {sample && (

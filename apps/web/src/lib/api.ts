@@ -8,6 +8,7 @@
 import type {
   CommandResult,
   Conclusion,
+  ImportResult,
   LanguageState,
   AssistantReport,
   CapacityReport,
@@ -85,9 +86,11 @@ async function toError(response: Response): Promise<ApiError> {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
+    // У загрузки файла тип содержимого ставит сам браузер: ему нужна граница составного тела.
+    const isForm = init?.body instanceof FormData;
     response = await fetch(`${BASE_URL}${path}`, {
       ...init,
-      headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+      headers: isForm ? init?.headers : { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
     });
   } catch {
     throw new ApiError(
@@ -180,6 +183,15 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ document }),
     }),
+
+  importDrawing: (file: File, realWidthM: number, name: string, readLabels = true) => {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('real_width_m', String(realWidthM));
+    form.append('name', name);
+    form.append('read_labels', String(readLabels));
+    return request<ImportResult>('/api/import/drawing', { method: 'POST', body: form });
+  },
 
   command: (document: Plan, text: string) =>
     request<CommandResult>('/api/assistant/command', {

@@ -548,23 +548,25 @@ def evaluate(plan: Plan, candidate_plan: Plan, candidate: Candidate, baseline_er
 
 Ranker = Callable[[list[Candidate]], list[Candidate]]
 
-# Насколько сильно предсказание модели сдвигает порядок относительно оценки уместности.
+# Насколько сильно каждая голова модели сдвигает порядок относительно оценки уместности.
 MODEL_WEIGHT = 4.0
+QUALITY_WEIGHT = 1.0
 
 
 def _prioritise(candidates: list[Candidate]) -> list[Candidate]:
-    """Порядок полной проверки: оценка уместности, уточнённая обученной моделью.
+    """Порядок полной проверки: оценка уместности, уточнённая обеими головами модели.
 
-    Модель предсказывает, пройдёт ли позиция полную проверку. Её предсказание вычитается из
-    оценки уместности, поэтому перспективные места проверяются первыми, а без файла весов
-    порядок остаётся прежним.
+    Первая голова отвечает, пройдёт ли позиция полную проверку, — её предсказание поднимает
+    кандидата в списке. Вторая предсказывает величину цели, то есть каким получится план целиком;
+    меньше — лучше, поэтому она опускает кандидата тем сильнее, чем хуже ожидаемая расстановка.
+    Без файла весов порядок остаётся прежним, без второй головы — таким, как был до неё.
     """
-    probabilities = accelerator.rank([c.features for c in candidates])
-    if probabilities is None:
+    ranked = accelerator.rank_pairs([c.features for c in candidates])
+    if ranked is None:
         return candidates
     paired = sorted(
-        zip(candidates, probabilities),
-        key=lambda pair: pair[0].fitness - MODEL_WEIGHT * pair[1],
+        zip(candidates, ranked),
+        key=lambda pair: pair[0].fitness - MODEL_WEIGHT * pair[1][0] + QUALITY_WEIGHT * pair[1][1],
     )
     return [candidate for candidate, _ in paired]
 

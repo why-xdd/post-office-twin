@@ -4,14 +4,20 @@
 площади. Поэтому проверяется только верхушка списка, а порядок задаёт оценка уместности —
 набор правил, написанных вручную.
 
-Здесь этот порядок уточняет модель, обученная на данных, которые сервис порождает сам: для
-десятков тысяч позиций известно, чем закончилась полная проверка. Модель — градиентный бустинг
-на решающих деревьях: для табличных признаков он точнее линейной модели, а вывод — обход
-неглубоких деревьев, то есть микросекунды на кандидата.
+Здесь этот порядок уточняет модель, обученная на данных, которые сервис порождает сам: для сотен
+тысяч позиций известно и то, чем закончилась полная проверка, и то, какой получилась расстановка
+целиком. Поэтому голов две. Первая отвечает «пройдёт ли позиция проверку» — это отсев заведомо
+плохих мест. Вторая предсказывает величину цели: среди допустимых мест она отличает удачное от
+просто терпимого. Одной первой мало: допустимых мест обычно большинство, и без второй головы
+порядок внутри них случаен.
 
-Сервис не зависит ни от одной библиотеки машинного обучения: деревья лежат в JSON, обход
-написан здесь. Обучение (scikit-learn) живёт в scripts/train_accelerator.py и в поставку не
-входит. Файл весов необязателен: без него поиск работает как раньше, только менее прицельно.
+Обе головы — градиентный бустинг на решающих деревьях: для табличных признаков он точнее линейной
+модели, а вывод — обход неглубоких деревьев, то есть микросекунды на кандидата.
+
+Сервис не зависит ни от одной библиотеки машинного обучения: деревья лежат в JSON, обход написан
+здесь, обучение живёт в scripts/ и в поставку не входит. Файл весов необязателен: без него поиск
+работает как раньше, только менее прицельно. Вторая голова тоже необязательна — файл, где её нет,
+читается по-прежнему.
 """
 
 from __future__ import annotations
@@ -78,8 +84,24 @@ class Tree:
 
 
 @dataclass(frozen=True)
+class Quality:
+    """Голова, предсказывающая величину цели: чем меньше, тем лучше расстановка."""
+
+    trees: list[Tree]
+    init: float
+    learning_rate: float
+    importance: dict[str, float]
+
+    def value(self, row: list[float]) -> float:
+        return self.init + self.learning_rate * sum(tree.predict(row) for tree in self.trees)
+
+    def explain(self) -> list[tuple[str, float]]:
+        return sorted(self.importance.items(), key=lambda item: -item[1])
+
+
+@dataclass(frozen=True)
 class Model:
-    """Ансамбль деревьев, предсказывающий вероятность «позиция пройдёт полную проверку»."""
+    """Ансамбль деревьев: вероятность «позиция пройдёт проверку» и ожидаемое качество места."""
 
     trees: list[Tree]
     init: float
@@ -89,6 +111,7 @@ class Model:
     trained_at: str
     samples: int
     features: tuple[str, ...] = FEATURES
+    quality: Quality | None = None
 
     def row(self, features: dict[str, float]) -> list[float]:
         return [float(features.get(name, 0.0)) for name in self.features]
@@ -96,6 +119,10 @@ class Model:
     def probability(self, features: dict[str, float]) -> float:
         raw = self.init + self.learning_rate * sum(tree.predict(self.row(features)) for tree in self.trees)
         return 1.0 / (1.0 + math.exp(-max(-30.0, min(30.0, raw))))
+
+    def expected_score(self, features: dict[str, float]) -> float:
+        """Ожидаемая величина цели для места. Ноль, если вторая голова не обучена."""
+        return self.quality.value(self.row(features)) if self.quality is not None else 0.0
 
     def explain(self) -> list[tuple[str, float]]:
         """Признаки по убыванию влияния — для README и разговора с проверяющим."""
@@ -107,8 +134,8 @@ _loaded = False
 _model: Model | None = None
 
 
-def _parse(data: dict) -> Model:
-    trees = [
+def _trees(items: list[dict]) -> list[Tree]:
+    return [
         Tree(
             feature=[int(v) for v in tree["feature"]],
             threshold=[float(v) for v in tree["threshold"]],
@@ -116,10 +143,24 @@ def _parse(data: dict) -> Model:
             right=[int(v) for v in tree["right"]],
             value=[float(v) for v in tree["value"]],
         )
-        for tree in data["trees"]
+        for tree in items
     ]
+
+
+def _parse(data: dict) -> Model:
+    trees = _trees(data["trees"])
+    quality = None
+    if isinstance(data.get("quality"), dict):
+        head = data["quality"]
+        quality = Quality(
+            trees=_trees(head["trees"]),
+            init=float(head["init"]),
+            learning_rate=float(head.get("learning_rate", 1.0)),
+            importance={k: float(v) for k, v in head.get("importance", {}).items()},
+        )
     return Model(
         trees=trees,
+        quality=quality,
         init=float(data["init"]),
         learning_rate=float(data.get("learning_rate", 1.0)),
         importance={k: float(v) for k, v in data.get("importance", {}).items()},
@@ -162,3 +203,15 @@ def rank(candidates: list[dict[str, float]]) -> list[float] | None:
     if model is None:
         return None
     return [model.probability(features) for features in candidates]
+
+
+def rank_pairs(candidates: list[dict[str, float]]) -> list[tuple[float, float]] | None:
+    """Пары «вероятность пройти проверку, ожидаемая величина цели», либо None без модели.
+
+    Второе число равно нулю, если в файле нет второй головы: тогда порядок определяется только
+    вероятностью, как в прежней версии.
+    """
+    model = load()
+    if model is None:
+        return None
+    return [(model.probability(features), model.expected_score(features)) for features in candidates]

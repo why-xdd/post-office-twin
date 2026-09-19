@@ -32,6 +32,40 @@ def test_model_is_shipped_and_reports_its_quality() -> None:
     assert len(model.explain()) == len(accelerator.FEATURES)
 
 
+def test_second_head_earns_its_place() -> None:
+    """Вторая голова обязана улучшать выбор, а не просто присутствовать в файле."""
+    accelerator.reset()
+    model = accelerator.load()
+    assert model is not None and model.quality is not None, "в поставке должны быть обе головы"
+    metrics = model.metrics
+    # Проигрыш лучшему месту: чем меньше, тем ближе выбор сервиса к идеальному.
+    assert metrics["проигрыш лучшему месту — две головы"] < metrics["проигрыш лучшему месту — одна голова"]
+    assert metrics["проигрыш лучшему месту — одна голова"] < metrics["проигрыш лучшему месту — прежний порядок"]
+    assert metrics["лучшее место в первых 10 — две головы"] >= metrics["лучшее место в первых 10 — прежний порядок"]
+
+
+def test_file_without_second_head_still_loads(tmp_path: Path) -> None:
+    """Файл прежнего образца обязан читаться: вторая голова — дополнение, а не условие."""
+    accelerator.reset()
+    data = json.loads(accelerator.MODEL_PATH.read_text(encoding="utf-8"))
+    data.pop("quality")
+    older = tmp_path / "модель.json"
+    older.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    model = accelerator.load(older)
+    assert model is not None and model.quality is None
+    assert model.expected_score({"fitness": 1.0}) == 0.0
+
+
+def test_rank_pairs_gives_both_answers(plan: Plan) -> None:
+    """Порядок проверки строится по двум числам: вероятность и ожидаемое качество."""
+    accelerator.reset()
+    candidates, _ = search.generate(plan, "waiting_seat")
+    pairs = accelerator.rank_pairs([c.features for c in candidates[:50]])
+    assert pairs is not None
+    assert all(0.0 <= probability <= 1.0 for probability, _ in pairs)
+    assert len({round(quality, 6) for _, quality in pairs}) > 1, "вторая голова обязана различать места"
+
+
 def test_probability_is_a_probability(plan: Plan) -> None:
     candidates, _ = search.generate(plan, "storage_rack")
     probabilities = accelerator.rank([c.features for c in candidates[:50]])

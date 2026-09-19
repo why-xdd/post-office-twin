@@ -1,13 +1,17 @@
 """Градиентный бустинг на решающих деревьях — обучение без внешних библиотек.
 
-Задача: по признакам позиции предсказать, пройдёт ли она полную проверку. Это бинарная
-классификация на табличных данных, где бустинг обычно сильнее и линейной модели, и нейросети.
+Здесь две задачи. Первая — предсказать, пройдёт ли позиция полную проверку: бинарная
+классификация с логистической функцией потерь. Вторая — предсказать, насколько хороша будет
+расстановка, если объект встанет сюда: регрессия с квадратичной функцией потерь. Обе решает один
+и тот же код, разница только в градиенте, гессиане и начальном приближении.
 
-Как это работает. Модель — сумма неглубоких деревьев. Сначала берётся общее среднее (логит
-доли подходящих мест), затем каждое следующее дерево учится на ошибках предыдущих: для
-логистической функции потерь это градиент g = p − y и гессиан h = p (1 − p). Дерево ищет
-разбиение, максимально уменьшающее потери; значение листа — −Σg / (Σh + λ), как в известных
-реализациях бустинга.
+Это табличные данные, где бустинг обычно сильнее и линейной модели, и нейросети.
+
+Как это работает. Модель — сумма неглубоких деревьев. Сначала берётся общее начальное
+приближение (логит доли подходящих мест либо среднее значение цели), затем каждое следующее
+дерево учится на ошибках предыдущих: для логистической функции потерь градиент g = p − y и
+гессиан h = p (1 − p), для квадратичной — g = f − y и h = 1. Дерево ищет разбиение, максимально
+уменьшающее потери; значение листа — −Σg / (Σh + λ), как в известных реализациях бустинга.
 
 Скорость даёт предварительное разбиение каждого признака на 256 корзин: вместо перебора всех
 порогов достаточно накопить суммы по корзинам. Это тот же приём, что и в гистограммных
@@ -64,6 +68,7 @@ class Booster:
     init: float
     learning_rate: float
     importance: np.ndarray
+    loss: str = "logistic"
 
     def raw(self, x: np.ndarray) -> np.ndarray:
         total = np.full(len(x), self.init)
@@ -73,6 +78,10 @@ class Booster:
 
     def probability(self, x: np.ndarray) -> np.ndarray:
         return 1.0 / (1.0 + np.exp(-np.clip(self.raw(x), -30, 30)))
+
+    def predict(self, x: np.ndarray) -> np.ndarray:
+        """Ответ модели в том виде, в каком его читает человек: вероятность или число."""
+        return self.raw(x) if self.loss == "squared" else self.probability(x)
 
 
 def _bin_edges(x: np.ndarray) -> list[np.ndarray]:
@@ -173,16 +182,27 @@ def train(
     seed: int = 0,
     validation: tuple[np.ndarray, np.ndarray] | None = None,
     patience: int = 30,
+    loss: str = "logistic",
 ) -> Booster:
-    """Обучение с ранней остановкой по отложенной выборке."""
+    """Обучение с ранней остановкой по отложенной выборке.
+
+    `loss="logistic"` — классификация «позиция пройдёт проверку», `loss="squared"` — регрессия
+    на величину, которую хотим предсказать. Различаются только начальное приближение, градиент,
+    гессиан и то, по чему считается ошибка на отложенной выборке.
+    """
+    if loss not in ("logistic", "squared"):
+        raise ValueError(f"Неизвестная функция потерь: {loss}")
     rng = np.random.default_rng(seed)
     edges = _bin_edges(x)
     binned = np.empty(x.shape, dtype=np.int32)
     for column in range(x.shape[1]):
         binned[:, column] = np.searchsorted(edges[column], x[:, column], side="left")
 
-    share = float(np.clip(y.mean(), 1e-6, 1 - 1e-6))
-    init = float(np.log(share / (1 - share)))
+    if loss == "squared":
+        init = float(y.mean())
+    else:
+        share = float(np.clip(y.mean(), 1e-6, 1 - 1e-6))
+        init = float(np.log(share / (1 - share)))
     raw = np.full(len(y), init)
     importance = np.zeros(x.shape[1])
     grown: list[TreeArrays] = []
@@ -191,9 +211,13 @@ def train(
     validation_raw = np.full(len(validation[1]), init) if validation is not None else None
 
     for _ in range(trees):
-        probability = 1.0 / (1.0 + np.exp(-np.clip(raw, -30, 30)))
-        gradient = probability - y
-        hessian = np.maximum(probability * (1 - probability), 1e-6)
+        if loss == "squared":
+            gradient = raw - y
+            hessian = np.ones(len(y))
+        else:
+            probability = 1.0 / (1.0 + np.exp(-np.clip(raw, -30, 30)))
+            gradient = probability - y
+            hessian = np.maximum(probability * (1 - probability), 1e-6)
         rows = np.arange(len(y))
         if subsample < 1.0:
             rows = rng.choice(rows, size=int(len(y) * subsample), replace=False)
@@ -204,10 +228,15 @@ def train(
 
         if validation is not None and validation_raw is not None:
             validation_raw += learning_rate * tree.predict(validation[0])
-            p = 1.0 / (1.0 + np.exp(-np.clip(validation_raw, -30, 30)))
-            loss = float(-np.mean(validation[1] * np.log(p + 1e-9) + (1 - validation[1]) * np.log(1 - p + 1e-9)))
-            if loss < best_loss - 1e-5:
-                best_loss, best_count, since_best = loss, len(grown), 0
+            if loss == "squared":
+                current = float(np.mean((validation_raw - validation[1]) ** 2))
+            else:
+                p = 1.0 / (1.0 + np.exp(-np.clip(validation_raw, -30, 30)))
+                current = float(
+                    -np.mean(validation[1] * np.log(p + 1e-9) + (1 - validation[1]) * np.log(1 - p + 1e-9))
+                )
+            if current < best_loss - 1e-5:
+                best_loss, best_count, since_best = current, len(grown), 0
             else:
                 since_best += 1
                 if since_best >= patience:
@@ -216,4 +245,6 @@ def train(
     if validation is not None and best_count:
         grown = grown[:best_count]
     total = importance.sum() or 1.0
-    return Booster(trees=grown, init=init, learning_rate=learning_rate, importance=importance / total)
+    return Booster(
+        trees=grown, init=init, learning_rate=learning_rate, importance=importance / total, loss=loss
+    )

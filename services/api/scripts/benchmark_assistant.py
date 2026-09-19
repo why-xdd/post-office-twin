@@ -1,8 +1,8 @@
 """Замер качества ассистента: что даёт обученный ускоритель.
 
-Считает один и тот же сценарий дважды — с моделью и без неё — и печатает таблицу: время,
-оставшиеся нарушения, общую оценку расстановки и её слагаемые. Числа из этой таблицы идут в
-README и в презентацию, поэтому замер должен воспроизводиться одной командой:
+Считает один и тот же сценарий трижды — без модели, с одной головой и с обеими — и печатает
+таблицу: время, оставшиеся нарушения, общую оценку расстановки и её слагаемые. Числа из этой
+таблицы идут в README и в презентацию, поэтому замер должен воспроизводиться одной командой:
 
     uv run python scripts/benchmark_assistant.py --plans ../../data/example_plan.json
 """
@@ -14,15 +14,20 @@ import json
 import time
 from pathlib import Path
 
-from app.assistant import accelerator, objective, recommend
+from app.assistant import accelerator, objective, recommend, search
 from app.models import Plan
 
 
-def measure(plan: Plan, with_model: bool) -> dict:
+def measure(plan: Plan, with_model: bool, with_quality: bool = True) -> dict:
+    """Один и тот же сценарий при разной оснастке поиска."""
     accelerator.reset()
     original = accelerator.MODEL_PATH
+    weight = search.QUALITY_WEIGHT
     if not with_model:
         accelerator.MODEL_PATH = original.with_name("__нет_модели__.json")
+    if not with_quality:
+        # Вторая голова отключается весом: так видно, что даёт именно она.
+        search.QUALITY_WEIGHT = 0.0
     try:
         started = time.perf_counter()
         report = recommend.improve(plan, fixes_only=True)
@@ -41,6 +46,7 @@ def measure(plan: Plan, with_model: bool) -> dict:
         }
     finally:
         accelerator.MODEL_PATH = original
+        search.QUALITY_WEIGHT = weight
         accelerator.reset()
 
 
@@ -55,9 +61,14 @@ def main() -> None:
         plan = Plan.model_validate(json.loads(Path(path).read_text(encoding="utf-8")))
         before = objective.score(plan)
         print(f"\n{path}: было ошибок {before.errors}, оценка {before.total}")
-        for label, with_model in (("без модели", False), ("с моделью", True)):
-            result = measure(plan, with_model)
-            print(f"  {label}: " + ", ".join(f"{k} {v}" for k, v in result.items()))
+        runs = (
+            ("без модели", False, False),
+            ("одна голова", True, False),
+            ("две головы", True, True),
+        )
+        for label, with_model, with_quality in runs:
+            result = measure(plan, with_model, with_quality)
+            print(f"  {label:12}: " + ", ".join(f"{k} {v}" for k, v in result.items()))
 
 
 if __name__ == "__main__":

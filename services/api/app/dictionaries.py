@@ -31,6 +31,10 @@ class EquipmentType(BaseModel):
     operator_workplace: bool = Field(
         default=False, description="У объекта есть место сотрудника: касса, стойка выдачи"
     )
+    height_m: float = Field(default=1.0, gt=0, description="Высота объекта — для объёмного вида")
+    mount_height_m: float = Field(
+        default=0.0, ge=0, description="Высота низа над полом: у настенных и настольных больше нуля"
+    )
     attribute_schema: dict[str, str] = Field(default_factory=dict)
 
 
@@ -42,6 +46,37 @@ DEFAULT_ZONE_TYPES: list[ZoneType] = [
     ZoneType(code="back_office", label="Складская / служебная зона", public=False),
     ZoneType(code="staff_room", label="Помещение персонала", public=False),
 ]
+
+# Высоты вынесены отдельной таблицей: в «Перечне оборудования ОПС» их нет, это наши значения по
+# типовым габаритам мебели и техники. Первое число — высота объекта, второе — высота его низа над
+# полом: у настенного табло и камеры она больше нуля. План может переопределить любую из них
+# через свой справочник или через height_m у конкретного объекта.
+HEIGHTS: dict[str, tuple[float, float]] = {
+    "cashier_window": (1.15, 0.0),
+    "pvz_counter": (1.1, 0.0),
+    "self_service_kiosk": (1.5, 0.0),
+    "payment_terminal_stand": (1.2, 0.0),
+    "package_drop_box": (1.3, 0.0),
+    "info_display": (0.65, 2.1),
+    "media_panel": (0.8, 1.35),
+    "waiting_seat": (0.85, 0.0),
+    "atm": (1.6, 0.0),
+    "parcel_locker": (2.0, 0.0),
+    "back_office_workplace": (0.75, 0.0),
+    "printer": (0.45, 0.75),
+    "label_printer": (0.25, 0.9),
+    "camera": (0.15, 2.6),
+    "fire_alarm": (0.1, 2.85),
+    "security_alarm": (0.15, 2.2),
+    "storage_rack": (2.0, 0.0),
+    "goods_rack": (1.8, 0.0),
+    "weighing_station": (0.9, 0.0),
+    "info_stand": (1.8, 0.0),
+    "safe": (0.9, 0.0),
+    "fitting_room": (2.1, 0.0),
+    "trash_bin": (0.7, 0.0),
+    "potted_plant": (1.1, 0.0),
+}
 
 PUBLIC = ["client_area", "waiting", "queue_accumulator"]
 SERVICE = ["back_office", "staff_room"]
@@ -246,6 +281,10 @@ DEFAULT_EQUIPMENT_TYPES: list[EquipmentType] = [
         allowed_zones=PUBLIC,
     ),
 ]
+
+for _type in DEFAULT_EQUIPMENT_TYPES:
+    _height, _mount = HEIGHTS.get(_type.code, (1.0, 0.0))
+    _type.height_m, _type.mount_height_m = _height, _mount
 
 
 def zone_types(plan: Plan | None = None) -> dict[str, ZoneType]:

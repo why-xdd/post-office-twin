@@ -19,7 +19,7 @@ import {
   Save,
   Undo2,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { PlanCanvas, type Layers } from '../canvas/PlanCanvas';
 import { Mark } from '../components/Mark';
 import { ADDRESS_KIND_LABEL, buildAddressBook, parseAddress } from '../lib/addresses';
@@ -41,7 +41,7 @@ import { Library } from '../panels/Library';
 import { Passport } from '../panels/Passport';
 import { Properties } from '../panels/Properties';
 import { Review } from '../panels/Review';
-import { isDirty, useWorkspace, type Mode, type SidePanel } from '../state/store';
+import { isDirty, useWorkspace, type Mode, type SidePanel, type ViewKind } from '../state/store';
 import './workspace.css';
 
 interface WorkspaceProps {
@@ -51,6 +51,15 @@ interface WorkspaceProps {
 type LoadState = { kind: 'loading' } | { kind: 'ready' } | { kind: 'error'; message: string };
 
 const VALIDATE_DELAY_MS = 450;
+
+// Объёмный вид тянет за собой библиотеку трёхмерной графики: она грузится только когда нужна,
+// иначе редактор плана платил бы мегабайтом за то, чем пользуются изредка.
+const Plan3D = lazy(() => import('../canvas/Plan3D').then((module) => ({ default: module.Plan3D })));
+
+const VIEWS: { id: ViewKind; label: string; hint: string }[] = [
+  { id: '2d', label: 'План', hint: 'Чертёж сверху: правка, зоны, размеры' },
+  { id: '3d', label: 'Объём', hint: 'То же помещение в объёме: высоты, проёмы, маршруты' },
+];
 
 const HOTKEYS: [string, string][] = [
   ['V · W · O · Z', 'выбор · перегородка · контур · зона'],
@@ -95,6 +104,8 @@ export function Workspace({ planId }: WorkspaceProps) {
   const highlight = useWorkspace((s) => s.highlight);
   const tool = useWorkspace((s) => s.tool);
   const reviewErrors = useWorkspace((s) => s.report?.errors ?? 0);
+  const viewKind = useWorkspace((s) => s.view);
+  const setViewKind = useWorkspace((s) => s.setView);
   const previewing = useWorkspace((s) => s.preview !== null);
 
   const [load, setLoad] = useState<LoadState>({ kind: 'loading' });
@@ -573,6 +584,21 @@ export function Workspace({ planId }: WorkspaceProps) {
           ))}
         </div>
 
+        <div className="segmented" role="radiogroup" aria-label="Вид плана">
+          {VIEWS.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              role="radio"
+              aria-checked={viewKind === item.id}
+              title={item.hint}
+              onClick={() => setViewKind(item.id)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+
         <div className="ws-rail__tools">
           {!review && (
             <>
@@ -628,22 +654,28 @@ export function Workspace({ planId }: WorkspaceProps) {
       {!review && <Library types={types} zoneTypes={zoneTypes} layers={layers} onLayers={setLayers} onNotice={setNotice} />}
 
       <main className="ws-sheet" aria-label="Лист плана">
-        <PlanCanvas
-          types={typeMap}
-          book={book}
-          layers={layers}
-          fitSignal={fitSignal}
-          focus={focus}
-          onViewChange={setView}
-          onCursor={setCursor}
-          onNotice={setNotice}
-        />
-        {mode === 'design' && toolHint && (
+        {viewKind === '3d' ? (
+          <Suspense fallback={<p className="ws-hint">Загружается объёмный вид…</p>}>
+            <Plan3D types={typeMap} />
+          </Suspense>
+        ) : (
+          <PlanCanvas
+            types={typeMap}
+            book={book}
+            layers={layers}
+            fitSignal={fitSignal}
+            focus={focus}
+            onViewChange={setView}
+            onCursor={setCursor}
+            onNotice={setNotice}
+          />
+        )}
+        {viewKind === '2d' && mode === 'design' && toolHint && (
           <p className="ws-hint" role="note">
             {toolHint}
           </p>
         )}
-        {review && reviewErrors > 0 && (
+        {viewKind === '2d' && review && reviewErrors > 0 && (
           <p className="ws-hint" role="note">
             {previewing
               ? 'Пунктирные стрелки — куда переедут объекты'

@@ -37,6 +37,32 @@ def test_health(client: TestClient) -> None:
     assert client.get("/health").json() == {"status": "ok"}
 
 
+def test_sample_plan_opens_without_any_configuration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Проверяющий поднимает сервис из исходников: пример обязан открыться без переменных среды.
+
+    Прежде путь к примеру был задан под контейнер, и вне Docker кнопка «Открыть пример» молчала.
+    """
+    monkeypatch.setenv("OPS_TWIN_DB", str(tmp_path / "plans.sqlite"))
+    monkeypatch.delenv("OPS_TWIN_SAMPLE", raising=False)
+    import app.main as main
+
+    importlib.reload(main)
+    with TestClient(main.app) as bare:
+        answer = bare.get("/api/sample-plan")
+    assert answer.status_code == 200
+    assert answer.json()["ops"]["id"]
+
+
+def test_dictionaries_carry_heights(client: TestClient, document: dict) -> None:
+    """Высоты едут в справочнике: без них объёмный вид пришлось бы выдумывать на клиенте."""
+    answer = client.post("/api/dictionaries", json={"document": document})
+    types = {t["code"]: t for t in answer.json()["equipment_types"]}
+    assert types["cashier_window"]["height_m"] > 0
+    # Настенное табло висит над полом, напольная касса — нет.
+    assert types["info_display"]["mount_height_m"] > 1.0
+    assert types["cashier_window"]["mount_height_m"] == 0
+
+
 def test_rules_always_cite_a_source(client: TestClient) -> None:
     rules = client.get("/api/rules").json()
     assert rules

@@ -30,7 +30,22 @@ from app.rules.engine import ValidationReport, validate
 from app.storage import PlanStore
 
 DB_PATH = os.environ.get("OPS_TWIN_DB", "storage/plans.sqlite")
-SAMPLE_PLAN = Path(os.environ.get("OPS_TWIN_SAMPLE", "/app/samples/example_plan.json"))
+def _sample_plan_path() -> Path:
+    """Где лежит пример плана.
+
+    В контейнере он приезжает в /app/samples, при запуске из исходников — в data/ рядом с кодом.
+    Проверяющий поднимает сервис и так, и так, поэтому путь ищется, а не задаётся одним значением.
+    """
+    named = os.environ.get("OPS_TWIN_SAMPLE")
+    if named:
+        return Path(named)
+    packaged = Path("/app/samples/example_plan.json")
+    if packaged.exists():
+        return packaged
+    return Path(__file__).resolve().parents[3] / "data" / "example_plan.json"
+
+
+SAMPLE_PLAN = _sample_plan_path()
 
 app = FastAPI(
     title="Цифровой двойник отделения Почты России",

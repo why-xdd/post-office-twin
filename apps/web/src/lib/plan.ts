@@ -128,6 +128,8 @@ export interface EquipmentTypeDef {
   allowed_zones?: string[];
   capacity_persons?: number | null;
   operator_workplace?: boolean;
+  height_m?: number;
+  mount_height_m?: number;
   attribute_schema?: Record<string, string>;
 }
 
@@ -270,6 +272,9 @@ export interface EquipmentTypeInfo {
   capacity_persons?: number | null;
   /** У объекта есть место сотрудника: касса, стойка выдачи, рабочее место. */
   operator_workplace?: boolean;
+  /** Высота объекта и высота его низа над полом — для объёмного вида. */
+  height_m?: number;
+  mount_height_m?: number;
   attribute_schema: Record<string, string>;
 }
 

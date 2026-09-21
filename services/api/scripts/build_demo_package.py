@@ -178,7 +178,7 @@ def build(out: Path) -> dict[str, Any]:
         "",
         "В сервисе:",
         "",
-        "1. Открыть адрес сервиса (указан в README.md репозитория).",
+        "1. Открыть https://plan-ops.onrender.com (адрес также указан в README.md репозитория).",
         "2. На первом экране нажать «Загрузить свой план» и выбрать `plan_original.json` или `plan_after.json`.",
         "3. План откроется в редакторе с зонами, оборудованием, идентификаторами, атрибутами и паспортами "
         "объектов. «Сохранить версию» записывает его в хранилище; сохранённые планы открываются из списка на "
@@ -187,9 +187,9 @@ def build(out: Path) -> dict[str, Any]:
         "Через API:",
         "",
         "```bash",
-        "curl -X POST АДРЕС/api/plans -H 'Content-Type: application/json' \\",
+        "curl -X POST https://plan-ops.onrender.com/api/plans -H 'Content-Type: application/json' \\",
         "  -d \"{\\\"title\\\": \\\"Заречное\\\", \\\"document\\\": $(cat plan_original.json)}\"",
-        "curl АДРЕС/api/plans/ИДЕНТИФИКАТОР",
+        "curl https://plan-ops.onrender.com/api/plans/ИДЕНТИФИКАТОР",
         "```",
         "",
         "Исходный план — это тот же файл, что открывается кнопкой «Открыть пример» (`data/demo_plan.json` "

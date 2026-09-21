@@ -39,10 +39,10 @@ def _sample_plan_path() -> Path:
     named = os.environ.get("OPS_TWIN_SAMPLE")
     if named:
         return Path(named)
-    packaged = Path("/app/samples/example_plan.json")
+    packaged = Path("/app/samples/demo_plan.json")
     if packaged.exists():
         return packaged
-    return Path(__file__).resolve().parents[3] / "data" / "example_plan.json"
+    return Path(__file__).resolve().parents[3] / "data" / "demo_plan.json"
 
 
 SAMPLE_PLAN = _sample_plan_path()

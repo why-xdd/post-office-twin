@@ -1,0 +1,1333 @@
+{
+  "ops": {
+    "id": "ops_zarechnoe_demo",
+    "type": "city_medium",
+    "type_label": "Городское отделение",
+    "name": "Отделение «Заречное» (условное)",
+    "total_area_sqm": 126.25,
+    "bbox": {
+      "width_m": 15.0,
+      "height_m": 9.0
+    },
+    "scale": "1 unit = 1 meter",
+    "ceiling_height_m": 3.2
+  },
+  "walls": [
+    {
+      "id": "w_1",
+      "from": [
+        0,
+        2.5
+      ],
+      "to": [
+        3.5,
+        2.5
+      ],
+      "type": "outer"
+    },
+    {
+      "id": "w_2",
+      "from": [
+        3.5,
+        2.5
+      ],
+      "to": [
+        3.5,
+        0
+      ],
+      "type": "outer"
+    },
+    {
+      "id": "w_3",
+      "from": [
+        3.5,
+        0
+      ],
+      "to": [
+        15,
+        0
+      ],
+      "type": "outer"
+    },
+    {
+      "id": "w_4",
+      "from": [
+        15,
+        0
+      ],
+      "to": [
+        15,
+        9
+      ],
+      "type": "outer"
+    },
+    {
+      "id": "w_5",
+      "from": [
+        15,
+        9
+      ],
+      "to": [
+        0,
+        9
+      ],
+      "type": "outer"
+    },
+    {
+      "id": "w_6",
+      "from": [
+        0,
+        9
+      ],
+      "to": [
+        0,
+        2.5
+      ],
+      "type": "outer"
+    },
+    {
+      "id": "w_p1",
+      "from": [
+        10.5,
+        0
+      ],
+      "to": [
+        10.5,
+        9
+      ],
+      "type": "partition",
+      "label": "Перегородка операционного зала"
+    },
+    {
+      "id": "w_p2",
+      "from": [
+        10.5,
+        6
+      ],
+      "to": [
+        15,
+        6
+      ],
+      "type": "partition",
+      "label": "Перегородка помещения персонала"
+    }
+  ],
+  "doors": [
+    {
+      "id": "d_main",
+      "wall": [
+        5.2,
+        0,
+        6.8,
+        0
+      ],
+      "type": "entrance",
+      "width_m": 1.6,
+      "label": "Вход для посетителей"
+    },
+    {
+      "id": "d_service",
+      "wall": [
+        15,
+        1.0,
+        15,
+        2.0
+      ],
+      "type": "service",
+      "width_m": 1.0,
+      "label": "Служебный вход"
+    },
+    {
+      "id": "d_hall",
+      "wall": [
+        10.5,
+        8.0,
+        10.5,
+        8.9
+      ],
+      "type": "internal",
+      "width_m": 0.9,
+      "label": "Дверь в служебную зону"
+    },
+    {
+      "id": "d_staff",
+      "wall": [
+        11.0,
+        6,
+        11.9,
+        6
+      ],
+      "type": "internal",
+      "width_m": 0.9,
+      "label": "Дверь в комнату персонала"
+    }
+  ],
+  "windows": [
+    {
+      "id": "win_w",
+      "wall": [
+        0,
+        4.0,
+        0,
+        6.0
+      ],
+      "height_m": 1.4
+    },
+    {
+      "id": "win_n1",
+      "wall": [
+        1.5,
+        9,
+        3.5,
+        9
+      ],
+      "height_m": 1.4
+    },
+    {
+      "id": "win_n2",
+      "wall": [
+        7.5,
+        9,
+        9.5,
+        9
+      ],
+      "height_m": 1.4
+    },
+    {
+      "id": "win_e",
+      "wall": [
+        15,
+        3.5,
+        15,
+        5.0
+      ],
+      "height_m": 1.2
+    }
+  ],
+  "zones": [
+    {
+      "id": "z_hall",
+      "type": "client_area",
+      "label": "Операционный зал",
+      "polygon": [
+        [
+          0,
+          2.5
+        ],
+        [
+          3.5,
+          2.5
+        ],
+        [
+          3.5,
+          0
+        ],
+        [
+          10.5,
+          0
+        ],
+        [
+          10.5,
+          9
+        ],
+        [
+          0,
+          9
+        ]
+      ]
+    },
+    {
+      "id": "z_vestibule",
+      "type": "vestibule",
+      "label": "Тамбур",
+      "polygon": [
+        [
+          4.6,
+          0
+        ],
+        [
+          7.4,
+          0
+        ],
+        [
+          7.4,
+          1.6
+        ],
+        [
+          4.6,
+          1.6
+        ]
+      ]
+    },
+    {
+      "id": "z_waiting",
+      "type": "waiting",
+      "label": "Зона ожидания",
+      "polygon": [
+        [
+          0.3,
+          6.2
+        ],
+        [
+          4.8,
+          6.2
+        ],
+        [
+          4.8,
+          8.7
+        ],
+        [
+          0.3,
+          8.7
+        ]
+      ]
+    },
+    {
+      "id": "z_queue",
+      "type": "queue_accumulator",
+      "label": "Накопитель очереди к окнам",
+      "polygon": [
+        [
+          6.2,
+          1.8
+        ],
+        [
+          8.4,
+          1.8
+        ],
+        [
+          8.4,
+          7.8
+        ],
+        [
+          6.2,
+          7.8
+        ]
+      ]
+    },
+    {
+      "id": "z_back",
+      "type": "back_office",
+      "label": "Служебная зона",
+      "polygon": [
+        [
+          10.5,
+          0
+        ],
+        [
+          15,
+          0
+        ],
+        [
+          15,
+          6
+        ],
+        [
+          10.5,
+          6
+        ]
+      ]
+    },
+    {
+      "id": "z_staff",
+      "type": "staff_room",
+      "label": "Комната персонала",
+      "polygon": [
+        [
+          10.5,
+          6
+        ],
+        [
+          15,
+          6
+        ],
+        [
+          15,
+          9
+        ],
+        [
+          10.5,
+          9
+        ]
+      ]
+    }
+  ],
+  "equipment": [
+    {
+      "id": "eq_win_1",
+      "type": "cashier_window",
+      "label": "Окно №1",
+      "position": [
+        9.1,
+        2.2
+      ],
+      "size_m": [
+        1.2,
+        0.8
+      ],
+      "rotation_deg": 90,
+      "zone": "z_hall",
+      "operator_position": [
+        10.0,
+        2.2
+      ],
+      "attributes": {
+        "window_number": 1,
+        "services": "почтовые отправления, платежи",
+        "data_origin": "synthetic"
+      },
+      "inventory": {
+        "serial_number": "ЗР-ОК-0101",
+        "vendor": "Поставщик А",
+        "model": "Операционная касса ОК-2",
+        "last_inspection": "2026-06-16",
+        "next_inspection": "2026-12-16"
+      },
+      "staff": {
+        "full_name": "Смирнова Анна Викторовна",
+        "position": "Оператор связи",
+        "personnel_number": "40211",
+        "schedule": "2/2, 08:00–20:00",
+        "avg_service_time_min": 3.2
+      },
+      "integrations": {
+        "WFM": "",
+        "DPA": "",
+        "SOM": "",
+        "Портал": ""
+      }
+    },
+    {
+      "id": "eq_win_2",
+      "type": "cashier_window",
+      "label": "Окно №2",
+      "position": [
+        9.1,
+        4.6
+      ],
+      "size_m": [
+        1.2,
+        0.8
+      ],
+      "rotation_deg": 90,
+      "zone": "z_hall",
+      "operator_position": [
+        10.0,
+        4.6
+      ],
+      "attributes": {
+        "window_number": 2,
+        "services": "почтовые отправления, выдача пенсий",
+        "data_origin": "synthetic"
+      },
+      "inventory": {
+        "serial_number": "ЗР-ОК-0102",
+        "vendor": "Поставщик А",
+        "model": "Операционная касса ОК-2",
+        "last_inspection": "2026-06-16",
+        "next_inspection": "2026-12-16"
+      },
+      "staff": {
+        "full_name": "Корнилов Павел Андреевич",
+        "position": "Оператор связи",
+        "personnel_number": "40377",
+        "schedule": "5/2, 09:00–18:00",
+        "avg_service_time_min": 2.8
+      },
+      "integrations": {
+        "WFM": "",
+        "DPA": "",
+        "SOM": "",
+        "Портал": ""
+      }
+    },
+    {
+      "id": "eq_win_3",
+      "type": "cashier_window",
+      "label": "Окно №3",
+      "position": [
+        9.1,
+        7.0
+      ],
+      "size_m": [
+        1.2,
+        0.8
+      ],
+      "rotation_deg": 90,
+      "zone": "z_hall",
+      "operator_position": [
+        10.0,
+        7.0
+      ],
+      "attributes": {
+        "window_number": 3,
+        "services": "финансовые услуги, подписка",
+        "data_origin": "synthetic"
+      },
+      "inventory": {
+        "serial_number": "ЗР-ОК-0103",
+        "vendor": "Поставщик А",
+        "model": "Операционная касса ОК-2",
+        "last_inspection": "2025-09-02",
+        "next_inspection": "2026-03-02"
+      },
+      "staff": {
+        "full_name": "Лаптева Ольга Игоревна",
+        "position": "Оператор связи, финансовые услуги",
+        "personnel_number": "40415",
+        "schedule": "5/2, 10:00–19:00",
+        "avg_service_time_min": 4.1
+      },
+      "integrations": {
+        "WFM": "",
+        "DPA": "",
+        "SOM": "",
+        "Портал": ""
+      }
+    },
+    {
+      "id": "eq_pvz",
+      "type": "pvz_counter",
+      "label": "Стойка выдачи посылок",
+      "position": [
+        1.35,
+        4.3
+      ],
+      "size_m": [
+        2.0,
+        0.8
+      ],
+      "rotation_deg": 90,
+      "zone": "z_hall",
+      "operator_position": [
+        0.5,
+        4.3
+      ],
+      "attributes": {
+        "cells": 120,
+        "data_origin": "synthetic"
+      },
+      "inventory": {
+        "serial_number": "ЗР-ПВЗ-0201",
+        "vendor": "Поставщик А",
+        "model": "Стойка выдачи СВ-20",
+        "last_inspection": "2026-06-16",
+        "next_inspection": "2026-12-16"
+      },
+      "staff": {
+        "full_name": "Белова Ирина Сергеевна",
+        "position": "Оператор выдачи посылок",
+        "personnel_number": "40462",
+        "schedule": "2/2, 10:00–22:00",
+        "avg_service_time_min": 1.9
+      },
+      "integrations": {
+        "WFM": "",
+        "SOM": "",
+        "Портал": ""
+      }
+    },
+    {
+      "id": "eq_locker",
+      "type": "parcel_locker",
+      "label": "Почтомат",
+      "position": [
+        5.9,
+        8.6
+      ],
+      "size_m": [
+        1.8,
+        0.6
+      ],
+      "rotation_deg": 0,
+      "zone": "z_hall",
+      "attributes": {
+        "cells": 48,
+        "parcels_loaded": 31,
+        "data_origin": "synthetic"
+      },
+      "inventory": {
+        "serial_number": "ЗР-ПМ-0301",
+        "vendor": "Поставщик Е",
+        "model": "Почтомат ПМ-48",
+        "last_inspection": "2026-06-16",
+        "next_inspection": "2026-12-16"
+      },
+      "integrations": {
+        "Мониторинг": ""
+      }
+    },
+    {
+      "id": "eq_kiosk",
+      "type": "self_service_kiosk",
+      "label": "Терминал электронной очереди",
+      "position": [
+        6.6,
+        2.3
+      ],
+      "size_m": [
+        0.6,
+        0.6
+      ],
+      "rotation_deg": 0,
+      "zone": "z_queue",
+      "attributes": {
+        "ip_address": "10.20.14.21",
+        "usage_per_month": 3800,
+        "data_origin": "synthetic"
+      },
+      "inventory": {
+        "serial_number": "ЗР-ТЭ-0401",
+        "vendor": "Поставщик Б",
+        "model": "ТСО-500",
+        "last_inspection": "2026-03-16",
+        "next_inspection": "2026-09-16"
+      },
+      "integrations": {
+        "Мониторинг": "",
+        "RDP": "",
+        "Аналитика": ""
+      }
+    },
+    {
+      "id": "eq_bench_3",
+      "type": "waiting_seat",
+      "label": "Скамья у окон",
+      "position": [
+        7.7,
+        2.0
+      ],
+      "size_m": [
+        2.0,
+        0.5
+      ],
+      "rotation_deg": 90,
+      "zone": "z_queue",
+      "capacity_persons": 3
+    },
+    {
+      "id": "eq_bench_1",
+      "type": "waiting_seat",
+      "label": "Скамья ожидания 1",
+      "position": [
+        2.0,
+        6.8
+      ],
+      "size_m": [
+        2.0,
+        0.5
+      ],
+      "rotation_deg": 0,
+      "zone": "z_waiting",
+      "capacity_persons": 3
+    },
+    {
+      "id": "eq_bench_2",
+      "type": "waiting_seat",
+      "label": "Скамья ожидания 2",
+      "position": [
+        2.0,
+        8.3
+      ],
+      "size_m": [
+        2.0,
+        0.5
+      ],
+      "rotation_deg": 0,
+      "zone": "z_waiting",
+      "capacity_persons": 3
+    },
+    {
+      "id": "eq_atm",
+      "type": "atm",
+      "label": "Банкомат",
+      "position": [
+        7.9,
+        0.4
+      ],
+      "size_m": [
+        0.7,
+        0.5
+      ],
+      "rotation_deg": 0,
+      "zone": "z_hall",
+      "attributes": {
+        "data_origin": "synthetic"
+      },
+      "inventory": {
+        "serial_number": "ЗР-БМ-0501",
+        "vendor": "Банк-партнёр",
+        "model": "Банкомат ATM-8",
+        "last_inspection": "2026-04-05",
+        "next_inspection": "2026-10-05"
+      },
+      "integrations": {
+        "Мониторинг": ""
+      }
+    },
+    {
+      "id": "eq_pay",
+      "type": "payment_terminal_stand",
+      "label": "Стойка оплаты",
+      "position": [
+        4.3,
+        5.0
+      ],
+      "size_m": [
+        0.5,
+        0.5
+      ],
+      "rotation_deg": 0,
+      "zone": "z_hall",
+      "attributes": {
+        "data_origin": "synthetic"
+      },
+      "inventory": {
+        "serial_number": "ЗР-СО-0601",
+        "vendor": "Поставщик Б",
+        "model": "Стойка оплаты СО-1",
+        "last_inspection": "2026-06-16",
+        "next_inspection": "2026-12-16"
+      }
+    },
+    {
+      "id": "eq_display",
+      "type": "info_display",
+      "label": "Табло очереди",
+      "position": [
+        8.6,
+        8.9
+      ],
+      "size_m": [
+        1.1,
+        0.1
+      ],
+      "rotation_deg": 0,
+      "zone": "z_hall",
+      "attributes": {
+        "diagonal_inch": 55,
+        "data_origin": "synthetic"
+      },
+      "inventory": {
+        "serial_number": "ЗР-ТБ-0701",
+        "vendor": "Поставщик Д",
+        "model": "Табло ТО-55",
+        "last_inspection": "2026-06-16",
+        "next_inspection": "2026-12-16"
+      }
+    },
+    {
+      "id": "eq_info",
+      "type": "info_stand",
+      "label": "Информационный стенд",
+      "position": [
+        0.15,
+        7.6
+      ],
+      "size_m": [
+        1.0,
+        0.2
+      ],
+      "rotation_deg": 90,
+      "zone": "z_hall"
+    },
+    {
+      "id": "eq_trash",
+      "type": "trash_bin",
+      "label": "Урна у входа",
+      "position": [
+        3.8,
+        0.3
+      ],
+      "size_m": [
+        0.4,
+        0.4
+      ],
+      "rotation_deg": 0,
+      "zone": "z_hall"
+    },
+    {
+      "id": "eq_plant",
+      "type": "potted_plant",
+      "label": "Растение",
+      "position": [
+        4.4,
+        8.4
+      ],
+      "size_m": [
+        0.5,
+        0.5
+      ],
+      "rotation_deg": 0,
+      "zone": "z_waiting"
+    },
+    {
+      "id": "eq_rack_hall",
+      "type": "storage_rack",
+      "label": "Стеллаж возвратов",
+      "position": [
+        4.6,
+        3.6
+      ],
+      "size_m": [
+        2.0,
+        0.6
+      ],
+      "rotation_deg": 90,
+      "zone": "z_hall",
+      "attributes": {
+        "shelves": 5,
+        "data_origin": "synthetic"
+      },
+      "inventory": {
+        "serial_number": "ЗР-СТ-0801",
+        "vendor": "Поставщик Г",
+        "model": "СТ-2000",
+        "last_inspection": "2026-06-16",
+        "next_inspection": "2026-12-16"
+      }
+    },
+    {
+      "id": "eq_cam_1",
+      "type": "camera",
+      "label": "Камера зала",
+      "position": [
+        0.2,
+        8.8
+      ],
+      "size_m": [
+        0.2,
+        0.2
+      ],
+      "rotation_deg": 0,
+      "zone": "z_hall",
+      "attributes": {
+        "ip_address": "10.20.14.51",
+        "data_origin": "synthetic"
+      },
+      "inventory": {
+        "serial_number": "ЗР-КМ-0901",
+        "vendor": "Поставщик Ж",
+        "model": "Камера IP-2",
+        "last_inspection": "2026-06-16",
+        "next_inspection": "2026-12-16"
+      }
+    },
+    {
+      "id": "eq_cam_2",
+      "type": "camera",
+      "label": "Камера входа",
+      "position": [
+        10.3,
+        0.2
+      ],
+      "size_m": [
+        0.2,
+        0.2
+      ],
+      "rotation_deg": 0,
+      "zone": "z_hall",
+      "attributes": {
+        "ip_address": "10.20.14.52",
+        "data_origin": "synthetic"
+      },
+      "inventory": {
+        "serial_number": "ЗР-КМ-0902",
+        "vendor": "Поставщик Ж",
+        "model": "Камера IP-2",
+        "last_inspection": "2026-06-16",
+        "next_inspection": "2026-12-16"
+      }
+    },
+    {
+      "id": "eq_fire_1",
+      "type": "fire_alarm",
+      "label": "Извещатель зала",
+      "position": [
+        5.0,
+        4.5
+      ],
+      "size_m": [
+        0.2,
+        0.2
+      ],
+      "rotation_deg": 0,
+      "zone": "z_hall",
+      "attributes": {
+        "data_origin": "synthetic"
+      },
+      "inventory": {
+        "serial_number": "ЗР-ПС-1001",
+        "vendor": "Поставщик З",
+        "model": "ИП-212",
+        "last_inspection": "2026-01-20",
+        "next_inspection": "2027-01-20"
+      }
+    },
+    {
+      "id": "eq_rack_1",
+      "type": "storage_rack",
+      "label": "Стеллаж посылок",
+      "position": [
+        11.5,
+        0.4
+      ],
+      "size_m": [
+        2.0,
+        0.6
+      ],
+      "rotation_deg": 0,
+      "zone": "z_back",
+      "attributes": {
+        "shelves": 6,
+        "data_origin": "synthetic"
+      },
+      "inventory": {
+        "serial_number": "ЗР-СТ-0802",
+        "vendor": "Поставщик Г",
+        "model": "СТ-2000",
+        "last_inspection": "2026-06-16",
+        "next_inspection": "2026-12-16"
+      }
+    },
+    {
+      "id": "eq_rack_2",
+      "type": "storage_rack",
+      "label": "Стеллаж писем",
+      "position": [
+        13.8,
+        4.0
+      ],
+      "size_m": [
+        2.0,
+        0.6
+      ],
+      "rotation_deg": 0,
+      "zone": "z_back",
+      "attributes": {
+        "shelves": 6,
+        "data_origin": "synthetic"
+      },
+      "inventory": {
+        "serial_number": "ЗР-СТ-0803",
+        "vendor": "Поставщик Г",
+        "model": "СТ-2000",
+        "last_inspection": "2026-06-16",
+        "next_inspection": "2026-12-16"
+      }
+    },
+    {
+      "id": "eq_safe",
+      "type": "safe",
+      "label": "Сейф",
+      "position": [
+        14.4,
+        4.0
+      ],
+      "size_m": [
+        0.6,
+        0.6
+      ],
+      "rotation_deg": 0,
+      "zone": "z_back",
+      "attributes": {
+        "data_origin": "synthetic"
+      },
+      "inventory": {
+        "serial_number": "ЗР-СФ-1101",
+        "vendor": "Поставщик В",
+        "model": "Сейф С-90",
+        "last_inspection": "2025-12-01",
+        "next_inspection": "2026-12-01"
+      }
+    },
+    {
+      "id": "eq_wp_1",
+      "type": "back_office_workplace",
+      "label": "Рабочее место приёма РПО",
+      "position": [
+        12.0,
+        2.5
+      ],
+      "size_m": [
+        1.2,
+        0.8
+      ],
+      "rotation_deg": 0,
+      "zone": "z_back",
+      "attributes": {
+        "computer": "АРМ-14",
+        "data_origin": "synthetic"
+      },
+      "inventory": {
+        "serial_number": "ЗР-АРМ-1201",
+        "vendor": "Поставщик А",
+        "model": "АРМ-П",
+        "last_inspection": "2026-06-16",
+        "next_inspection": "2026-12-16"
+      },
+      "staff": {
+        "full_name": "Гусев Николай Петрович",
+        "position": "Сортировщик",
+        "personnel_number": "40533",
+        "schedule": "5/2, 07:00–16:00"
+      },
+      "integrations": {
+        "WFM": "",
+        "Портал": ""
+      }
+    },
+    {
+      "id": "eq_printer",
+      "type": "printer",
+      "label": "МФУ",
+      "position": [
+        12.4,
+        2.6
+      ],
+      "size_m": [
+        0.5,
+        0.4
+      ],
+      "rotation_deg": 0,
+      "zone": "z_back",
+      "attributes": {
+        "vendor": "Поставщик А",
+        "model": "МФУ-40",
+        "data_origin": "synthetic"
+      },
+      "inventory": {
+        "serial_number": "ЗР-ПР-1301",
+        "vendor": "Поставщик А",
+        "model": "МФУ-40",
+        "last_inspection": "2026-06-16",
+        "next_inspection": "2026-12-16"
+      }
+    },
+    {
+      "id": "eq_label",
+      "type": "label_printer",
+      "label": "Принтер этикеток",
+      "position": [
+        11.7,
+        2.6
+      ],
+      "size_m": [
+        0.25,
+        0.2
+      ],
+      "rotation_deg": 0,
+      "zone": "z_back",
+      "attributes": {
+        "data_origin": "synthetic"
+      },
+      "inventory": {
+        "serial_number": "ЗР-ПЭ-1401",
+        "vendor": "Поставщик Д",
+        "model": "ПЭ-4",
+        "last_inspection": "2026-06-16",
+        "next_inspection": "2026-12-16"
+      }
+    },
+    {
+      "id": "eq_scale",
+      "type": "weighing_station",
+      "label": "Весы",
+      "position": [
+        12.9,
+        5.4
+      ],
+      "size_m": [
+        0.6,
+        0.6
+      ],
+      "rotation_deg": 0,
+      "zone": "z_back",
+      "attributes": {
+        "data_origin": "synthetic"
+      },
+      "inventory": {
+        "serial_number": "ЗР-ВС-1501",
+        "vendor": "Поставщик В",
+        "model": "Весы ВП-60",
+        "last_inspection": "2026-06-10",
+        "next_inspection": "2027-06-10"
+      }
+    },
+    {
+      "id": "eq_sort",
+      "type": "sorting_table",
+      "label": "Стол сортировки",
+      "position": [
+        14.1,
+        5.3
+      ],
+      "size_m": [
+        1.6,
+        0.8
+      ],
+      "rotation_deg": 0,
+      "zone": "z_back",
+      "attributes": {
+        "data_origin": "synthetic"
+      },
+      "inventory": {
+        "serial_number": "ЗР-СС-1601",
+        "vendor": "Поставщик Г",
+        "model": "СС-1600"
+      }
+    },
+    {
+      "id": "eq_cam_3",
+      "type": "camera",
+      "label": "Камера служебной зоны",
+      "position": [
+        14.8,
+        5.8
+      ],
+      "size_m": [
+        0.2,
+        0.2
+      ],
+      "rotation_deg": 0,
+      "zone": "z_back",
+      "attributes": {
+        "ip_address": "10.20.14.53",
+        "data_origin": "synthetic"
+      },
+      "inventory": {
+        "serial_number": "ЗР-КМ-0903",
+        "vendor": "Поставщик Ж",
+        "model": "Камера IP-2",
+        "last_inspection": "2026-06-16",
+        "next_inspection": "2026-12-16"
+      }
+    },
+    {
+      "id": "eq_sec",
+      "type": "security_alarm",
+      "label": "Охранная сигнализация",
+      "position": [
+        14.8,
+        2.4
+      ],
+      "size_m": [
+        0.3,
+        0.2
+      ],
+      "rotation_deg": 0,
+      "zone": "z_back",
+      "attributes": {
+        "data_origin": "synthetic"
+      },
+      "inventory": {
+        "serial_number": "ЗР-ОС-1701",
+        "vendor": "Поставщик З",
+        "model": "Прибор ОС-8",
+        "last_inspection": "2026-06-16",
+        "next_inspection": "2026-12-16"
+      }
+    },
+    {
+      "id": "eq_fire_2",
+      "type": "fire_alarm",
+      "label": "Извещатель служебной зоны",
+      "position": [
+        12.7,
+        3.2
+      ],
+      "size_m": [
+        0.2,
+        0.2
+      ],
+      "rotation_deg": 0,
+      "zone": "z_back",
+      "attributes": {
+        "data_origin": "synthetic"
+      },
+      "inventory": {
+        "serial_number": "ЗР-ПС-1002",
+        "vendor": "Поставщик З",
+        "model": "ИП-212",
+        "last_inspection": "2026-01-20",
+        "next_inspection": "2027-01-20"
+      }
+    },
+    {
+      "id": "eq_wp_2",
+      "type": "back_office_workplace",
+      "label": "Рабочее место начальника",
+      "position": [
+        13.8,
+        8.3
+      ],
+      "size_m": [
+        1.2,
+        0.8
+      ],
+      "rotation_deg": 0,
+      "zone": "z_staff",
+      "attributes": {
+        "computer": "АРМ-15",
+        "data_origin": "synthetic"
+      },
+      "inventory": {
+        "serial_number": "ЗР-АРМ-1202",
+        "vendor": "Поставщик А",
+        "model": "АРМ-П",
+        "last_inspection": "2026-06-16",
+        "next_inspection": "2026-12-16"
+      },
+      "staff": {
+        "full_name": "Тихонов Дмитрий Олегович",
+        "position": "Начальник отделения",
+        "personnel_number": "40018",
+        "schedule": "5/2, 08:30–17:30"
+      },
+      "integrations": {
+        "WFM": "",
+        "Портал": ""
+      }
+    },
+    {
+      "id": "eq_trash_2",
+      "type": "trash_bin",
+      "label": "Урна",
+      "position": [
+        14.6,
+        6.4
+      ],
+      "size_m": [
+        0.4,
+        0.4
+      ],
+      "rotation_deg": 0,
+      "zone": "z_staff"
+    },
+    {
+      "id": "eq_fire_3",
+      "type": "fire_alarm",
+      "label": "Извещатель комнаты персонала",
+      "position": [
+        12.7,
+        7.5
+      ],
+      "size_m": [
+        0.2,
+        0.2
+      ],
+      "rotation_deg": 0,
+      "zone": "z_staff",
+      "attributes": {
+        "data_origin": "synthetic"
+      },
+      "inventory": {
+        "serial_number": "ЗР-ПС-1003",
+        "vendor": "Поставщик З",
+        "model": "ИП-212",
+        "last_inspection": "2026-01-20",
+        "next_inspection": "2027-01-20"
+      }
+    }
+  ],
+  "dictionaries": {
+    "equipment_types": [
+      {
+        "code": "sorting_table",
+        "label": "Стол сортировки РПО",
+        "group": "Служебная зона",
+        "default_size_m": [
+          1.6,
+          0.8
+        ],
+        "floor_object": true,
+        "allowed_zones": [
+          "back_office"
+        ],
+        "attribute_schema": {
+          "serial_number": "string"
+        },
+        "height_m": 0.9
+      }
+    ]
+  },
+  "flow_hints": {
+    "main_entrance": "d_main",
+    "typical_paths": [
+      {
+        "label": "К окнам обслуживания",
+        "waypoints": [
+          [
+            6.0,
+            0.3
+          ],
+          [
+            6.0,
+            3.4
+          ],
+          [
+            8.0,
+            4.6
+          ]
+        ],
+        "frequency_share": 0.55
+      },
+      {
+        "label": "В пункт выдачи посылок",
+        "waypoints": [
+          [
+            6.0,
+            0.3
+          ],
+          [
+            4.0,
+            3.2
+          ],
+          [
+            2.3,
+            4.6
+          ]
+        ],
+        "frequency_share": 0.25
+      },
+      {
+        "label": "К почтомату",
+        "waypoints": [
+          [
+            6.0,
+            0.3
+          ],
+          [
+            5.6,
+            4.0
+          ],
+          [
+            5.9,
+            7.9
+          ]
+        ],
+        "frequency_share": 0.12
+      },
+      {
+        "label": "К терминалу очереди",
+        "waypoints": [
+          [
+            6.0,
+            0.3
+          ],
+          [
+            6.4,
+            1.8
+          ]
+        ],
+        "frequency_share": 0.08
+      }
+    ],
+    "typical_visit_duration_min": 12,
+    "peak_hours_local": [
+      "12:00-14:00",
+      "17:00-19:00"
+    ],
+    "avg_daily_visitors": 420
+  }
+}

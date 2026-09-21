@@ -27,11 +27,11 @@ RUN uv sync --frozen --no-dev --no-install-project
 
 COPY services/api/app ./app
 COPY --from=web /web/dist ./web
-COPY data/example_plan.json ./samples/example_plan.json
+COPY data/demo_plan.json ./samples/demo_plan.json
 
 ENV PATH="/app/.venv/bin:$PATH" \
     OPS_TWIN_DB=/app/storage/plans.sqlite \
-    OPS_TWIN_SAMPLE=/app/samples/example_plan.json \
+    OPS_TWIN_SAMPLE=/app/samples/demo_plan.json \
     OPS_TWIN_WEB=/app/web \
     PORT=8000
 

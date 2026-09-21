@@ -367,6 +367,7 @@
       ],
       "rotation_deg": 90,
       "zone": "z_hall",
+      "counter_height_m": 0.8,
       "operator_position": [
         10.0,
         2.2
@@ -411,6 +412,7 @@
       ],
       "rotation_deg": 90,
       "zone": "z_hall",
+      "counter_height_m": 0.8,
       "operator_position": [
         10.0,
         4.6
@@ -455,6 +457,7 @@
       ],
       "rotation_deg": 90,
       "zone": "z_hall",
+      "counter_height_m": 0.8,
       "operator_position": [
         10.0,
         7.0

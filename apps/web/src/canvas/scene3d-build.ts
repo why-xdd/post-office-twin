@@ -23,6 +23,7 @@ const COLOR = {
   equipment: 0xf7f4ea,
   operator: 0xa9b1b1,
   violation: 0x9e3119,
+  caution: 0xb8862c,
   route: 0x2c5a74,
   figure: 0x5e6b6e,
   wheelchair: 0x845a08,
@@ -63,7 +64,9 @@ function prismMesh(prism: Prism, quality: Quality): THREE.Mesh {
   const geometry = new THREE.BoxGeometry(prism.size[0], prism.height, prism.size[1]);
   const colour = prism.violation
     ? COLOR.violation
-    : prism.kind === 'equipment'
+    : prism.caution
+      ? COLOR.caution
+      : prism.kind === 'equipment'
       ? COLOR.equipment
       : prism.kind === 'operator'
         ? COLOR.operator

@@ -32,6 +32,7 @@ import { outlinePoints } from '../lib/planFacts';
 import { defaultOperatorPosition, transformInPlace } from '../lib/equipmentOps';
 import { MIN_WALL_M, addOpening, moveWall, replaceOutline, wallAxis, wallLength } from '../lib/wallEdit';
 import { OUTER_WALL_M, PARTITION_M, fitsRoom, hostWall, isOuter, offsetOutline, outwardNormal, placeInRoom } from '../lib/room';
+import { zoneLabelPoints } from '../lib/zoneLabels';
 import { useWorkspace } from '../state/store';
 import { glyphFor } from './glyphs';
 import './canvas.css';
@@ -524,6 +525,13 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
 
   const outline = useMemo(() => (doc ? outlinePoints(doc) : null), [doc]);
   const interior = useMemo<Point | null>(() => (outline ? polygonCentroid(outline) : null), [outline]);
+  // Во время перетаскивания подписи зон не двигаются: точки считаются по плану до начала жеста.
+  const transientBase = useWorkspace((s) => s.transientBase);
+  const labelSource = transientBase ?? doc;
+  const labelPoints = useMemo(
+    () => (labelSource ? zoneLabelPoints(labelSource) : new Map<string, Point>()),
+    [labelSource],
+  );
 
   if (!doc) return <div ref={container} className="plan-canvas" />;
 
@@ -762,7 +770,7 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
         {layers.zones &&
           labelsVisible &&
           (doc.zones ?? []).map((zone) => {
-            const [lx, ly] = toScreen(view, polygonCentroid(zone.polygon));
+            const [lx, ly] = toScreen(view, labelPoints.get(zone.id) ?? polygonCentroid(zone.polygon));
             return (
               <g key={`label-${zone.id}`} className="plan-zone-label" transform={`translate(${lx} ${ly})`}>
                 {addressesVisible && (

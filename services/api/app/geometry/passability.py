@@ -68,11 +68,16 @@ def _wall_obstacle(plan: Plan, wall_id: str) -> Polygon | None:
     return band
 
 
-def _component_containing(space: Polygon | MultiPolygon, probe: Point) -> Polygon | None:
+def _component_index(space: Polygon | MultiPolygon, probe: Point) -> int | None:
+    """Номер связной части свободной области, в которой лежит точка.
+
+    Сравнивать части по номеру, а не по геометрии: равенство многоугольников на плане в сотни
+    объектов стоит дороже всего остального расчёта маршрута.
+    """
     parts = list(space.geoms) if isinstance(space, MultiPolygon) else [space]
-    for part in parts:
+    for index, part in enumerate(parts):
         if part.distance(probe) < 1e-6:
-            return part
+            return index
     return None
 
 
@@ -96,9 +101,8 @@ def _connected(space: Polygon | MultiPolygon, a: Point, b: Point, radius: float)
     first_pos, second_pos = _reach(space, a, radius), _reach(space, b, radius)
     if first_pos is None or second_pos is None:
         return False
-    first = _component_containing(space, first_pos)
-    second = _component_containing(space, second_pos)
-    return first is not None and second is not None and first.equals(second)
+    first = _component_index(space, first_pos)
+    return first is not None and first == _component_index(space, second_pos)
 
 
 def _eroded(space: Polygon | MultiPolygon, width: float) -> Polygon | MultiPolygon:

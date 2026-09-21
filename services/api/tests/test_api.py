@@ -38,9 +38,9 @@ def test_health(client: TestClient) -> None:
 
 
 def test_sample_plan_opens_without_any_configuration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Проверяющий поднимает сервис из исходников: пример обязан открыться без переменных среды.
+    """При запуске из исходников пример открывается без переменных среды.
 
-    Прежде путь к примеру был задан под контейнер, и вне Docker кнопка «Открыть пример» молчала.
+    Раньше путь был задан под контейнер, и вне Docker кнопка «Открыть пример» не работала.
     """
     monkeypatch.setenv("OPS_TWIN_DB", str(tmp_path / "plans.sqlite"))
     monkeypatch.delenv("OPS_TWIN_SAMPLE", raising=False)

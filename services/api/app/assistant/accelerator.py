@@ -125,7 +125,7 @@ class Model:
         return self.quality.value(self.row(features)) if self.quality is not None else 0.0
 
     def explain(self) -> list[tuple[str, float]]:
-        """Признаки по убыванию влияния — для README и разговора с проверяющим."""
+        """Признаки по убыванию влияния."""
         return sorted(self.importance.items(), key=lambda item: -item[1])
 
 

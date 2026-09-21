@@ -10,10 +10,9 @@ app/assistant/accelerator.py. Экспорт сверяется с обучен�
 машинным нулём.
 
 Запуск из services/api:
-    uv run python scripts/train_accelerator.py --plans ../../data/example_plan.json --synthetic 40
+    uv run python scripts/train_accelerator.py --plans ../../data/example_plan.json --synthetic 180 --per-type 200
 
-Реальные планы БТИ правилами хакатона запрещены, поэтому разнообразие даёт генератор
-синтетических отделений.
+Реальные планы БТИ не используются, разнообразие даёт генератор синтетических отделений.
 """
 
 from __future__ import annotations

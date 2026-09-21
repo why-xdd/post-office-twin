@@ -19,7 +19,7 @@ def plan() -> Plan:
 
 
 def test_model_is_shipped_and_reports_its_quality() -> None:
-    """Модель едет вместе с сервисом и честно сообщает, на чём и с каким качеством обучена."""
+    """Модель поставляется вместе с сервисом и хранит, на чём и с каким качеством обучена."""
     accelerator.reset()
     model = accelerator.load()
     assert model is not None, "файл модели должен поставляться вместе с сервисом"

@@ -94,7 +94,7 @@ export function Plan3D({ types }: Props) {
 
   const scene = useMemo(() => (doc ? buildScene(doc, types, report) : null), [doc, types, report]);
 
-  /** Ракурс: камера перелетает плавно, чтобы на защите не терялась ориентация. */
+  /** Ракурс: камера перелетает плавно, чтобы не терялась ориентация в помещении. */
   const flyTo = (shot: Shot, instant = false) => {
     const parts = engine.current;
     if (!parts || !scene || !parts.sphere) return;

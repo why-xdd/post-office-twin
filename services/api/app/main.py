@@ -33,8 +33,8 @@ DB_PATH = os.environ.get("OPS_TWIN_DB", "storage/plans.sqlite")
 def _sample_plan_path() -> Path:
     """Где лежит пример плана.
 
-    В контейнере он приезжает в /app/samples, при запуске из исходников — в data/ рядом с кодом.
-    Проверяющий поднимает сервис и так, и так, поэтому путь ищется, а не задаётся одним значением.
+    В контейнере он лежит в /app/samples, при запуске из исходников — в data/ в корне проекта.
+    Переменная OPS_TWIN_SAMPLE задаёт путь явно.
     """
     named = os.environ.get("OPS_TWIN_SAMPLE")
     if named:

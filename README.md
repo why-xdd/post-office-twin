@@ -21,17 +21,31 @@ React, TypeScript, Vite, three.js на клиенте. Python 3.12, FastAPI, sha
 ## Запуск
 
 ```bash
-docker compose up -d
+docker compose up -d --build
 ```
 
-Клиент — http://localhost:5173, API — http://localhost:8000, документация API — `/docs`.
+Сервис откроется на http://localhost:8000: сайт, API и документация API (`/docs`) — с одного
+адреса. Планы хранятся в томе `plan-data` и переживают перезапуск контейнера.
 
-Для разработки без Docker:
+Без Docker, для разработки:
 
 ```bash
-cd apps/web && npm install && npm run dev
-cd services/api && uv sync && uv run uvicorn app.main:app --reload
+cd services/api && uv sync && uv run uvicorn app.main:app --reload   # API на :8000
+cd apps/web && npm install && npm run dev                           # клиент на :5173
 ```
+
+Если клиент собран (`npm run build`), API отдаёт его сам, и отдельный сервер для клиента не
+нужен.
+
+Хранилище выбирается переменной `DATABASE_URL`: если она задана, планы лежат в PostgreSQL, иначе —
+в файле SQLite (`OPS_TWIN_DB`, по умолчанию `storage/plans.sqlite`). Все переменные — в
+`.env.example`.
+
+### Развёртывание
+
+`render.yaml` описывает развёртывание на Render: веб-служба из корневого `Dockerfile` и база
+PostgreSQL. В панели Render: New → Blueprint → репозиторий. `/health` используется как проверка
+готовности.
 
 ## Данные
 

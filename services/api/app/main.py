@@ -27,7 +27,7 @@ from app.importer import build as importer
 from app.models import Plan, duplicate_ids
 from app.rules.catalog import DEFAULT_RULES, Rule, rules_by_id
 from app.rules.engine import ValidationReport, validate
-from app.storage import PlanStore
+from app.storage import open_store
 
 DB_PATH = os.environ.get("OPS_TWIN_DB", "storage/plans.sqlite")
 def _sample_plan_path() -> Path:
@@ -91,7 +91,7 @@ async def trace_and_limit(request: Request, call_next):
     return response
 
 
-store = PlanStore(DB_PATH)
+store = open_store(os.environ.get("DATABASE_URL"), DB_PATH)
 
 
 class CreatePlanRequest(BaseModel):
@@ -393,3 +393,28 @@ def assistant_place(payload: PlaceRequest) -> Recommendation:
         raise HTTPException(status_code=422, detail=f"Зона «{payload.zone_id}» на плане не найдена.")
     with heavy_slot("поиск места"):
         return recommend.place_equipment(plan, payload.equipment_type, payload.zone_id)
+
+
+def _web_dir() -> Path | None:
+    """Собранный клиент, если он есть рядом: тогда сервис отдаёт и сайт, и API с одного адреса.
+
+    OPS_TWIN_WEB задаёт каталог явно; иначе ищется /app/web (образ) и apps/web/dist (исходники).
+    Без собранного клиента сервис работает как чистый API — так он запускается в разработке.
+    """
+    named = os.environ.get("OPS_TWIN_WEB")
+    candidates = [Path(named)] if named else [
+        Path("/app/web"),
+        Path(__file__).resolve().parents[3] / "apps" / "web" / "dist",
+    ]
+    for candidate in candidates:
+        if (candidate / "index.html").is_file():
+            return candidate
+    return None
+
+
+WEB_DIR = _web_dir()
+if WEB_DIR is not None:
+    from fastapi.staticfiles import StaticFiles
+
+    # Монтируется последним: маршруты API и /health объявлены выше и имеют приоритет.
+    app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")

@@ -139,3 +139,192 @@ class PlanStore:
             cur = conn.execute("DELETE FROM plans WHERE id = ?", (plan_id,))
             if cur.rowcount == 0:
                 raise KeyError(plan_id)
+
+
+PG_SCHEMA = (
+    """
+    CREATE TABLE IF NOT EXISTS plans (
+        id          TEXT PRIMARY KEY,
+        title       TEXT NOT NULL,
+        created_at  TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS versions (
+        plan_id     TEXT NOT NULL REFERENCES plans(id) ON DELETE CASCADE,
+        version     INTEGER NOT NULL,
+        document    TEXT NOT NULL,
+        note        TEXT NOT NULL DEFAULT '',
+        created_at  TEXT NOT NULL,
+        PRIMARY KEY (plan_id, version)
+    )
+    """,
+)
+
+
+class PostgresPlanStore:
+    """Хранилище планов в PostgreSQL — для развёртывания, где диск не переживает перезапуск.
+
+    Интерфейс тот же, что у PlanStore. Документ хранится текстом, как пришёл, а не в JSONB:
+    JSONB переставляет ключи, и сохранённый план открывался бы не в том виде, в каком его
+    сохранили. Номер новой версии выдаётся под блокировкой строки плана, поэтому два
+    одновременных сохранения из разных процессов не получат один и тот же номер.
+    """
+
+    def __init__(self, url: str) -> None:
+        from urllib.parse import parse_qs, unquote, urlsplit
+
+        parts = urlsplit(url)
+        if parts.scheme not in {"postgres", "postgresql"}:
+            raise ValueError(f"Ожидался адрес postgres://, получен {parts.scheme}://")
+        query = parse_qs(parts.query)
+        self._params: dict[str, Any] = {
+            "user": unquote(parts.username or ""),
+            "password": unquote(parts.password or "") or None,
+            "host": parts.hostname or "localhost",
+            "port": parts.port or 5432,
+            "database": (parts.path or "/").lstrip("/") or "postgres",
+            "timeout": BUSY_TIMEOUT_S,
+        }
+        socket_dir = query.get("host", [None])[0]
+        if socket_dir and socket_dir.startswith("/"):
+            self._params["unix_sock"] = f"{socket_dir}/.s.PGSQL.{self._params['port']}"
+            self._params.pop("host")
+        elif query.get("sslmode", [""])[0] in {"require", "verify-ca", "verify-full"}:
+            import ssl
+
+            self._params["ssl_context"] = ssl.create_default_context()
+        self._write_lock = threading.Lock()
+        conn = self._connect()
+        try:
+            for statement in PG_SCHEMA:
+                conn.run(statement)
+        finally:
+            conn.close()
+
+    def _connect(self):
+        import pg8000.native
+
+        return pg8000.native.Connection(**self._params)
+
+    @staticmethod
+    def _rows(conn, sql: str, **params: Any) -> list[dict[str, Any]]:
+        rows = conn.run(sql, **params) or []
+        names = [column["name"] for column in (conn.columns or [])]
+        return [dict(zip(names, row)) for row in rows]
+
+    def _transaction(self, work):
+        """Выполняет работу в одной транзакции: либо всё, либо ничего."""
+        conn = self._connect()
+        try:
+            conn.run("START TRANSACTION")
+            try:
+                result = work(conn)
+            except BaseException:
+                conn.run("ROLLBACK")
+                raise
+            conn.run("COMMIT")
+            return result
+        finally:
+            conn.close()
+
+    def create(self, title: str, document: dict[str, Any], note: str = "") -> tuple[str, int]:
+        plan_id = uuid.uuid4().hex
+
+        def work(conn) -> None:
+            conn.run("INSERT INTO plans (id, title, created_at) VALUES (:id, :title, :at)", id=plan_id, title=title, at=_now())
+            conn.run(
+                "INSERT INTO versions (plan_id, version, document, note, created_at) "
+                "VALUES (:id, 1, :doc, :note, :at)",
+                id=plan_id,
+                doc=json.dumps(document, ensure_ascii=False),
+                note=note,
+                at=_now(),
+            )
+
+        with self._write_lock:
+            self._transaction(work)
+        return plan_id, 1
+
+    def save_version(
+        self, plan_id: str, document: dict[str, Any], note: str = "", title: str | None = None
+    ) -> int:
+        def work(conn) -> int:
+            if not conn.run("SELECT 1 FROM plans WHERE id = :id FOR UPDATE", id=plan_id):
+                raise KeyError(plan_id)
+            current = conn.run("SELECT COALESCE(MAX(version), 0) FROM versions WHERE plan_id = :id", id=plan_id)
+            version = int(current[0][0]) + 1
+            conn.run(
+                "INSERT INTO versions (plan_id, version, document, note, created_at) "
+                "VALUES (:id, :v, :doc, :note, :at)",
+                id=plan_id,
+                v=version,
+                doc=json.dumps(document, ensure_ascii=False),
+                note=note,
+                at=_now(),
+            )
+            if title:
+                conn.run("UPDATE plans SET title = :title WHERE id = :id", title=title, id=plan_id)
+            return version
+
+        with self._write_lock:
+            return self._transaction(work)
+
+    def get(self, plan_id: str, version: int | None = None) -> dict[str, Any]:
+        conn = self._connect()
+        try:
+            if version is None:
+                rows = conn.run(
+                    "SELECT document FROM versions WHERE plan_id = :id ORDER BY version DESC LIMIT 1", id=plan_id
+                )
+            else:
+                rows = conn.run(
+                    "SELECT document FROM versions WHERE plan_id = :id AND version = :v", id=plan_id, v=version
+                )
+        finally:
+            conn.close()
+        if not rows:
+            raise KeyError(plan_id)
+        return json.loads(rows[0][0])
+
+    def list_plans(self) -> list[dict[str, Any]]:
+        conn = self._connect()
+        try:
+            return self._rows(
+                conn,
+                "SELECT p.id, p.title, p.created_at, MAX(v.version) AS versions "
+                "FROM plans p JOIN versions v ON v.plan_id = p.id "
+                "GROUP BY p.id ORDER BY p.created_at DESC",
+            )
+        finally:
+            conn.close()
+
+    def list_versions(self, plan_id: str) -> list[dict[str, Any]]:
+        conn = self._connect()
+        try:
+            rows = self._rows(
+                conn,
+                "SELECT version, note, created_at FROM versions WHERE plan_id = :id ORDER BY version",
+                id=plan_id,
+            )
+        finally:
+            conn.close()
+        if not rows:
+            raise KeyError(plan_id)
+        return rows
+
+    def delete(self, plan_id: str) -> None:
+        def work(conn) -> None:
+            conn.run("DELETE FROM plans WHERE id = :id", id=plan_id)
+            if conn.row_count == 0:
+                raise KeyError(plan_id)
+
+        with self._write_lock:
+            self._transaction(work)
+
+
+def open_store(database_url: str | None, sqlite_path: str | Path) -> PlanStore | PostgresPlanStore:
+    """Хранилище по настройке: адрес PostgreSQL, если задан, иначе файл SQLite."""
+    if database_url:
+        return PostgresPlanStore(database_url)
+    return PlanStore(sqlite_path)

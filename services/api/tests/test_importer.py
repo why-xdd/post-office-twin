@@ -98,7 +98,7 @@ def test_import_endpoint_returns_a_draft(client_and_drawing) -> None:
     response = client.post(
         "/api/import/drawing",
         files={"file": ("plan.png", drawing_bytes, "image/png")},
-        data={"real_width_m": "12", "name": "С чертежа", "read_labels": "false"},
+        data={"real_width_m": "12", "name": "С чертежа"},
     )
     assert response.status_code == 200, response.text
     body = response.json()

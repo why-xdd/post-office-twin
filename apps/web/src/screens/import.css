@@ -55,11 +55,6 @@
   text-align: right;
 }
 
-.import__source {
-  color: var(--ink-3);
-  font-size: var(--text-12);
-}
-
 .import__image {
   display: block;
   width: 100%;

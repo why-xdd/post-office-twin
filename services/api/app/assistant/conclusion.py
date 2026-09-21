@@ -1,9 +1,8 @@
 """Заключение по плану — текст для сдачи заказчику.
 
 Сначала собираются факты: что за отделение, что нашла проверка, что предлагает ассистент и
-каким будет эффект. По этим фактам всегда строится текст по шаблону — он не зависит ни от
-какой модели и всегда одинаков для одного и того же плана. Если подключена языковая модель,
-она пересказывает те же факты связно; числа ей передаются готовыми, придумывать нечего.
+каким будет эффект. По этим фактам строится текст по шаблону, поэтому для одного и того же
+плана он всегда одинаков, а каждое число в нём можно проверить.
 """
 
 from __future__ import annotations
@@ -13,7 +12,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from app.assistant import llm, objective, recommend
+from app.assistant import objective, recommend
 from app.geometry import core
 from app.models import Plan
 from app.rules.engine import Severity, validate
@@ -21,7 +20,6 @@ from app.rules.engine import Severity, validate
 
 class Conclusion(BaseModel):
     text: str = Field(description="Готовый текст заключения")
-    source: str = Field(description="Чем составлен текст: шаблон или языковая модель")
     facts: dict[str, Any] = Field(description="Числа, на которых построен текст")
 
 
@@ -128,12 +126,7 @@ def from_template(data: dict[str, Any]) -> str:
     return _human(" ".join(lines))
 
 
-def build(plan: Plan, use_model: bool = True) -> Conclusion:
-    """Заключение: шаблон всегда, пересказ моделью — если она подключена."""
+def build(plan: Plan) -> Conclusion:
+    """Заключение по плану: факты и текст по ним."""
     data = facts(plan)
-    text = from_template(data)
-    if use_model:
-        written = llm.conclusion(data)
-        if written:
-            return Conclusion(text=written, source="языковая модель по посчитанным числам", facts=data)
-    return Conclusion(text=text, source="шаблон по посчитанным числам", facts=data)
+    return Conclusion(text=from_template(data), facts=data)

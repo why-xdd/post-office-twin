@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field, ValidationError
 from app.assistant import capacity as capacity_model
 from app.cache import assistant_cache, fingerprint, validation_cache
 from app.concurrency import heavy_slot
-from app.assistant import conclusion, llm, recommend
+from app.assistant import conclusion, recommend
 from app.assistant.capacity import CapacityReport
 from app.assistant.recommend import AssistantReport, ImprovementReport, Recommendation
 from app.dictionaries import equipment_types, zone_types
@@ -342,12 +342,12 @@ def assistant_command(payload: CommandRequest) -> recommend.CommandResult:
 
 
 @app.post("/api/assistant/conclusion", response_model=conclusion.Conclusion, summary="Заключение по плану")
-def assistant_conclusion(payload: SaveVersionRequest, use_model: bool = True) -> conclusion.Conclusion:
+def assistant_conclusion(payload: SaveVersionRequest) -> conclusion.Conclusion:
     """Текст для сдачи: что проверено, что нарушено, что предлагается и каким будет эффект."""
     plan = _parse_plan(payload.document)
-    key = fingerprint("conclusion", payload.document, use_model)
+    key = fingerprint("conclusion", payload.document)
     return assistant_cache.get_or_compute(
-        key, lambda: _with_slot("подготовку заключения", lambda: conclusion.build(plan, use_model))
+        key, lambda: _with_slot("подготовку заключения", lambda: conclusion.build(plan))
     )
 
 
@@ -357,7 +357,6 @@ def import_drawing(
     real_width_m: float = Form(gt=0.5, le=200, description="Действительная ширина помещения в метрах"),
     name: str = Form(default="План с чертежа", max_length=200),
     page: int = Form(default=0, ge=0, le=50, description="Страница PDF, считая с нуля"),
-    read_labels: bool = Form(default=True, description="Читать подписи языковой моделью"),
 ) -> importer.ImportResult:
     """Распознаёт чертёж и возвращает черновик плана: стены, проёмы, перегородки.
 
@@ -371,14 +370,7 @@ def import_drawing(
         raise HTTPException(status_code=422, detail="Файл пустой.")
     try:
         with heavy_slot("распознавание чертежа"):
-            return importer.build(
-                data,
-                real_width_m=real_width_m,
-                page=page,
-                name=name,
-                media_type=file.content_type or "image/png",
-                read_labels=read_labels,
-            )
+            return importer.build(data, real_width_m=real_width_m, page=page, name=name)
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from None
     except Exception:
@@ -387,16 +379,6 @@ def import_drawing(
             detail="Не удалось прочитать файл: нужен рисунок плана в PNG, JPEG или PDF.",
         ) from None
 
-
-@app.get("/api/assistant/language", summary="Состояние языковой модели")
-def assistant_language() -> dict[str, Any]:
-    """Подключена ли языковая модель. Без неё сервис работает полностью, но фразы разбирает сам."""
-    state = llm.availability()
-    return {
-        "модель_подключена": state.ready,
-        "почему_нет": state.reason,
-        "модель": state.model if state.ready else None,
-    }
 
 
 @app.post("/api/assistant/place", response_model=Recommendation, summary="Найти место для объекта")

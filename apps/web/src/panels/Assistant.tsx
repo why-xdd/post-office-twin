@@ -34,7 +34,6 @@ import type {
   CapacityReport,
   CommandResult,
   Conclusion as ConclusionText,
-  LanguageState,
   Effect,
   EquipmentTypeInfo,
   ImprovementReport,
@@ -80,7 +79,6 @@ export function Assistant({ book, types, onFocusObject, onNotice }: AssistantPro
   const [command, setCommand] = useState('');
   const [commandResult, setCommandResult] = useState<CommandResult | null>(null);
   const [conclusion, setConclusion] = useState<ConclusionText | null>(null);
-  const [language, setLanguage] = useState<LanguageState | null>(null);
   const docAtRun = useRef<string>('');
   const [elapsed, setElapsed] = useState(0);
 
@@ -99,11 +97,6 @@ export function Assistant({ book, types, onFocusObject, onNotice }: AssistantPro
   }, [job]);
 
   useEffect(() => () => setPreview(null), [setPreview]);
-
-  // Подключена ли языковая модель — от этого зависит подсказка у поля команды.
-  useEffect(() => {
-    api.languageState().then(setLanguage).catch(() => setLanguage(null));
-  }, []);
 
   const run = async <T,>(kind: Job, request: () => Promise<T>, onResult: (result: T) => void) => {
     if (!doc) return;
@@ -209,11 +202,7 @@ export function Assistant({ book, types, onFocusObject, onNotice }: AssistantPro
               Понять
             </button>
           </div>
-          <p className="assistant__hint">
-            {language?.['модель_подключена']
-              ? 'Фразу разбирает сервис, а непонятное уточняет языковая модель. План меняется только после «Принять».'
-              : 'Фразу разбирает сервис. План меняется только после «Принять».'}
-          </p>
+          <p className="assistant__hint">План меняется только после «Принять».</p>
         </form>
 
         <div className="assistant__run">
@@ -280,7 +269,7 @@ export function Assistant({ book, types, onFocusObject, onNotice }: AssistantPro
           <div className="conclusion">
             <p className="conclusion__text">{conclusion.text}</p>
             <div className="conclusion__foot">
-              <span>{conclusion.source}</span>
+              <span>Собрано по расчётам плана</span>
               <button
                 type="button"
                 className="btn btn--outline"

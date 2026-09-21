@@ -366,7 +366,6 @@ export interface ImportResult {
   document: Plan;
   notes: string[];
   stats: Record<string, string | number>;
-  labels_source: string;
 }
 
 export interface CommandResult {
@@ -379,14 +378,7 @@ export interface CommandResult {
 
 export interface Conclusion {
   text: string;
-  source: string;
   facts: Record<string, unknown>;
-}
-
-export interface LanguageState {
-  'модель_подключена': boolean;
-  'почему_нет': string;
-  'модель': string | null;
 }
 
 export interface ImprovementReport {

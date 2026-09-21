@@ -5,9 +5,9 @@
 убрать, пересчитать. Геометрию и нормы по-прежнему считает расчёт, а не язык: разбор только
 выбирает, что именно посчитать.
 
-Разбор работает без всяких моделей: русские команды в этой области короткие и однотипные.
-Языковая модель подключается отдельно (llm.py) и используется как уточнение, когда фраза
-не разобралась; результат модели всё равно проходит через ту же проверку.
+Разбор словарный: команды в этой области короткие и однотипные, и словаря синонимов по
+каждому типу оборудования и зоне хватает. Что не разобралось, возвращается списком — сервис
+не угадывает, а переспрашивает.
 """
 
 from __future__ import annotations
@@ -235,50 +235,3 @@ def _understand_part(part: str, plan: Plan) -> Action | None:
             text=part,
         )
     return None
-
-
-# Соответствие слов из ответа модели нашим видам действий.
-MODEL_KINDS = {
-    "поставить": "add",
-    "переставить": "move",
-    "убрать": "remove",
-    "исправить": "fix",
-    "проверить": "check",
-}
-
-
-def from_model(payload: dict, plan: Plan) -> Understanding:
-    """Ответ языковой модели в те же действия, что и обычный разбор.
-
-    Всё, чего нет в справочнике плана, отбрасывается: модель не может придумать тип
-    оборудования или зону, которых не существует.
-    """
-    known_types = set(equipment_types(plan))
-    known_zones = {z.id for z in plan.zones}
-    known_objects = {e.id for e in plan.equipment}
-    result = Understanding(source="языковая модель")
-    for raw in payload.get("действия", []) or []:
-        kind = MODEL_KINDS.get(str(raw.get("что", "")).strip())
-        if kind is None:
-            continue
-        type_code = raw.get("тип_оборудования")
-        zone_id = raw.get("зона")
-        object_id = raw.get("объект")
-        action = Action(
-            kind=kind,
-            equipment_type=type_code if type_code in known_types else None,
-            zone_id=zone_id if zone_id in known_zones else None,
-            object_id=object_id if object_id in known_objects else None,
-            count=max(1, min(20, int(raw.get("количество", 1) or 1))),
-            near_entrance=bool(raw.get("у_входа")),
-            near_wall=bool(raw.get("у_стены")),
-            near_partition=bool(raw.get("у_перегородки")),
-            text=str(raw),
-        )
-        if kind in {"add"} and action.equipment_type is None:
-            continue
-        if kind in {"move", "remove"} and action.object_id is None and action.equipment_type is None:
-            continue
-        result.actions.append(action)
-    result.unknown.extend(str(item) for item in payload.get("не_понято", []) or [])
-    return result

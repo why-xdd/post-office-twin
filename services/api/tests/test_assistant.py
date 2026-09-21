@@ -194,11 +194,10 @@ def test_remove_command_shows_the_effect(plan: Plan) -> None:
 
 
 def test_conclusion_is_built_from_computed_numbers(plan: Plan) -> None:
-    """Заключение собирается по посчитанным числам и без языковой модели."""
+    """Заключение собирается по посчитанным числам: каждое число в тексте есть в фактах."""
     from app.assistant import conclusion
 
-    result = conclusion.build(plan, use_model=False)
-    assert result.source == "шаблон по посчитанным числам"
+    result = conclusion.build(plan)
     assert "ОПС-1" in result.text
     assert "нарушени" in result.text
     # Внутренние идентификаторы в текст для заказчика не попадают.

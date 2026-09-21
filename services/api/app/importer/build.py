@@ -14,8 +14,6 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from app.dictionaries import equipment_types, zone_types
-from app.importer import labels
 from app.importer.drawing import Detection, Segment, detect, outer_walls, scale_factor, summary
 from app.models import Plan
 
@@ -32,7 +30,6 @@ class ImportResult(BaseModel):
     document: dict[str, Any] = Field(description="План в формате сервиса — черновик для редактора")
     notes: list[str] = Field(default_factory=list, description="Что стоит проверить человеку")
     stats: dict[str, Any] = Field(default_factory=dict, description="Числа распознавания")
-    labels_source: str = Field(default="", description="Чем подписаны зоны и оборудование")
 
 
 def _metres(value: float, digits: int = 2) -> str:
@@ -57,14 +54,8 @@ def build(
     real_width_m: float,
     page: int = 0,
     name: str = "План с чертежа",
-    media_type: str = "image/png",
-    read_labels: bool = True,
 ) -> ImportResult:
-    """Распознаёт чертёж и собирает из него черновик плана.
-
-    Геометрию считает разбор изображения. Подписи оборудования и зон читает языковая модель,
-    если она подключена: без неё импорт всё равно даёт готовый контур со стенами и проёмами.
-    """
+    """Распознаёт чертёж и собирает из него черновик плана: контур, перегородки и проёмы."""
     detection = detect(data, page)
     notes: list[str] = []
     stats = summary(detection)
@@ -193,33 +184,9 @@ def build(
         notes.append(f"Найдено перегородок: {partitions}. Проверьте их длину и положение.")
     notes.append("Оборудование и зоны чертёж не содержит в машинном виде — расставьте их в редакторе.")
 
-    labels_source = ""
-    if read_labels and data[:5] != b"%PDF-":
-        found = labels.read(data, media_type, _catalogue())
-        if found:
-            labels_source = "языковая модель прочитала подписи чертежа"
-            notes.extend(
-                labels.apply(
-                    document,
-                    found,
-                    to_plan,
-                    (detection.width_px, detection.height_px),
-                    equipment_types(None),
-                    zone_types(None),
-                )
-            )
-
     stats["перегородок"] = partitions
     stats["проёмов"] = len(document["doors"]) + len(document["windows"])
     stats["объектов"] = len(document["equipment"])
     # Черновик обязан быть корректным планом: иначе редактор его не откроет.
     Plan.model_validate(document)
-    return ImportResult(document=document, notes=notes, stats=stats, labels_source=labels_source)
-
-
-def _catalogue() -> dict[str, Any]:
-    """Справочник для модели: коды и названия типов оборудования и зон."""
-    return {
-        "типы_оборудования": {code: t.label for code, t in equipment_types(None).items()},
-        "типы_зон": {code: z.label for code, z in zone_types(None).items()},
-    }
+    return ImportResult(document=document, notes=notes, stats=stats)

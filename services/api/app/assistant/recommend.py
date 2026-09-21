@@ -19,7 +19,6 @@ from pydantic import BaseModel, Field
 
 from app.assistant import capacity as capacity_model
 from app.assistant import language
-from app.assistant import llm
 from app.assistant import objective
 from app.assistant import completeness as completeness_model
 from app.assistant import search
@@ -1108,11 +1107,6 @@ def run_command(plan: Plan, text: str) -> CommandResult:
     """Выполняет команду словами: разбирает фразу и готовит рекомендации с предпросмотром."""
     started = time.perf_counter()
     understanding = language.understand(text, plan)
-    if not understanding.understood and understanding.unknown:
-        # Фразу не разобрали своими силами — пробуем языковую модель, если она подключена.
-        guessed = llm.understand(text, _catalogue(plan))
-        if guessed:
-            understanding = language.from_model(guessed, plan)
 
     result = CommandResult(understood=[], unknown=list(understanding.unknown), source=understanding.source)
     current = plan
@@ -1148,11 +1142,3 @@ def run_command(plan: Plan, text: str) -> CommandResult:
     result.elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
     return result
 
-
-def _catalogue(plan: Plan) -> dict[str, Any]:
-    """Справочник плана для языковой модели: коды типов, зон и объектов с их названиями."""
-    return {
-        "типы_оборудования": {code: t.label for code, t in equipment_types(plan).items()},
-        "зоны": {z.id: z.label or z.type for z in plan.zones},
-        "объекты": {e.id: e.label or e.type for e in plan.equipment},
-    }

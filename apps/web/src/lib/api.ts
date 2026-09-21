@@ -9,7 +9,6 @@ import type {
   CommandResult,
   Conclusion,
   ImportResult,
-  LanguageState,
   AssistantReport,
   CapacityReport,
   DictionariesInfo,
@@ -184,12 +183,11 @@ export const api = {
       body: JSON.stringify({ document }),
     }),
 
-  importDrawing: (file: File, realWidthM: number, name: string, readLabels = true) => {
+  importDrawing: (file: File, realWidthM: number, name: string) => {
     const form = new FormData();
     form.append('file', file);
     form.append('real_width_m', String(realWidthM));
     form.append('name', name);
-    form.append('read_labels', String(readLabels));
     return request<ImportResult>('/api/import/drawing', { method: 'POST', body: form });
   },
 
@@ -199,13 +197,11 @@ export const api = {
       body: JSON.stringify({ document, text }),
     }),
 
-  conclusion: (document: Plan, useModel = true) =>
-    request<Conclusion>(`/api/assistant/conclusion?use_model=${useModel}`, {
+  conclusion: (document: Plan) =>
+    request<Conclusion>('/api/assistant/conclusion', {
       method: 'POST',
       body: JSON.stringify({ document }),
     }),
-
-  languageState: () => request<LanguageState>('/api/assistant/language'),
 
   place: (document: Plan, equipmentType: string, zoneId?: string) =>
     request<Recommendation>('/api/assistant/place', {

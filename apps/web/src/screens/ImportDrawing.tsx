@@ -192,7 +192,6 @@ export function ImportDrawing() {
                     </div>
                   ))}
                 </dl>
-                {result.labels_source && <p className="import__source">{result.labels_source}</p>}
               </section>
             )}
           </form>

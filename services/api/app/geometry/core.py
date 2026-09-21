@@ -212,7 +212,9 @@ def clearances(plan: Plan, limit_m: float) -> list[Clearance]:
     for i in range(len(items)):
         for j in range(i + 1, len(items)):
             distance = polygons[i].distance(polygons[j])
-            if 0 < distance < limit_m:
+            # Сравнивается то же округлённое число, что показывается человеку: иначе 0,79999 м
+            # попадает в нарушение с текстом «0,8 м при требуемых 0,8 м».
+            if 0 < round(distance, PRECISION) < limit_m:
                 tight.append(
                     Clearance(
                         first_id=items[i].id,
@@ -231,7 +233,9 @@ def wall_clearances(plan: Plan, limit_m: float) -> list[Clearance]:
         poly = equipment_polygon(item)
         for wall_id, line in walls:
             distance = poly.distance(line)
-            if 0 < distance < limit_m:
+            # Сравнивается то же округлённое число, что показывается человеку: иначе 0,79999 м
+            # попадает в нарушение с текстом «0,8 м при требуемых 0,8 м».
+            if 0 < round(distance, PRECISION) < limit_m:
                 tight.append(
                     Clearance(
                         first_id=item.id,

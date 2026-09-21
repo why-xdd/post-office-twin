@@ -179,6 +179,27 @@ def mismatched_zone_links(plan: Plan) -> list[dict[str, str | None]]:
     return problems
 
 
+def misplaced_by_type(plan: Plan, allowed: dict[str, list[str]]) -> list[dict[str, object]]:
+    """Объекты, стоящие в зоне, куда их тип по справочнику ставить не положено.
+
+    Зоны вложены друг в друга, поэтому объект считается на месте, если хотя бы одна из зон,
+    где стоит его центр, есть в списке допустимых. Типы без списка и объекты вне зон не
+    проверяются: для вторых есть своя проверка.
+    """
+    problems: list[dict[str, object]] = []
+    for item in plan.equipment:
+        permitted = allowed.get(item.type) or []
+        if not permitted:
+            continue
+        probe = Point(item.position)
+        here = [z for z in plan.zones if zone_polygon(z).contains(probe)]
+        if not here or any(z.type in permitted for z in here):
+            continue
+        smallest = min(here, key=lambda z: zone_polygon(z).area)
+        problems.append({"объект": item.id, "зона": smallest, "допустимые": permitted})
+    return problems
+
+
 def clearances(plan: Plan, limit_m: float) -> list[Clearance]:
     """Пары объектов, между которыми расстояние меньше заданного.
 

@@ -1,0 +1,183 @@
+/*
+ * Объёмный вид: та же мастерская, что и лист плана.
+ *
+ * Органы управления лежат на листе плитками из бумаги этикеток, как подсказки в редакторе, и
+ * не спорят со сценой: план остаётся главным объектом экрана.
+ */
+
+.plan3d {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--sheet);
+}
+
+.plan3d__stage {
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  touch-action: none;
+}
+
+.plan3d__stage:active {
+  cursor: grabbing;
+}
+
+.plan3d__stage:focus-visible {
+  outline: 2px solid var(--notice);
+  outline-offset: -2px;
+}
+
+.plan3d__stage canvas {
+  display: block;
+}
+
+.plan3d__shots,
+.plan3d__quality {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  gap: 1px;
+  padding: 2px;
+  border-radius: var(--radius-plate);
+  background: var(--label-edge);
+  box-shadow: 0 2px 8px rgba(20, 24, 26, 0.18);
+}
+
+.plan3d__shots {
+  top: var(--s-4);
+  left: var(--s-4);
+}
+
+.plan3d__quality {
+  top: var(--s-4);
+  right: var(--s-4);
+}
+
+.plan3d__shot,
+.plan3d__mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px var(--s-3);
+  border: 0;
+  border-radius: calc(var(--radius-plate) - 2px);
+  color: var(--ink);
+  background: var(--label);
+  font: inherit;
+  font-size: var(--text-13);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-drawer), color var(--dur-fast) var(--ease-drawer);
+}
+
+.plan3d__shot:hover,
+.plan3d__mode:hover {
+  background: #fffdf6;
+}
+
+.plan3d__shot:focus-visible,
+.plan3d__mode:focus-visible {
+  outline: 2px solid var(--notice);
+  outline-offset: 1px;
+}
+
+.plan3d__mode--on {
+  color: var(--on-steel);
+  background: var(--steel-800);
+}
+
+.plan3d__mode--on:hover {
+  background: var(--steel-700);
+}
+
+.plan3d__legend {
+  position: absolute;
+  left: var(--s-4);
+  bottom: var(--s-4);
+  z-index: 2;
+  max-width: 30rem;
+  margin: 0;
+  padding: 8px var(--s-3);
+  border-radius: var(--radius-plate);
+  color: var(--ink-2);
+  background: rgba(233, 228, 214, 0.92);
+  box-shadow: 0 0 0 1px var(--label-edge);
+  font-size: var(--text-12);
+  line-height: 1.45;
+  pointer-events: none;
+}
+
+.plan3d__legend p {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+
+.plan3d__legend p + p {
+  margin-top: 4px;
+  color: var(--ink-3);
+}
+
+.plan3d__notice {
+  position: absolute;
+  top: calc(var(--s-4) + 2.6rem);
+  right: var(--s-4);
+  z-index: 3;
+  max-width: 17rem;
+  margin: 0;
+  padding: 7px var(--s-3);
+  border-radius: var(--radius-plate);
+  color: var(--ink);
+  background: var(--caution-bg);
+  box-shadow: 0 0 0 1px var(--label-edge);
+  font-size: var(--text-12);
+  line-height: 1.4;
+  pointer-events: none;
+}
+
+.plan3d__tip {
+  position: absolute;
+  top: calc(var(--s-4) + 2.6rem);
+  left: 50%;
+  z-index: 3;
+  margin: 0;
+  padding: 7px var(--s-3);
+  border-radius: var(--radius-plate);
+  transform: translateX(-50%);
+  color: var(--on-steel);
+  background: var(--steel-850);
+  box-shadow: 0 2px 8px rgba(20, 24, 26, 0.24);
+  font-size: var(--text-13);
+  pointer-events: none;
+}
+
+.plan3d__tip--bad {
+  color: #fff;
+  background: var(--signal);
+}
+
+.plan3d--absent {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s-3);
+  padding: var(--s-5);
+  color: var(--ink-2);
+  text-align: center;
+}
+
+.plan3d--absent p {
+  max-width: 28rem;
+  margin: 0;
+  font-size: var(--text-14);
+  line-height: 1.5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .plan3d__shot,
+  .plan3d__mode {
+    transition: none;
+  }
+}

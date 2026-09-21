@@ -1,93 +1,163 @@
-# template-gitlab-ae4a3148
+# Цифровой двойник отделения Почты России
 
-Template for task: GitLab репозиторий
+Веб-сервис для работы с цифровым планом отделения: 2D-редактор плана, справочники зон и
+оборудования, инвентаризация, проверка корректности планировки по отраслевым нормам и упрощённое
+3D-представление.
 
-## Getting started
+## Состав
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+| Каталог | Назначение |
+|---|---|
+| `apps/web` | Клиент: редактор плана, панели свойств, 3D-вид |
+| `services/api` | Сервер: хранение планов, схема данных, геометрия и правила проверки |
+| `data` | Материалы задачи: пример формата плана, перечень оборудования ОПС |
+| `research` | Нормативная база проверок со ссылками на пункты документов |
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+## Технологии
 
-## Add your files
+React, TypeScript, Vite, three.js на клиенте. Python 3.12, FastAPI, shapely, networkx, SQLite на
+сервере. Запуск через Docker Compose.
 
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/ee/gitlab-basics/add-file.html#add-a-file-using-the-command-line) or push an existing Git repository with the following command:
+## Запуск
 
+```bash
+docker compose up -d
 ```
-cd existing_repo
-git remote add origin https://git.codenrock.com/codenrock/khakaton-postcode-challenge-ot-pochtatekha/template-gitlab-ae4a3148.git
-git branch -M main
-git push -uf origin main
+
+Клиент — http://localhost:5173, API — http://localhost:8000, документация API — `/docs`.
+
+Для разработки без Docker:
+
+```bash
+cd apps/web && npm install && npm run dev
+cd services/api && uv sync && uv run uvicorn app.main:app --reload
 ```
 
-## Integrate with your tools
+## Данные
 
-- [ ] [Set up project integrations](https://git.codenrock.com/codenrock/khakaton-postcode-challenge-ot-pochtatekha/template-gitlab-ae4a3148/-/settings/integrations)
+Формат плана описан в `data/example_plan.json`: координаты в метрах, начало отсчёта — левый нижний
+угол, `position` у оборудования означает центр объекта, `size_m` — габариты по осям X и Y.
 
-## Collaborate with your team
+Планы отделений синтетические. Реальные планы БТИ не используются.
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/ee/user/project/merge_requests/merge_when_pipeline_succeeds.html)
+## Проверки планировки
 
-## Test and Deploy
+Правила проверки опираются на ВНТП 311-98 «Объекты почтовой связи», СП 59.13330.2020 «Доступность
+зданий и сооружений для МГН» и Приказ Минцифры России от 26.10.2020 № 538. Перечень правил с
+точными значениями и номерами пунктов — в `research/normatives.md`.
 
-Use the built-in continuous integration in GitLab.
+## Ассистент планировки
 
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/index.html)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+Ассистент подбирает расстановку и объясняет каждое предложение: что изменить, почему (со ссылкой
+на пункт норматива) и какой будет эффект. Решение принимает человек — рекомендация сначала
+показывается на плане и применяется только по кнопке.
 
-***
+Варианты сравниваются по одной величине, в которую входят нарушения норм, ширина прохода для
+маломобильных посетителей, проходимость подхода к каждому окну, число мест ожидания, средний путь
+посетителя и суммарная величина переноса оборудования (`app/assistant/objective.py`). Так
+устранение нарушения не достигается ценой удобства: например, скамья не уезжает из зоны ожидания
+просто потому, что «так меньше ошибок».
 
-# Editing this README
+### Обучаемый ускоритель поиска
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+Полная проверка одного варианта расстановки стоит дорого, поэтому проверяется только верхушка
+списка мест. Порядок этой верхушки задаёт модель — градиентный бустинг на решающих деревьях,
+обученный на данных, которые сервис порождает сам: для каждой позиции известно, чем закончилась
+полная проверка и какой получилась расстановка целиком.
 
-## Suggestions for a good README
+Голов две, и они отвечают на разные вопросы. Первая — «пройдёт ли позиция проверку»: она
+отсеивает места, добавляющие нарушения. Вторая — «насколько хороша будет расстановка»: она
+предсказывает величину цели и расставляет по местам те варианты, которые первая голова считает
+одинаково допустимыми. Вторая голова учится только на допустимых местах: иначе она повторяет
+первую вместо того, чтобы различать удачное и просто терпимое.
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+| Показатель | Значение |
+|---|---|
+| Размеченных позиций | 239 267 |
+| Площадь под ROC (на помещениях, которых модель не видела) | 0.9749 |
+| Доля верных ответов | 0.9432 |
+| Подходящих мест в первых 10 — модель | 0.9348 |
+| Подходящих мест в первых 10 — порядок без модели | 0.7621 |
 
-## Name
-Choose a self-explaining name for your project.
+Главная мера полезности — не точность, а то, насколько выбранное место хуже лучшего из возможных
+(в единицах цели; меньше — лучше) и как часто лучшее место вообще попадает в проверяемую верхушку:
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+| Порядок проверки | Проигрыш лучшему месту | Лучшее место в первых 10 |
+|---|---|---|
+| Без модели | 4.537 | 0.7024 |
+| Одна голова | 2.794 | 0.7183 |
+| Две головы | **2.496** | **0.7302** |
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+На демонстрационном плане это видно целиком (`scripts/benchmark_assistant.py`): без модели
+остаётся 1 нарушение и оценка 131.9 за 32 секунды, с одной головой — 0 нарушений и оценка 25.2 за
+18 секунд, с двумя — 0 нарушений и оценка 20.1 за 17 секунд.
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+Сервис не зависит ни от одной библиотеки машинного обучения: деревья лежат в
+`app/assistant/accelerator_model.json`, обход написан в `app/assistant/accelerator.py`, обучение —
+в `scripts/` и в поставку не входит. Без файла модели сервис работает так же, только подбирает
+менее прицельно; файл без второй головы читается по-прежнему.
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+Переобучить и замерить эффект:
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+```bash
+cd services/api
+uv run python scripts/train_accelerator.py --plans ../../data/example_plan.json --synthetic 180 --per-type 200
+uv run python scripts/benchmark_assistant.py --plans ../../data/example_plan.json
+```
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+Обучающие планы синтетические: генератор делает и прямоугольные залы, и Г-образные, с разной
+глубиной, входом с разных сторон и разной загруженностью оборудованием. Реальные планы БТИ не
+используются.
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+### Команды словами и заключение
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+Поле «Скажите, что сделать» понимает фразы вида «поставь две кассы у перегородки», «убери
+банкомат», «перенеси скамью в зону ожидания». Фразу разбирает сам сервис
+(`app/assistant/language.py`), а места и последствия считает тот же расчёт, что и в панели
+ассистента. Если часть фразы не разобралась, сервис так и говорит, а не додумывает.
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+Заключение по плану — готовый текст для согласования: что проверено, что нарушено, что
+предлагается и каким будет эффект. Собирается из посчитанных чисел, поэтому для одного и того же
+плана всегда одинаково.
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+## Объёмный вид
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+Кнопка «Объём» показывает тот же план в трёх измерениях: стены с проёмами и перемычками над
+дверями, оборудование в его настоящих габаритах, типовые маршруты посетителей лентами по полу и
+две фигуры у входа для чувства масштаба — человек ростом 1,7 м и кресло-коляска шириной 0,9 м.
+Объекты, участвующие в нарушениях, окрашены и помечены меткой сверху: цвет не единственный признак.
 
-## License
-For open source projects, say how it is licensed.
+Высоты не выдуманы: они лежат в справочнике типов (`height_m` и `mount_height_m`, высота низа над
+полом для настенного оборудования) и редактируются вместе с планом, а у конкретного объекта может
+быть своя высота. Поэтому объём соответствует плану, а не представлениям о том, как выглядит
+отделение.
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+Качества рисования два, переключаются кнопкой и запоминаются:
+
+- **Покрасивее** — физические материалы, мягкие тени, отражения помещения, сглаживание.
+- **Попроще** — плоская заливка без теней и отражений. Нужен для слабой машины и чужого
+  проектора; сервис переходит на него сам, если браузер выдаёт меньше 22 кадров в секунду, и
+  говорит об этом. Без поддержки WebGL объёмный вид сообщает об этом и не мешает работать с планом.
+
+Ракурсы «Изометрия», «Сверху» и «От входа» ставят камеру одним нажатием, вид сверху совпадает с
+чертежом. Камерой можно управлять и с клавиатуры: стрелки вращают, плюс и минус приближают. Библиотека трёхмерной графики грузится только
+при открытии объёмного вида и не утяжеляет редактор плана.
+
+## Импорт чертежа
+
+Экран «Чертёж в цифровой план» принимает картинку или PDF: сервис находит стены, перегородки и
+проёмы, а масштаб берёт из одного числа — действительной ширины помещения, которую называет
+человек. Распознавание не использует внешних библиотек компьютерного зрения: тёмные пиксели
+считаются по строкам и столбцам, длинные сплошные полосы становятся стенами, светлые промежутки
+внутри них — дверями и окнами (`app/importer/drawing.py`).
+
+Результат — черновик: он открывается в редакторе вместе со списком того, что стоит проверить.
+На контрольном чертеже 14 × 9 м сервис восстанавливает 13,92 × 8,92 м, находит перегородку и два
+проёма. Оборудование и зоны расставляются уже в редакторе.
+
+Реальные планы БТИ по условиям задачи не используются: распознавание проверено на синтетических
+чертежах и собственных рисунках.
+
+## Лицензия
+
+MIT.

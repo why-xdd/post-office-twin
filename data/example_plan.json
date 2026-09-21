@@ -1,0 +1,116 @@
+{
+  "_comment": "Синтетический пример векторизованного плана ОПС в формате, которым команды получают данные на хакатоне. Все координаты в метрах, начало координат — левый нижний угол.",
+
+  "ops": {
+    "id": "ops_synthetic_city_small_01",
+    "type": "city_small",
+    "type_label": "Городское малое отделение",
+    "name": "ОПС-1 (синтетический пример для брифа)",
+    "total_area_sqm": 78.0,
+    "bbox": { "width_m": 10.4, "height_m": 7.5 },
+    "scale": "1 unit = 1 meter",
+    "ceiling_height_m": 3.0
+  },
+
+  "walls": [
+    { "id": "w_outer_s", "from": [0.0, 0.0], "to": [10.4, 0.0], "type": "outer" },
+    { "id": "w_outer_e", "from": [10.4, 0.0], "to": [10.4, 7.5], "type": "outer" },
+    { "id": "w_outer_n", "from": [10.4, 7.5], "to": [0.0, 7.5], "type": "outer" },
+    { "id": "w_outer_w", "from": [0.0, 7.5], "to": [0.0, 0.0], "type": "outer" },
+    { "id": "w_inner_1", "from": [7.5, 0.0], "to": [7.5, 5.0], "type": "partition", "label": "Перегородка клиентская/служебная" }
+  ],
+
+  "doors": [
+    { "id": "d_main",  "wall": [0.0, 7.5, 1.5, 7.5], "type": "entrance", "width_m": 1.5, "label": "Главный вход для клиентов" },
+    { "id": "d_staff", "wall": [10.4, 5.5, 10.4, 6.5], "type": "service", "width_m": 1.0, "label": "Служебный вход" },
+    { "id": "d_partition", "wall": [7.5, 4.0, 7.5, 5.0], "type": "internal", "width_m": 1.0, "label": "Дверь в служебную зону" }
+  ],
+
+  "windows": [
+    { "id": "win_1", "wall": [3.0, 7.5, 5.0, 7.5], "height_m": 1.2 },
+    { "id": "win_2", "wall": [10.4, 1.0, 10.4, 3.0], "height_m": 1.2 }
+  ],
+
+  "zones": [
+    {
+      "id": "z_client",
+      "type": "client_area",
+      "label": "Клиентская зона",
+      "polygon": [[0.0, 0.0], [7.5, 0.0], [7.5, 7.5], [0.0, 7.5]],
+      "area_sqm": 56.25
+    },
+    {
+      "id": "z_back",
+      "type": "back_office",
+      "label": "Складская / служебная зона",
+      "polygon": [[7.5, 0.0], [10.4, 0.0], [10.4, 7.5], [7.5, 7.5]],
+      "area_sqm": 21.75
+    },
+    {
+      "id": "z_waiting",
+      "type": "waiting",
+      "label": "Зона ожидания",
+      "polygon": [[0.3, 4.5], [4.3, 4.5], [4.3, 7.0], [0.3, 7.0]],
+      "area_sqm": 10.0,
+      "expected_capacity_persons": 8
+    },
+    {
+      "id": "z_queue",
+      "type": "queue_accumulator",
+      "label": "Накопитель очереди к кассам",
+      "polygon": [[4.5, 3.0], [7.0, 3.0], [7.0, 6.5], [4.5, 6.5]],
+      "area_sqm": 8.75
+    }
+  ],
+
+  "equipment": [
+    { "id": "eq_cashier_1", "type": "cashier_window",     "label": "Окно кассы №1",      "position": [6.5, 1.5], "size_m": [1.2, 0.8], "rotation_deg": 0,   "zone": "z_client", "operator_position": [6.5, 0.5] },
+    { "id": "eq_cashier_2", "type": "cashier_window",     "label": "Окно кассы №2",      "position": [6.5, 3.0], "size_m": [1.2, 0.8], "rotation_deg": 0,   "zone": "z_client", "operator_position": [6.5, 4.0] },
+    { "id": "eq_pvz",       "type": "pvz_counter",        "label": "Стойка ПВЗ (выдача посылок)", "position": [2.0, 0.5], "size_m": [2.0, 0.8], "rotation_deg": 0,   "zone": "z_client" },
+    { "id": "eq_kiosk",     "type": "self_service_kiosk", "label": "Терминал электронной очереди", "position": [0.6, 0.6], "size_m": [0.6, 0.6], "rotation_deg": 0,   "zone": "z_client" },
+    { "id": "eq_atm",       "type": "atm",                "label": "Банкомат",            "position": [0.6, 6.5], "size_m": [0.7, 0.5], "rotation_deg": 90,  "zone": "z_client" },
+    { "id": "eq_info",      "type": "info_stand",         "label": "Информационный стенд","position": [4.0, 7.2], "size_m": [1.0, 0.2], "rotation_deg": 0,   "zone": "z_client" },
+    { "id": "eq_bench_1",   "type": "waiting_seat",       "label": "Скамья ожидания",     "position": [1.5, 6.5], "size_m": [2.0, 0.5], "rotation_deg": 0,   "zone": "z_waiting", "capacity_persons": 4 },
+    { "id": "eq_bench_2",   "type": "waiting_seat",       "label": "Скамья ожидания",     "position": [1.5, 5.0], "size_m": [2.0, 0.5], "rotation_deg": 0,   "zone": "z_waiting", "capacity_persons": 4 },
+    { "id": "eq_rack_1",    "type": "storage_rack",       "label": "Стеллаж посылок",     "position": [8.0, 1.0], "size_m": [2.0, 0.6], "rotation_deg": 0,   "zone": "z_back" },
+    { "id": "eq_rack_2",    "type": "storage_rack",       "label": "Стеллаж писем",       "position": [8.0, 3.0], "size_m": [2.0, 0.6], "rotation_deg": 0,   "zone": "z_back" },
+    { "id": "eq_safe",      "type": "safe",               "label": "Сейф",                 "position": [9.8, 0.6], "size_m": [0.6, 0.6], "rotation_deg": 0,   "zone": "z_back" },
+    { "id": "eq_back_wp",   "type": "back_office_workplace", "label": "Рабочее место сотрудника", "position": [9.0, 6.0], "size_m": [1.2, 0.8], "rotation_deg": 0, "zone": "z_back" }
+  ],
+
+  "flow_hints": {
+    "main_entrance": "d_main",
+    "typical_paths": [
+      {
+        "label": "Клиент пришёл в кассу",
+        "waypoints": [[0.75, 7.0], [0.75, 4.0], [4.5, 4.0], [4.5, 1.5], [6.5, 1.5]],
+        "frequency_share": 0.55
+      },
+      {
+        "label": "Клиент за посылкой в ПВЗ",
+        "waypoints": [[0.75, 7.0], [2.0, 0.9]],
+        "frequency_share": 0.30
+      },
+      {
+        "label": "Клиент к банкомату",
+        "waypoints": [[0.75, 7.0], [0.6, 6.5]],
+        "frequency_share": 0.15
+      }
+    ],
+    "typical_visit_duration_min": 7,
+    "peak_hours_local": ["12:00-14:00", "17:00-19:00"],
+    "avg_daily_visitors": 220
+  },
+
+  "_format_notes": {
+    "coordinate_system": "Прямоугольная, в метрах. Начало координат — левый нижний угол bbox. X — вправо, Y — вверх.",
+    "position_semantics": "Для equipment position — координаты центра объекта. size_m — [длина по X, длина по Y]. rotation_deg — поворот вокруг центра по часовой.",
+    "zones": "Полигоны замкнутые. Любой объект (equipment) принадлежит одной зоне через поле zone.",
+    "equipment_types_catalog": [
+      "cashier_window", "pvz_counter", "self_service_kiosk", "atm", "info_stand",
+      "waiting_seat", "storage_rack", "safe", "back_office_workplace", "fitting_room",
+      "weighing_station", "package_drop_box", "trash_bin", "potted_plant"
+    ],
+    "extensibility": "Формат расширяемый — Почта-Тех может добавить свои типы оборудования и зон, прислать список — добавим в каталог до старта хакатона."
+  }
+}

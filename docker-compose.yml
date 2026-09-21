@@ -1,0 +1,24 @@
+services:
+  api:
+    build: ./services/api
+    ports:
+      - "8000:8000"
+    volumes:
+      - api-data:/app/storage
+      - ./data/example_plan.json:/app/samples/example_plan.json:ro
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./apps/web
+      args:
+        VITE_API_URL: http://localhost:8000
+    ports:
+      - "5173:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  api-data:

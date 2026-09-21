@@ -1,0 +1,22 @@
+# зависимости и сборка
+/node_modules/
+/apps/web/node_modules/
+/apps/web/dist/
+/services/api/.venv/
+__pycache__/
+*.py[cod]
+/services/api/.pytest_cache/
+.ruff_cache/
+
+# локальные данные и артефакты
+/data/ops_demo/
+/data/*.zip
+/research/sp59.txt
+*.sqlite
+*.db
+
+# среда
+.env
+.env.*
+!.env.example
+.DS_Store

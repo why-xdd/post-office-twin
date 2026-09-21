@@ -1,0 +1,67 @@
+.plan-thumb {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.plan-thumb__item {
+  fill: #fbf9f3;
+  stroke: var(--ink-2);
+  stroke-width: 1.5;
+}
+
+.plan-thumb__item--conflict {
+  fill: var(--signal-bg);
+  stroke: var(--signal);
+}
+
+.plan-thumb__ring {
+  fill: var(--ink);
+}
+
+.plan-thumb__wall {
+  stroke: var(--ink);
+  stroke-linecap: square;
+}
+
+.plan-thumb__door {
+  stroke: var(--sheet);
+}
+
+.plan-thumb__size text {
+  fill: var(--ink-2);
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.plan-thumb__pin {
+  animation: thumb-pin var(--dur-drawer) var(--ease-latch) both;
+}
+
+.plan-thumb__pin circle {
+  fill: var(--signal);
+  stroke: #fff;
+  stroke-width: 2;
+}
+
+.plan-thumb__pin text {
+  fill: #fff;
+  font-family: var(--font-plate);
+  font-stretch: 70%;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+@keyframes thumb-pin {
+  from {
+    opacity: 0;
+    transform: translateY(-12px) scale(0.6);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .plan-thumb__pin {
+    animation: none;
+  }
+}

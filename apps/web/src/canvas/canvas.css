@@ -1,0 +1,460 @@
+.plan-canvas {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--sheet);
+  touch-action: none;
+  user-select: none;
+}
+
+.plan-canvas svg {
+  display: block;
+  cursor: default;
+}
+
+.plan-canvas--tool-zone svg,
+.plan-canvas--tool-wall svg,
+.plan-canvas[data-placing='true'] svg {
+  cursor: crosshair;
+}
+
+/* Оборудование */
+.plan-equipment__body {
+  fill: var(--equip-fill);
+  stroke: var(--equip-stroke);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  transition: opacity var(--dur-base) var(--ease-drawer);
+}
+
+.plan-equipment--hover .plan-equipment__body {
+  fill: #fffdf6;
+  stroke-width: 2.25;
+}
+
+.plan-equipment--mounted .plan-equipment__body {
+  fill: rgba(251, 249, 243, 0.6);
+  stroke: var(--equip-wall-mounted);
+  stroke-dasharray: 3 2;
+  stroke-width: 1.25;
+}
+
+.plan-equipment__glyph {
+  color: var(--ink-2);
+  pointer-events: none;
+}
+
+.plan-equipment--mounted .plan-equipment__glyph {
+  color: var(--ink-3);
+}
+
+.plan-equipment--drawn-out .plan-equipment__body,
+.plan-equipment--drawn-out .plan-equipment__glyph {
+  opacity: 0.32;
+}
+
+.plan-equipment__violation {
+  fill: url(#hatch-signal);
+  stroke: var(--signal);
+  stroke-width: 2.5;
+  pointer-events: none;
+}
+
+.plan-operator {
+  fill: var(--steel-300);
+  stroke: var(--ink-2);
+  stroke-width: 1;
+  pointer-events: none;
+}
+
+/* Объект встал на место по рекомендации: короткий щелчок защёлки */
+/* Метки нарушений */
+.plan-pin {
+  cursor: pointer;
+}
+
+.plan-pin__body {
+  animation: pin-drop var(--dur-drawer) var(--ease-latch) both;
+}
+
+.plan-pin__disc {
+  fill: var(--signal);
+  stroke: #fff;
+  stroke-width: 2;
+  filter: drop-shadow(0 2px 3px rgba(60, 20, 10, 0.35));
+  transition: r var(--dur-base) var(--ease-latch);
+}
+
+.plan-pin--note .plan-pin__disc {
+  fill: var(--caution);
+}
+
+.plan-pin__number {
+  fill: #fff;
+  font-family: var(--font-plate);
+  font-stretch: 70%;
+  font-size: 13px;
+  font-weight: 700;
+  pointer-events: none;
+}
+
+.plan-pin--active .plan-pin__number {
+  font-size: 15px;
+}
+
+.plan-pin:hover .plan-pin__disc,
+.plan-pin--active .plan-pin__disc {
+  stroke: var(--ink);
+}
+
+@keyframes pin-drop {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+}
+
+.plan-equipment--latched {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: latch var(--dur-drawer) var(--ease-latch);
+}
+
+.plan-equipment--latched .plan-equipment__body {
+  stroke-width: 2.5;
+}
+
+@keyframes latch {
+  0% {
+    transform: scale(1.06);
+  }
+  55% {
+    transform: scale(0.985);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* Адресные таблички */
+.plan-address rect {
+  fill: var(--steel-700);
+}
+
+.plan-address text {
+  fill: var(--on-steel);
+  font-family: var(--font-plate);
+  font-stretch: 62%;
+  font-weight: 640;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.plan-address--signal rect {
+  fill: var(--signal);
+}
+
+.plan-address--steel rect {
+  fill: var(--steel-600);
+}
+
+.plan-zone-label > text {
+  fill: var(--ink-2);
+  font-size: 12px;
+  font-weight: 540;
+  paint-order: stroke;
+  stroke: var(--sheet);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}
+
+.plan-zone-label {
+  pointer-events: none;
+}
+
+/* Проёмы */
+.plan-door__gap {
+  stroke: var(--sheet);
+}
+
+.plan-door__leaf {
+  stroke: var(--ink);
+  stroke-width: 1.5;
+}
+
+.plan-door__swing {
+  fill: none;
+  stroke: var(--ink-3);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+
+.plan-door--entrance .plan-door__leaf {
+  stroke-width: 2.25;
+}
+
+.plan-door--selected .plan-door__leaf,
+.plan-door--selected .plan-door__swing {
+  stroke: var(--notice);
+}
+
+.plan-window line + line {
+  stroke: var(--ink);
+  stroke-width: 1;
+}
+
+/* Маршруты */
+.plan-route path {
+  stroke: var(--notice);
+  stroke-width: 1.5;
+  stroke-dasharray: 2 5;
+  stroke-linecap: round;
+}
+
+.plan-route text {
+  fill: var(--notice);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* Выделение */
+.plan-selection__outline {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 3;
+  animation: ants 0.8s linear infinite;
+}
+
+.plan-selection__corner {
+  fill: var(--sheet);
+  stroke: var(--ink);
+  stroke-width: 1.5;
+}
+
+.plan-selection__stem {
+  stroke: var(--ink);
+  stroke-width: 1;
+}
+
+.plan-selection__knob {
+  fill: var(--sheet);
+  stroke: var(--ink);
+  stroke-width: 1.5;
+  cursor: grab;
+}
+
+.plan-selection__size {
+  fill: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+  paint-order: stroke;
+  stroke: var(--sheet);
+  stroke-width: 4px;
+}
+
+@keyframes ants {
+  to {
+    stroke-dashoffset: -16;
+  }
+}
+
+/* Черновики */
+.plan-draft path,
+.plan-draft line {
+  fill: rgba(44, 90, 116, 0.06);
+  stroke: var(--notice);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 3;
+}
+
+.plan-draft rect {
+  fill: var(--sheet);
+  stroke: var(--notice);
+  stroke-width: 1.5;
+}
+
+.plan-draft__length {
+  fill: var(--notice);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.plan-placing path {
+  fill: rgba(251, 249, 243, 0.8);
+  stroke: var(--ink);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+}
+
+.plan-placing--blocked path {
+  fill: rgba(241, 215, 204, 0.85);
+  stroke: var(--signal);
+}
+
+.plan-placing svg {
+  color: var(--ink-2);
+}
+
+/* Предпросмотр рекомендации */
+.plan-preview__path {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 1.5;
+  stroke-dasharray: 1 4;
+  stroke-linecap: round;
+}
+
+.plan-preview__ghost {
+  animation: drawer-out var(--dur-drawer) var(--ease-drawer) both;
+}
+
+.plan-preview__ghost path {
+  fill: rgba(251, 249, 243, 0.92);
+  stroke: var(--ink);
+  stroke-width: 2;
+  stroke-dasharray: 6 3;
+}
+
+.plan-preview__ghost svg {
+  color: var(--ink);
+}
+
+.plan-preview__remove path:first-child {
+  fill: rgba(179, 57, 31, 0.08);
+  stroke: var(--signal);
+  stroke-width: 2;
+  stroke-dasharray: 6 3;
+}
+
+.plan-preview__remove path:last-child {
+  stroke: var(--signal);
+  stroke-width: 2.5;
+}
+
+@keyframes drawer-out {
+  from {
+    transform: translate(var(--from-x), var(--from-y));
+    opacity: 0;
+  }
+  35% {
+    opacity: 1;
+  }
+  to {
+    transform: translate(0, 0);
+    opacity: 1;
+  }
+}
+
+/* Шкала */
+.plan-scalebar rect {
+  fill: rgba(244, 241, 232, 0.9);
+  stroke: var(--sheet-grid-major);
+}
+
+.plan-scalebar path {
+  stroke: var(--ink);
+  stroke-width: 1.5;
+  fill: none;
+}
+
+.plan-scalebar text {
+  fill: var(--ink);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .plan-selection__outline,
+  .plan-preview__ghost,
+  .plan-equipment--latched,
+  .plan-pin__body {
+    animation: none;
+  }
+}
+
+/* Ручка сдвига стены */
+.plan-wall-handle {
+  cursor: grab;
+}
+
+.plan-wall-handle circle {
+  fill: var(--notice);
+  stroke: #fff;
+  stroke-width: 2;
+  filter: drop-shadow(0 1px 2px rgba(20, 24, 26, 0.35));
+}
+
+.plan-wall-handle path {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  pointer-events: none;
+}
+
+.plan-wall-handle__label {
+  fill: var(--notice);
+  font-size: 12px;
+  font-weight: 650;
+  paint-order: stroke;
+  stroke: var(--sheet);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.plan-window.plan-window--selected line + line {
+  stroke: var(--notice);
+  stroke-width: 2.5;
+}
+
+.plan-draft--outline path {
+  fill: none;
+  stroke-width: 2;
+}
+
+.plan-draft__close {
+  fill: var(--notice) !important;
+}
+
+/* Меню проёма на стене */
+.wall-menu {
+  position: absolute;
+  z-index: 4;
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--radius-plate);
+  background: var(--steel-900);
+  box-shadow: var(--lift-shadow);
+  transform: translate(-50%, calc(-100% - 12px));
+  animation: wall-menu-in var(--dur-base) var(--ease-drawer) both;
+}
+
+.wall-menu button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 var(--s-3);
+  border: 0;
+  border-radius: 2px;
+  color: var(--on-steel);
+  background: transparent;
+  font-size: var(--text-13);
+  font-weight: 560;
+}
+
+.wall-menu button:hover,
+.wall-menu button:focus-visible {
+  background: var(--steel-700);
+}
+
+@keyframes wall-menu-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, calc(-100% - 6px));
+  }
+}

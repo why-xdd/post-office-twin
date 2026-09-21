@@ -1,0 +1,43 @@
+.plate {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-plate);
+  font-stretch: 62%;
+  font-weight: 640;
+  letter-spacing: 0.05em;
+  line-height: 1;
+  white-space: nowrap;
+  border-radius: var(--radius-plate);
+  font-variant-numeric: tabular-nums;
+}
+
+.plate--steel {
+  color: var(--on-steel);
+  background: linear-gradient(180deg, var(--steel-600), var(--steel-700));
+  box-shadow: var(--emboss);
+}
+
+.plate--label {
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--ink-3);
+}
+
+.plate--sm {
+  min-width: 34px;
+  padding: 3px 5px 2px;
+  font-size: var(--text-11);
+}
+
+.plate--md {
+  min-width: 44px;
+  padding: 4px 7px 3px;
+  font-size: var(--text-13);
+}
+
+.plate--lg {
+  min-width: 56px;
+  padding: 6px 9px 5px;
+  font-size: var(--text-16);
+}

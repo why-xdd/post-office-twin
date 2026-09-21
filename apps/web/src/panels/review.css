@@ -1,0 +1,360 @@
+.review {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.review--pending {
+  padding: var(--s-6) var(--s-5);
+  color: var(--ink-2);
+}
+
+.review__loading {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+/* Итог */
+.review__head {
+  position: relative;
+  display: flex;
+  gap: var(--s-3);
+  align-items: flex-start;
+  padding: var(--s-6) var(--s-5) var(--s-4);
+}
+
+.review__head h2 {
+  font-size: var(--text-26);
+  font-weight: 680;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+
+.review__head p {
+  margin-top: var(--s-2);
+  color: var(--ink-2);
+  font-size: var(--text-13);
+  line-height: 1.45;
+  max-width: 42ch;
+}
+
+.review__count {
+  color: var(--signal);
+  font-variant-numeric: tabular-nums;
+}
+
+.review__head--clean h2 {
+  color: var(--ok);
+}
+
+.review__head-icon {
+  flex: none;
+  margin-top: 2px;
+  color: var(--ok);
+}
+
+.review__rechecking {
+  position: absolute;
+  top: var(--s-5);
+  right: var(--s-5);
+  color: var(--ink-3);
+}
+
+.review__done {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  padding: 0 var(--s-5) var(--s-5);
+}
+
+/* Список нарушений */
+.review__list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0 var(--s-3);
+  list-style: none;
+}
+
+.review-item {
+  border-top: 1px solid var(--label-edge);
+}
+
+.review-item:last-child {
+  border-bottom: 1px solid var(--label-edge);
+}
+
+.review-item__row {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 16px;
+  align-items: start;
+  gap: var(--s-3);
+  width: 100%;
+  padding: var(--s-3) var(--s-2);
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  transition: background-color var(--dur-fast) ease-out;
+}
+
+.review-item__row:hover {
+  background: var(--label-strong);
+}
+
+.review-item--open .review-item__row {
+  background: #f4f1e8;
+}
+
+.review-item__pin {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  color: #fff;
+  background: var(--signal);
+  box-shadow: 0 1px 2px rgba(60, 20, 10, 0.35);
+  font-family: var(--font-plate);
+  font-stretch: 70%;
+  font-size: var(--text-14);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.review-item__dot {
+  justify-self: center;
+  width: 10px;
+  height: 10px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--caution);
+}
+
+.review-item__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.review-item__title {
+  font-size: var(--text-14);
+  font-weight: 640;
+  line-height: 1.3;
+}
+
+.review-item__measure {
+  color: var(--signal);
+  font-size: var(--text-13);
+  font-weight: 560;
+  font-variant-numeric: tabular-nums;
+}
+
+.review-item--warning .review-item__measure,
+.review-item--info .review-item__measure {
+  color: var(--caution);
+}
+
+.review-item__culprits {
+  color: var(--ink-3);
+  font-size: var(--text-12);
+}
+
+.review-item__chevron {
+  margin-top: 4px;
+  color: var(--ink-3);
+  transition: transform var(--dur-base) var(--ease-drawer);
+}
+
+.review-item--open .review-item__chevron {
+  transform: rotate(180deg);
+}
+
+.review-item__more {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: 0 var(--s-3) var(--s-4) calc(28px + var(--s-3) + var(--s-2));
+  background: #f4f1e8;
+  font-size: var(--text-13);
+  animation: review-open var(--dur-base) var(--ease-drawer) both;
+}
+
+@keyframes review-open {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+.review-item__impact {
+  color: var(--ink);
+  font-weight: 540;
+}
+
+.review-item__message {
+  color: var(--ink-2);
+  line-height: 1.45;
+}
+
+.review-item__more cite {
+  color: var(--ink-3);
+  font-size: var(--text-12);
+  font-style: normal;
+}
+
+/* Замечания */
+.review__notes {
+  margin: var(--s-4) 0 0;
+}
+
+.review__notes summary {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2) var(--s-5);
+  color: var(--ink-2);
+  font-size: var(--text-13);
+  font-weight: 560;
+  cursor: pointer;
+  list-style: none;
+}
+
+.review__notes summary::-webkit-details-marker {
+  display: none;
+}
+
+.review__notes summary svg {
+  transition: transform var(--dur-base) var(--ease-drawer);
+}
+
+.review__notes[open] summary svg {
+  transform: rotate(180deg);
+}
+
+/* Исправление */
+.review__fix {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  margin-top: auto;
+  padding: var(--s-4) var(--s-5) var(--s-5);
+  background: var(--label);
+  box-shadow: 0 -1px 0 var(--label-edge), 0 -10px 18px -8px rgba(40, 36, 26, 0.18);
+}
+
+.review__fix-button {
+  justify-content: center;
+  min-height: 48px;
+  font-size: var(--text-16);
+  font-weight: 640;
+  color: var(--on-steel);
+  background: linear-gradient(180deg, var(--steel-600), var(--steel-700));
+  box-shadow: var(--emboss), 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+
+.review__fix-button:hover:not(:disabled) {
+  background: linear-gradient(180deg, var(--steel-500), var(--steel-600));
+}
+
+.review__fix-note {
+  color: var(--ink-2);
+  font-size: var(--text-12);
+  line-height: 1.45;
+}
+
+.proposal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  animation: review-open var(--dur-drawer) var(--ease-drawer) both;
+}
+
+.proposal__title {
+  font-size: var(--text-20);
+  font-weight: 680;
+  line-height: 1.2;
+}
+
+.proposal__hint {
+  margin-top: calc(var(--s-2) * -1);
+  color: var(--ink-2);
+  font-size: var(--text-12);
+}
+
+.proposal__shifts {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  border-top: 1px solid var(--label-edge);
+}
+
+.shift {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding: 7px 0;
+  border-bottom: 1px solid var(--label-edge);
+  font-size: var(--text-14);
+}
+
+.shift dt {
+  color: var(--ink-2);
+}
+
+.shift dd {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.shift dd svg {
+  color: var(--ink-3);
+}
+
+.shift__before {
+  color: var(--ink-3);
+}
+
+.shift dd b {
+  font-size: var(--text-16);
+  font-weight: 700;
+}
+
+.shift--better dd b {
+  color: var(--ok);
+}
+
+.shift--worse dd b {
+  color: var(--caution);
+}
+
+.proposal__objects {
+  color: var(--ink-3);
+  font-size: var(--text-12);
+  line-height: 1.45;
+}
+
+.proposal__actions {
+  display: flex;
+  gap: var(--s-2);
+}
+
+.proposal__actions .btn--brass {
+  flex: 1;
+  justify-content: center;
+  min-height: 46px;
+  font-size: var(--text-16);
+}
+
+.proposal__actions .btn--outline {
+  min-height: 46px;
+}

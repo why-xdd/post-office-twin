@@ -1,0 +1,24 @@
+# Развёртывание на Render: одна веб-служба (сайт и API) и база PostgreSQL.
+# Создаётся из панели Render: New → Blueprint → этот репозиторий.
+
+services:
+  - type: web
+    name: plan-ops
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: plan-ops-db
+          property: connectionString
+
+databases:
+  - name: plan-ops-db
+    plan: free
+    region: frankfurt
+    databaseName: plan_ops
+    user: plan_ops

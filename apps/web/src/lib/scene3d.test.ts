@@ -77,6 +77,25 @@ describe('объёмная сцена', () => {
     expect(scene.violations).toBe(1);
   });
 
+  it('предупреждение красит объект янтарным, а не красным', () => {
+    const report = {
+      findings: [
+        { rule_id: 'r', title: 'Не в своей зоне', severity: 'warning', category: 'integrity', source: '', clause: '', message: '', objects: ['eq_2'], unit: '' },
+      ],
+      errors: 0,
+      warnings: 1,
+      infos: 0,
+      checked_rules: [],
+      skipped_rules: [],
+    } as unknown as ValidationReport;
+    const scene = buildScene(plan(), types(), report);
+    const display = scene.prisms.find((p) => p.id === 'eq_2');
+    expect(display?.violation).toBe(false);
+    expect(display?.caution).toBe(true);
+    expect(scene.violations).toBe(0);
+    expect(scene.cautions).toBe(1);
+  });
+
   it('переносит типовые маршруты и ставит фигуры у входа внутрь помещения', () => {
     const scene = buildScene(plan(), types());
     expect(scene.ribbons).toHaveLength(1);

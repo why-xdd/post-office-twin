@@ -405,11 +405,12 @@ export function Plan3D({ types }: Props) {
         <p>
           {scene.violations > 0 ? (
             <>
-              <TriangleAlert size={14} aria-hidden="true" /> Красным и меткой сверху — объекты, участвующие в нарушениях: {scene.violations}
+              <TriangleAlert size={14} aria-hidden="true" /> Красным и меткой сверху — объекты в нарушениях: {scene.violations}
             </>
           ) : (
             'Нарушений на плане нет'
           )}
+          {scene.cautions > 0 && ` · янтарным — в предупреждениях: ${scene.cautions}`}
         </p>
         <p>Синие полосы — типовые маршруты посетителей. Фигуры у входа: человек 1,7 м и кресло-коляска 0,9 м.</p>
       </div>

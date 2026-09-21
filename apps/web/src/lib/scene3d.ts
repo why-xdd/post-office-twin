@@ -39,7 +39,10 @@ export interface Prism {
   /** Низ над полом и собственная высота. */
   base: number;
   height: number;
+  /** Участвует в ошибке проверки: красный цвет и метка сверху. */
   violation: boolean;
+  /** Участвует только в предупреждении: янтарный цвет без метки. */
+  caution: boolean;
   typeCode?: string;
 }
 
@@ -69,12 +72,13 @@ export interface Scene {
   centre: Point;
   radius: number;
   violations: number;
+  cautions: number;
 }
 
-function violatingObjects(report: ValidationReport | null): Set<string> {
+function objectsBySeverity(report: ValidationReport | null, severity: 'error' | 'warning'): Set<string> {
   const ids = new Set<string>();
   for (const finding of report?.findings ?? []) {
-    if (finding.severity !== 'error' && finding.severity !== 'warning') continue;
+    if (finding.severity !== severity) continue;
     for (const id of finding.objects) ids.add(id);
   }
   return ids;
@@ -152,6 +156,7 @@ function wallPrisms(plan: Plan, ceiling: number): Prism[] {
         base,
         height,
         violation: false,
+        caution: false,
       });
     };
 
@@ -216,7 +221,8 @@ export function buildScene(
   const lookup = (code: string): EquipmentTypeInfo | undefined =>
     types instanceof Map ? types.get(code) : types[code];
   const ceiling = plan.ops.ceiling_height_m ?? DEFAULT_CEILING_M;
-  const guilty = violatingObjects(report);
+  const guilty = objectsBySeverity(report, 'error');
+  const doubtful = objectsBySeverity(report, 'warning');
   const floor = outlinePoints(plan) ?? [];
 
   const prisms = wallPrisms(plan, ceiling);
@@ -233,6 +239,7 @@ export function buildScene(
       base,
       height,
       violation: guilty.has(item.id),
+      caution: !guilty.has(item.id) && doubtful.has(item.id),
       typeCode: item.type,
     });
     if (item.operator_position) {
@@ -246,6 +253,7 @@ export function buildScene(
         base: 0,
         height: 0.45,
         violation: guilty.has(item.id),
+        caution: !guilty.has(item.id) && doubtful.has(item.id),
       });
     }
   }
@@ -275,5 +283,6 @@ export function buildScene(
     centre: [(minX + maxX) / 2, (minY + maxY) / 2],
     radius: Math.max(2, Math.hypot(maxX - minX, maxY - minY) / 2),
     violations: prisms.filter((prism) => prism.violation && prism.kind === 'equipment').length,
+    cautions: prisms.filter((prism) => prism.caution && prism.kind === 'equipment').length,
   };
 }

@@ -52,6 +52,10 @@ const WORDING: Record<string, Wording> = {
     title: 'Объект записан не в ту зону',
     impact: 'Инвентаризация по зонам будет неверной.',
   },
+  zone_allowed_for_type: {
+    title: 'Объект стоит не в своей зоне',
+    impact: 'По справочнику этому оборудованию место в другой зоне.',
+  },
   clearance_from_wall: {
     title: 'Рабочее место прижато к стене',
     impact: 'Сотруднику не хватает места за рабочим местом.',
@@ -164,6 +168,7 @@ const RULE_ORDER = [
   'objects_inside_outline',
   'unique_ids',
   'zone_links',
+  'zone_allowed_for_type',
 ];
 
 const SEVERITY_ORDER = { error: 0, warning: 1, info: 2 } as const;

@@ -151,6 +151,34 @@ def overlaps(plan: Plan, tolerance_sqm: float = 0.001) -> list[Overlap]:
     return result
 
 
+OPERATOR_SPACE_M = 0.6
+
+
+def operator_space_conflicts(plan: Plan, tolerance_sqm: float = 0.005) -> list[tuple[str, str]]:
+    """Объекты, занявшие место сотрудника за стойкой: пары (владелец места, помеха).
+
+    Место сотрудника — квадрат 0,6 × 0,6 м вокруг operator_position. Физическим объектом его
+    не считают остальные проверки, поэтому без этой скамья могла встать прямо за кассу.
+    """
+    from shapely.geometry import box as square
+
+    half = OPERATOR_SPACE_M / 2.0
+    items = floor_equipment(plan)
+    polygons = {item.id: equipment_polygon(item) for item in items}
+    conflicts: list[tuple[str, str]] = []
+    for owner in plan.equipment:
+        if owner.operator_position is None:
+            continue
+        x, y = owner.operator_position
+        seat = square(x - half, y - half, x + half, y + half)
+        for item in items:
+            if item.id == owner.id:
+                continue
+            if polygons[item.id].intersection(seat).area > tolerance_sqm:
+                conflicts.append((owner.id, item.id))
+    return conflicts
+
+
 def zone_of_point(plan: Plan, point: tuple[float, float]) -> str | None:
     """Самая точная зона, содержащая точку.
 
@@ -179,6 +207,27 @@ def mismatched_zone_links(plan: Plan) -> list[dict[str, str | None]]:
     return problems
 
 
+def misplaced_by_type(plan: Plan, allowed: dict[str, list[str]]) -> list[dict[str, object]]:
+    """Объекты, стоящие в зоне, куда их тип по справочнику ставить не положено.
+
+    Зоны вложены друг в друга, поэтому объект считается на месте, если хотя бы одна из зон,
+    где стоит его центр, есть в списке допустимых. Типы без списка и объекты вне зон не
+    проверяются: для вторых есть своя проверка.
+    """
+    problems: list[dict[str, object]] = []
+    for item in plan.equipment:
+        permitted = allowed.get(item.type) or []
+        if not permitted:
+            continue
+        probe = Point(item.position)
+        here = [z for z in plan.zones if zone_polygon(z).contains(probe)]
+        if not here or any(z.type in permitted for z in here):
+            continue
+        smallest = min(here, key=lambda z: zone_polygon(z).area)
+        problems.append({"объект": item.id, "зона": smallest, "допустимые": permitted})
+    return problems
+
+
 def clearances(plan: Plan, limit_m: float) -> list[Clearance]:
     """Пары объектов, между которыми расстояние меньше заданного.
 
@@ -191,7 +240,9 @@ def clearances(plan: Plan, limit_m: float) -> list[Clearance]:
     for i in range(len(items)):
         for j in range(i + 1, len(items)):
             distance = polygons[i].distance(polygons[j])
-            if 0 < distance < limit_m:
+            # Сравнивается то же округлённое число, что показывается человеку: иначе 0,79999 м
+            # попадает в нарушение с текстом «0,8 м при требуемых 0,8 м».
+            if 0 < round(distance, PRECISION) < limit_m:
                 tight.append(
                     Clearance(
                         first_id=items[i].id,
@@ -210,7 +261,9 @@ def wall_clearances(plan: Plan, limit_m: float) -> list[Clearance]:
         poly = equipment_polygon(item)
         for wall_id, line in walls:
             distance = poly.distance(line)
-            if 0 < distance < limit_m:
+            # Сравнивается то же округлённое число, что показывается человеку: иначе 0,79999 м
+            # попадает в нарушение с текстом «0,8 м при требуемых 0,8 м».
+            if 0 < round(distance, PRECISION) < limit_m:
                 tight.append(
                     Clearance(
                         first_id=item.id,

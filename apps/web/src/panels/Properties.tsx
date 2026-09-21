@@ -308,6 +308,15 @@ const ATTRIBUTE_LABEL: Record<string, string> = {
   model: 'Модель',
   ip_address: 'IP-адрес',
   status: 'Статус',
+  window_number: 'Номер окна',
+  services: 'Услуги',
+  cells: 'Ячеек',
+  parcels_loaded: 'Загружено посылок',
+  usage_per_month: 'Обращений в месяц',
+  uses_per_month: 'Обращений в месяц',
+  diagonal_inch: 'Диагональ, дюймов',
+  shelves: 'Полок',
+  computer: 'Компьютер',
 };
 
 function readAttribute(item: Equipment, name: string): string {

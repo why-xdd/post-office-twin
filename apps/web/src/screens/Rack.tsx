@@ -10,7 +10,6 @@ import { Mark } from '../components/Mark';
 import { PlanThumb } from '../components/PlanThumb';
 import { ServerBadge } from '../components/ServerBadge';
 import { ApiError, api, type PlanSummary } from '../lib/api';
-import { withDemoPassports } from '../lib/demoPassports';
 import type { Plan, ValidationReport } from '../lib/plan';
 import { formatNumber, planArea, plural } from '../lib/planFacts';
 import { sortFindings } from '../lib/plainFindings';
@@ -33,7 +32,7 @@ interface Problem {
   details: string[];
 }
 
-const DEMO_TITLE = 'Пример: ОПС-1';
+const DEMO_TITLE = 'Демо: отделение «Заречное»';
 
 function describeError(error: unknown, fallback: string): Problem {
   if (error instanceof ApiError) return { title: error.message, details: error.details };
@@ -104,7 +103,7 @@ export function Rack() {
     setBusy('demo');
     setProblem(null);
     try {
-      const ref = await api.createPlan(DEMO_TITLE, withDemoPassports(sample), 'Файл заказчика с синтетическими паспортами оборудования');
+      const ref = await api.createPlan(DEMO_TITLE, sample, 'Демонстрационный план');
       navigate({ name: 'plan', id: ref.id });
     } catch (error) {
       setProblem(describeError(error, 'Не удалось открыть демо-план.'));

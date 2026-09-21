@@ -16,6 +16,7 @@ import time
 from typing import Any
 
 from pydantic import BaseModel, Field
+from shapely.geometry import Point as ShapelyPoint
 
 from app.assistant import capacity as capacity_model
 from app.assistant import language
@@ -979,6 +980,54 @@ def _polish_gain(before: objective.Score, after: objective.Score) -> str:
     return ("Улучшение: " + ", ".join(parts) + ".") if parts else "План становится удобнее."
 
 
+def recommend_zone_moves(plan: Plan) -> list[Recommendation]:
+    """Объекты не в своей зоне по справочнику: перенос в ближайшую допустимую зону.
+
+    Стеллаж посреди клиентского зала проход не перекрывает и ошибкой не считается, но стоит
+    не там, где ему положено. Ассистент ищет место в зоне допустимого типа теми же расчётами,
+    что и для команды «перенеси в зону», и объясняет перенос ссылкой на справочник.
+    """
+    types = equipment_types(plan)
+    results: list[Recommendation] = []
+    for problem in core.misplaced_by_type(plan, {code: t.allowed_zones for code, t in types.items()}):
+        item = next(e for e in plan.equipment if e.id == problem["объект"])
+        allowed = [z for z in plan.zones if z.type in problem["допустимые"]]
+        if not allowed:
+            continue
+        target = min(allowed, key=lambda z: core.zone_polygon(z).centroid.distance(ShapelyPoint(item.position)))
+        action = language.Action(kind="move", object_id=item.id, zone_id=target.id, text="")
+        recommendation = _move_recommendation(plan, action)
+        if recommendation is None:
+            continue
+        type_label = types[item.type].label
+        permitted = ", ".join(z.label or z.id for z in allowed)
+        recommendation.id = f"zone:move:{item.id}"
+        recommendation.priority = 2
+        recommendation.title = f"Перенести в «{target.label or target.id}»: {_object_name(plan, item.id)}"
+        warnings = next((e for e in recommendation.effects if e.key == "warnings"), None)
+        recommendation.summary = f"Новое место в зоне «{target.label or target.id}»."
+        if warnings is not None and warnings.before is not None and warnings.after is not None:
+            recommendation.summary += (
+                f" Предупреждений станет {int(warnings.after)} вместо {int(warnings.before)}, ошибок не прибавится."
+            )
+        recommendation.reasons = [
+            Reason(
+                text=(
+                    f"По справочнику типов оборудования «{type_label}» ставится только в зонах: "
+                    f"{permitted}. Сейчас объект стоит в «{problem['зона'].label or problem['зона'].id}»."
+                ),
+                source="Справочник типов оборудования плана",
+            ),
+            *recommendation.reasons,
+        ]
+        recommendation.assumptions = [
+            "Допустимые зоны берутся из справочника плана: изменив справочник, можно разрешить другую зону.",
+            *recommendation.assumptions,
+        ]
+        results.append(recommendation)
+    return results
+
+
 def advise(plan: Plan) -> AssistantReport:
     started = time.perf_counter()
     before = summarize(plan)
@@ -986,6 +1035,7 @@ def advise(plan: Plan) -> AssistantReport:
     completeness = completeness_model.analyze(plan, capacity)
     recommendations = [
         *recommend_fixes(plan, before),
+        *recommend_zone_moves(plan),
         *recommend_capacity(plan, before, capacity),
         *recommend_completeness(plan, before, capacity),
     ]

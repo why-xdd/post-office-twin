@@ -10,12 +10,14 @@ import { TextField } from '../components/fields';
 import { Plate } from '../components/Plate';
 import type { AddressBook } from '../lib/addresses';
 import { key } from '../lib/addresses';
-import { SYNTHETIC_MARK } from '../lib/demoPassports';
 import type { Equipment, EquipmentTypeInfo } from '../lib/plan';
 import { formatNumber } from '../lib/planFacts';
 import { useWorkspace } from '../state/store';
 import { glyphFor } from '../canvas/glyphs';
 import './inventory.css';
+
+/** Отметка демонстрационных данных: сотрудники и учётные номера в демо-плане придуманы. */
+const SYNTHETIC_MARK = 'synthetic';
 
 interface PassportProps {
   book: AddressBook;

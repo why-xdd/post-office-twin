@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from shapely.geometry import Point as ShapelyPoint
 from shapely.geometry import box
 
+from app.dictionaries import equipment_types, zone_types
 from app.geometry import core, passability
 from app.models import Plan
 from app.rules.catalog import (
@@ -495,6 +496,21 @@ def structural_findings(plan: Plan) -> list[Finding]:
             )
         )
 
+    names = {item.id: item.label or item.id for item in plan.equipment}
+    for owner_id, blocker_id in core.operator_space_conflicts(plan):
+        findings.append(
+            Finding(
+                rule_id="operator_space_free",
+                title="Место сотрудника занято",
+                message=(
+                    f"«{names[blocker_id]}» стоит на месте сотрудника у «{names[owner_id]}»: "
+                    "работать за стойкой невозможно."
+                ),
+                objects=[blocker_id, owner_id],
+                **base,
+            )
+        )
+
     for problem in core.mismatched_zone_links(plan):
         declared = problem["указана"] or "не указана"
         actual = problem["фактически"] or "вне зон"
@@ -507,6 +523,27 @@ def structural_findings(plan: Plan) -> list[Finding]:
                     f"а фактически он расположен в «{actual}»."
                 ),
                 objects=[str(problem["объект"])],
+                **{**base, "severity": Severity.WARNING},
+            )
+        )
+
+    types = equipment_types(plan)
+    zone_labels = {code: z.label for code, z in zone_types(plan).items()}
+    for problem in core.misplaced_by_type(plan, {code: t.allowed_zones for code, t in types.items()}):
+        item_id = str(problem["объект"])
+        item = next(e for e in plan.equipment if e.id == item_id)
+        zone = problem["зона"]
+        type_label = types[item.type].label if item.type in types else item.type
+        permitted = ", ".join(zone_labels.get(code, code).lower() for code in problem["допустимые"])
+        findings.append(
+            Finding(
+                rule_id="zone_allowed_for_type",
+                title="Объект не в своей зоне",
+                message=(
+                    f"«{item.label or item_id}» ({type_label.lower()}) стоит в зоне «{zone.label or zone.id}», "
+                    f"а по справочнику этому типу место в: {permitted}."
+                ),
+                objects=[item_id],
                 **{**base, "severity": Severity.WARNING},
             )
         )

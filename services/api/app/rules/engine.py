@@ -496,6 +496,21 @@ def structural_findings(plan: Plan) -> list[Finding]:
             )
         )
 
+    names = {item.id: item.label or item.id for item in plan.equipment}
+    for owner_id, blocker_id in core.operator_space_conflicts(plan):
+        findings.append(
+            Finding(
+                rule_id="operator_space_free",
+                title="Место сотрудника занято",
+                message=(
+                    f"«{names[blocker_id]}» стоит на месте сотрудника у «{names[owner_id]}»: "
+                    "работать за стойкой невозможно."
+                ),
+                objects=[blocker_id, owner_id],
+                **base,
+            )
+        )
+
     for problem in core.mismatched_zone_links(plan):
         declared = problem["указана"] or "не указана"
         actual = problem["фактически"] or "вне зон"

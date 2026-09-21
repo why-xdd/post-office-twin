@@ -151,6 +151,34 @@ def overlaps(plan: Plan, tolerance_sqm: float = 0.001) -> list[Overlap]:
     return result
 
 
+OPERATOR_SPACE_M = 0.6
+
+
+def operator_space_conflicts(plan: Plan, tolerance_sqm: float = 0.005) -> list[tuple[str, str]]:
+    """Объекты, занявшие место сотрудника за стойкой: пары (владелец места, помеха).
+
+    Место сотрудника — квадрат 0,6 × 0,6 м вокруг operator_position. Физическим объектом его
+    не считают остальные проверки, поэтому без этой скамья могла встать прямо за кассу.
+    """
+    from shapely.geometry import box as square
+
+    half = OPERATOR_SPACE_M / 2.0
+    items = floor_equipment(plan)
+    polygons = {item.id: equipment_polygon(item) for item in items}
+    conflicts: list[tuple[str, str]] = []
+    for owner in plan.equipment:
+        if owner.operator_position is None:
+            continue
+        x, y = owner.operator_position
+        seat = square(x - half, y - half, x + half, y + half)
+        for item in items:
+            if item.id == owner.id:
+                continue
+            if polygons[item.id].intersection(seat).area > tolerance_sqm:
+                conflicts.append((owner.id, item.id))
+    return conflicts
+
+
 def zone_of_point(plan: Plan, point: tuple[float, float]) -> str | None:
     """Самая точная зона, содержащая точку.
 

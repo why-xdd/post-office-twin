@@ -13,7 +13,9 @@ __pycache__/
 /data/*.zip
 /research/sp59.txt
 *.sqlite
+*.sqlite-*
 *.db
+/services/api/storage/
 
 # среда
 .env

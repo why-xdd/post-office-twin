@@ -22,3 +22,6 @@ __pycache__/
 .env.*
 !.env.example
 .DS_Store
+
+# собранные материалы для сдачи
+/build/

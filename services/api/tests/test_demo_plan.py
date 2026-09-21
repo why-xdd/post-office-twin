@@ -57,3 +57,17 @@ def test_object_in_wrong_zone_is_found_and_moved(plan: Plan) -> None:
         f.rule_id == "zone_allowed_for_type" and "eq_rack_hall" in f.objects for f in validate(moved, {}).findings
     )
     assert validate(moved, {}).errors <= report.errors
+
+
+def test_nothing_stands_on_operator_space(plan: Plan) -> None:
+    """Скамья за стойкой кассы — ошибка, и ассистент такое место не предлагает."""
+    document = plan.model_dump(by_alias=True, exclude_none=True)
+    window = next(e for e in document["equipment"] if e["id"] == "eq_win_1")
+    bench = next(e for e in document["equipment"] if e["id"] == "eq_bench_3")
+    bench["position"] = list(window["operator_position"])
+    blocked = Plan.model_validate(document)
+    findings = [f for f in validate(blocked, {}).findings if f.rule_id == "operator_space_free"]
+    assert findings and "eq_bench_3" in findings[0].objects
+
+    improved = Plan.model_validate(recommend.improve(plan).improved_plan)
+    assert not [f for f in validate(improved, {}).findings if f.rule_id == "operator_space_free"]

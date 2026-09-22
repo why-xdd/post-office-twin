@@ -90,7 +90,8 @@ def main() -> None:
         lines.append(
             f"{number};{issued:%d.%m.%Y};{issued:%H:%M:%S};{called:%H:%M:%S};{finished:%H:%M:%S};{window};{name}"
         )
-    OUT.write_text("\r\n".join(lines) + "\r\n", encoding="utf-8")
+    # С BOM: иначе Excel в русской Windows откроет файл как Windows-1251 и покажет кракозябры.
+    OUT.write_text("\r\n".join(lines) + "\r\n", encoding="utf-8-sig")
     print(f"{OUT}: {len(rows)} талонов за {len(DAYS)} дней")
 
 

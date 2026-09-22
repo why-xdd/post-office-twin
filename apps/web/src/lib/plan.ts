@@ -65,6 +65,7 @@ export interface Zone {
 }
 
 export interface Inventory {
+  inventory_number?: string;
   serial_number?: string;
   vendor?: string;
   model?: string;
@@ -388,4 +389,81 @@ export interface ImprovementReport {
   improved_plan: Plan;
   effects: Effect[];
   elapsed_ms: number;
+}
+
+/** Сверка плана с ведомостью основных средств из учётной системы (1С). */
+export interface AccountingRow {
+  line: number;
+  inventory_number?: string | null;
+  name?: string | null;
+  serial_number?: string | null;
+  location?: string | null;
+  plan_id?: string | null;
+}
+
+export interface ReconcileMatch {
+  object_id: string;
+  label: string;
+  inventory_number?: string | null;
+  zone?: string | null;
+  accounting_location?: string | null;
+  location_differs: boolean;
+  serial_differs: boolean;
+  matched_by: string;
+}
+
+export interface ReconcileSurplus {
+  object_id: string;
+  label: string;
+  inventory_number?: string | null;
+  serial_number?: string | null;
+  zone?: string | null;
+}
+
+export interface Reconciliation {
+  matched: ReconcileMatch[];
+  missing_on_plan: AccountingRow[];
+  not_in_accounting: ReconcileSurplus[];
+  location_mismatches: number;
+  serial_mismatches: number;
+  rows_read: number;
+  columns_recognised: Record<string, string>;
+  summary: string;
+}
+
+/** Очередь по фактическим данным: журнал электронной очереди или счётчик посетителей. */
+export interface QueueHour {
+  hour: number;
+  arrivals_per_hour: number;
+  measured_wait_min?: number | null;
+  measured_wait_p90_min?: number | null;
+  measured_service_min?: number | null;
+  windows_open?: number | null;
+  model_wait_min?: number | null;
+  stable: boolean;
+  windows_needed: number;
+  short: boolean;
+}
+
+export interface QueueGroupHours {
+  name: string;
+  windows_on_plan: number;
+  service_min: number;
+  service_source: string;
+  hours: QueueHour[];
+  share_waited_over_limit?: number | null;
+  staff_hours_needed: number;
+  staff_hours_open?: number | null;
+}
+
+export interface QueueLogReport {
+  source: string;
+  days: number;
+  records: number;
+  skipped_rows: number;
+  groups: QueueGroupHours[];
+  peak_hours: string[];
+  declared_peak_hours: string[];
+  summary: string[];
+  assumptions: string[];
 }

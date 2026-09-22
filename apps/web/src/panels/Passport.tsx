@@ -154,6 +154,7 @@ export function Passport({ book, types }: PassportProps) {
         </h3>
         {editing ? (
           <div className="fields">
+            <TextField label="Инвентарный номер" wide value={item.inventory?.inventory_number} onCommit={(v) => update((t) => { t.inventory = { ...(t.inventory ?? {}), inventory_number: v || undefined }; })} />
             <TextField label="Серийный номер" wide value={item.inventory?.serial_number} onCommit={(v) => update((t) => { t.inventory = { ...(t.inventory ?? {}), serial_number: v || undefined }; })} />
             <TextField label="Производитель" value={item.inventory?.vendor} onCommit={(v) => update((t) => { t.inventory = { ...(t.inventory ?? {}), vendor: v || undefined }; })} />
             <TextField label="Модель" value={item.inventory?.model} onCommit={(v) => update((t) => { t.inventory = { ...(t.inventory ?? {}), model: v || undefined }; })} />
@@ -162,6 +163,8 @@ export function Passport({ book, types }: PassportProps) {
           </div>
         ) : item.inventory ? (
           <dl className="passport__facts">
+            <dt>Инвентарный №</dt>
+            <dd>{item.inventory.inventory_number ?? '—'}</dd>
             <dt>Серийный №</dt>
             <dd>{item.inventory.serial_number ?? '—'}</dd>
             <dt>Модель</dt>

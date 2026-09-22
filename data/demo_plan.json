@@ -378,6 +378,7 @@
         "data_origin": "synthetic"
       },
       "inventory": {
+        "inventory_number": "ЗР-000001",
         "serial_number": "ЗР-ОК-0101",
         "vendor": "Поставщик А",
         "model": "Операционная касса ОК-2",
@@ -423,6 +424,7 @@
         "data_origin": "synthetic"
       },
       "inventory": {
+        "inventory_number": "ЗР-000002",
         "serial_number": "ЗР-ОК-0102",
         "vendor": "Поставщик А",
         "model": "Операционная касса ОК-2",
@@ -468,6 +470,7 @@
         "data_origin": "synthetic"
       },
       "inventory": {
+        "inventory_number": "ЗР-000003",
         "serial_number": "ЗР-ОК-0103",
         "vendor": "Поставщик А",
         "model": "Операционная касса ОК-2",
@@ -511,6 +514,7 @@
         "data_origin": "synthetic"
       },
       "inventory": {
+        "inventory_number": "ЗР-000004",
         "serial_number": "ЗР-ПВЗ-0201",
         "vendor": "Поставщик А",
         "model": "Стойка выдачи СВ-20",
@@ -550,6 +554,7 @@
         "data_origin": "synthetic"
       },
       "inventory": {
+        "inventory_number": "ЗР-000005",
         "serial_number": "ЗР-ПМ-0301",
         "vendor": "Поставщик Е",
         "model": "Почтомат ПМ-48",
@@ -580,6 +585,7 @@
         "data_origin": "synthetic"
       },
       "inventory": {
+        "inventory_number": "ЗР-000006",
         "serial_number": "ЗР-ТЭ-0401",
         "vendor": "Поставщик Б",
         "model": "ТСО-500",
@@ -658,6 +664,7 @@
         "data_origin": "synthetic"
       },
       "inventory": {
+        "inventory_number": "ЗР-000007",
         "serial_number": "ЗР-БМ-0501",
         "vendor": "Банк-партнёр",
         "model": "Банкомат ATM-8",
@@ -686,6 +693,7 @@
         "data_origin": "synthetic"
       },
       "inventory": {
+        "inventory_number": "ЗР-000008",
         "serial_number": "ЗР-СО-0601",
         "vendor": "Поставщик Б",
         "model": "Стойка оплаты СО-1",
@@ -712,6 +720,7 @@
         "data_origin": "synthetic"
       },
       "inventory": {
+        "inventory_number": "ЗР-000009",
         "serial_number": "ЗР-ТБ-0701",
         "vendor": "Поставщик Д",
         "model": "Табло ТО-55",
@@ -783,6 +792,7 @@
         "data_origin": "synthetic"
       },
       "inventory": {
+        "inventory_number": "ЗР-000010",
         "serial_number": "ЗР-СТ-0801",
         "vendor": "Поставщик Г",
         "model": "СТ-2000",
@@ -809,6 +819,7 @@
         "data_origin": "synthetic"
       },
       "inventory": {
+        "inventory_number": "ЗР-000011",
         "serial_number": "ЗР-КМ-0901",
         "vendor": "Поставщик Ж",
         "model": "Камера IP-2",
@@ -835,6 +846,7 @@
         "data_origin": "synthetic"
       },
       "inventory": {
+        "inventory_number": "ЗР-000012",
         "serial_number": "ЗР-КМ-0902",
         "vendor": "Поставщик Ж",
         "model": "Камера IP-2",
@@ -860,6 +872,7 @@
         "data_origin": "synthetic"
       },
       "inventory": {
+        "inventory_number": "ЗР-000013",
         "serial_number": "ЗР-ПС-1001",
         "vendor": "Поставщик З",
         "model": "ИП-212",
@@ -886,6 +899,7 @@
         "data_origin": "synthetic"
       },
       "inventory": {
+        "inventory_number": "ЗР-000014",
         "serial_number": "ЗР-СТ-0802",
         "vendor": "Поставщик Г",
         "model": "СТ-2000",
@@ -912,6 +926,7 @@
         "data_origin": "synthetic"
       },
       "inventory": {
+        "inventory_number": "ЗР-000015",
         "serial_number": "ЗР-СТ-0803",
         "vendor": "Поставщик Г",
         "model": "СТ-2000",
@@ -937,6 +952,7 @@
         "data_origin": "synthetic"
       },
       "inventory": {
+        "inventory_number": "ЗР-000016",
         "serial_number": "ЗР-СФ-1101",
         "vendor": "Поставщик В",
         "model": "Сейф С-90",
@@ -963,6 +979,7 @@
         "data_origin": "synthetic"
       },
       "inventory": {
+        "inventory_number": "ЗР-000017",
         "serial_number": "ЗР-АРМ-1201",
         "vendor": "Поставщик А",
         "model": "АРМ-П",
@@ -1000,6 +1017,7 @@
         "data_origin": "synthetic"
       },
       "inventory": {
+        "inventory_number": "ЗР-000018",
         "serial_number": "ЗР-ПР-1301",
         "vendor": "Поставщик А",
         "model": "МФУ-40",
@@ -1025,6 +1043,7 @@
         "data_origin": "synthetic"
       },
       "inventory": {
+        "inventory_number": "ЗР-000019",
         "serial_number": "ЗР-ПЭ-1401",
         "vendor": "Поставщик Д",
         "model": "ПЭ-4",
@@ -1050,6 +1069,7 @@
         "data_origin": "synthetic"
       },
       "inventory": {
+        "inventory_number": "ЗР-000020",
         "serial_number": "ЗР-ВС-1501",
         "vendor": "Поставщик В",
         "model": "Весы ВП-60",
@@ -1075,6 +1095,7 @@
         "data_origin": "synthetic"
       },
       "inventory": {
+        "inventory_number": "ЗР-000021",
         "serial_number": "ЗР-СС-1601",
         "vendor": "Поставщик Г",
         "model": "СС-1600"
@@ -1099,6 +1120,7 @@
         "data_origin": "synthetic"
       },
       "inventory": {
+        "inventory_number": "ЗР-000022",
         "serial_number": "ЗР-КМ-0903",
         "vendor": "Поставщик Ж",
         "model": "Камера IP-2",
@@ -1124,6 +1146,7 @@
         "data_origin": "synthetic"
       },
       "inventory": {
+        "inventory_number": "ЗР-000023",
         "serial_number": "ЗР-ОС-1701",
         "vendor": "Поставщик З",
         "model": "Прибор ОС-8",
@@ -1149,6 +1172,7 @@
         "data_origin": "synthetic"
       },
       "inventory": {
+        "inventory_number": "ЗР-000024",
         "serial_number": "ЗР-ПС-1002",
         "vendor": "Поставщик З",
         "model": "ИП-212",
@@ -1175,6 +1199,7 @@
         "data_origin": "synthetic"
       },
       "inventory": {
+        "inventory_number": "ЗР-000025",
         "serial_number": "ЗР-АРМ-1202",
         "vendor": "Поставщик А",
         "model": "АРМ-П",
@@ -1225,6 +1250,7 @@
         "data_origin": "synthetic"
       },
       "inventory": {
+        "inventory_number": "ЗР-000026",
         "serial_number": "ЗР-ПС-1003",
         "vendor": "Поставщик З",
         "model": "ИП-212",

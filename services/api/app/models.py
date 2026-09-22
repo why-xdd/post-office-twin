@@ -89,6 +89,7 @@ class Zone(Base):
 class Inventory(Base):
     """Учётные атрибуты объекта: инвентарный номер, сроки обслуживания."""
 
+    inventory_number: str | None = Field(default=None, description="Инвентарный номер в учётной системе (1С)")
     serial_number: str | None = None
     vendor: str | None = None
     model: str | None = None

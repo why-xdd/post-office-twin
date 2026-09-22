@@ -471,3 +471,117 @@
   padding: 0 var(--s-3);
   font-size: var(--text-12);
 }
+
+/* Очередь по данным отделения */
+.qlog {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  margin-top: var(--s-2);
+}
+
+.qlog__source {
+  color: var(--ink-3);
+  font-size: var(--text-12);
+  line-height: 1.4;
+}
+
+.qlog__summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0 0 0 var(--s-4);
+  font-size: var(--text-13);
+  line-height: 1.4;
+}
+
+.qlog__group h4 {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: var(--s-2);
+  font-size: var(--text-13);
+  font-weight: 640;
+}
+
+.qlog__group h4 span {
+  color: var(--ink-3);
+  font-size: var(--text-12);
+  font-weight: 450;
+}
+
+.qlog__chart {
+  margin: 0;
+}
+
+.qlog__plot {
+  position: relative;
+  border-bottom: 1px solid var(--ink-3);
+}
+
+.qlog__bar {
+  position: absolute;
+  bottom: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  padding: 0 1px;
+  border: 0;
+  background: transparent;
+  cursor: default;
+}
+
+.qlog__fill {
+  width: 100%;
+  border-radius: 3px 3px 0 0;
+  background: var(--steel-500);
+  transition: background-color 120ms ease-out;
+}
+
+.qlog__bar--short .qlog__fill {
+  background: var(--signal);
+}
+
+.qlog__bar--active .qlog__fill,
+.qlog__bar:focus-visible .qlog__fill {
+  background: var(--ink);
+}
+
+.qlog__bar:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
+
+.qlog__flag {
+  margin-bottom: 2px;
+  color: var(--signal);
+  font-size: var(--text-11);
+  font-weight: 660;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.qlog__axis {
+  position: relative;
+  height: 16px;
+  color: var(--ink-3);
+  font-size: var(--text-11);
+  font-variant-numeric: tabular-nums;
+}
+
+.qlog__axis span {
+  position: absolute;
+  top: 2px;
+  transform: translateX(-50%);
+}
+
+.qlog__tip {
+  min-height: 2.8em;
+  margin-top: var(--s-1);
+  color: var(--ink-2);
+  font-size: var(--text-12);
+  line-height: 1.4;
+}

@@ -9,6 +9,7 @@ from typing import Any
 
 import time
 import uuid
+from urllib.parse import quote
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,9 +19,10 @@ from pydantic import BaseModel, Field, ValidationError
 from app.assistant import capacity as capacity_model
 from app.cache import assistant_cache, fingerprint, validation_cache
 from app.concurrency import heavy_slot
-from app.assistant import conclusion, recommend
+from app.assistant import conclusion, queue_log, recommend
 from app.assistant.capacity import CapacityReport
 from app.assistant.recommend import AssistantReport, ImprovementReport, Recommendation
+from app import exchange
 from app.dictionaries import equipment_types, zone_types
 from app.geometry import core
 from app.importer import build as importer
@@ -77,7 +79,7 @@ async def trace_and_limit(request: Request, call_next):
         return Response(
             status_code=413,
             content=json.dumps(
-                {"detail": f"Файл плана больше {MAX_BODY_BYTES // (1024 * 1024)} МБ — такой план не принимается."},
+                {"detail": f"Запрос больше {MAX_BODY_BYTES // (1024 * 1024)} МБ — такой файл не принимается."},
                 ensure_ascii=False,
             ),
             media_type="application/json",
@@ -282,6 +284,35 @@ class PlaceRequest(BaseModel):
     zone_id: str | None = Field(default=None, description="Ограничить поиск зоной")
 
 
+@app.post("/api/exchange/1c/export", summary="Опись оборудования для загрузки в 1С")
+def exchange_export(payload: SaveVersionRequest) -> Response:
+    """Таблица CSV (UTF-8, «;»): инвентарный номер, наименование, серийный номер, местонахождение."""
+    plan = _parse_plan(payload.document)
+    filename = exchange.export_filename(plan)
+    return Response(
+        content=exchange.export_csv(plan),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
+    )
+
+
+@app.post("/api/exchange/1c/reconcile", response_model=exchange.Reconciliation, summary="Сверка плана с учётом 1С")
+async def exchange_reconcile(document: str = Form(...), file: UploadFile = File(...)) -> exchange.Reconciliation:
+    """Ведомость основных средств из 1С (CSV) против оборудования на плане."""
+    try:
+        plan = _parse_plan(json.loads(document))
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=422, detail="План должен быть JSON-документом") from None
+    raw = await file.read()
+    if len(raw) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Файл учёта больше 5 МБ")
+    try:
+        rows, recognised = exchange.read_accounting(exchange.decode(raw))
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from None
+    return exchange.reconcile(plan, rows, recognised)
+
+
 @app.post("/api/dictionaries", summary="Справочники зон и типов оборудования")
 def get_dictionaries(payload: SaveVersionRequest | None = None) -> dict[str, Any]:
     """Встроенные справочники, дополненные и переопределённые справочником из плана."""
@@ -295,6 +326,21 @@ def get_dictionaries(payload: SaveVersionRequest | None = None) -> dict[str, Any
 @app.post("/api/capacity", response_model=CapacityReport, summary="Пропускная способность в час пик")
 def plan_capacity(payload: SaveVersionRequest) -> CapacityReport:
     return capacity_model.analyze(_parse_plan(payload.document))
+
+
+@app.post("/api/capacity/log", response_model=queue_log.QueueLogReport, summary="Очередь по журналу или счётчику")
+async def plan_queue_log(document: str = Form(...), file: UploadFile = File(...)) -> queue_log.QueueLogReport:
+    """Журнал электронной очереди или почасовой счётчик посетителей (CSV) против окон на плане."""
+    try:
+        plan = _parse_plan(json.loads(document))
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=422, detail="План должен быть JSON-документом") from None
+    raw = await file.read()
+    try:
+        source, records, skipped = queue_log.read(exchange.decode(raw))
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from None
+    return queue_log.analyze(plan, source, records, skipped)
 
 
 @app.post("/api/assistant", response_model=AssistantReport, summary="Рекомендации ассистента")

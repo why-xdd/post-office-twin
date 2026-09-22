@@ -15,6 +15,8 @@ import type {
   ImprovementReport,
   Plan,
   PlanMetrics,
+  QueueLogReport,
+  Reconciliation,
   Recommendation,
   Rule,
   ValidationReport,
@@ -182,6 +184,38 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ document }),
     }),
+
+  /** Опись оборудования для 1С: файл, а не JSON, поэтому мимо общего request. */
+  exportForAccounting: async (document: Plan): Promise<{ blob: Blob; filename: string }> => {
+    let response: Response;
+    try {
+      response = await fetch(`${BASE_URL}/api/exchange/1c/export`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ document }),
+      });
+    } catch {
+      throw new ApiError('Не удалось связаться с сервером. Проверьте, что сервис запущен и доступен.', 0);
+    }
+    if (!response.ok) throw await toError(response);
+    const disposition = response.headers.get('content-disposition') ?? '';
+    const encoded = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
+    return { blob: await response.blob(), filename: encoded ? decodeURIComponent(encoded) : 'опись для 1С.csv' };
+  },
+
+  queueLog: (document: Plan, file: File) => {
+    const form = new FormData();
+    form.append('document', JSON.stringify(document));
+    form.append('file', file);
+    return request<QueueLogReport>('/api/capacity/log', { method: 'POST', body: form });
+  },
+
+  reconcile: (document: Plan, file: File) => {
+    const form = new FormData();
+    form.append('document', JSON.stringify(document));
+    form.append('file', file);
+    return request<Reconciliation>('/api/exchange/1c/reconcile', { method: 'POST', body: form });
+  },
 
   importDrawing: (file: File, realWidthM: number, name: string) => {
     const form = new FormData();

@@ -42,6 +42,7 @@ import type {
 } from '../lib/plan';
 import { formatNumber, plural } from '../lib/planFacts';
 import { useWorkspace } from '../state/store';
+import { QueueLog } from './QueueLog';
 import './assistant.css';
 
 interface AssistantProps {
@@ -362,6 +363,8 @@ export function Assistant({ book, types, onFocusObject, onNotice }: AssistantPro
       )}
 
       {capacity && <CapacityBlock capacity={capacity} />}
+
+      {doc && <QueueLog doc={doc} />}
 
       <section className="assistant__section">
         <header className="assistant__section-head">

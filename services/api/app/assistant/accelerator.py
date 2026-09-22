@@ -63,6 +63,16 @@ FEATURES = (
     "type_atm",
     "type_info_stand",
     "type_package_drop_box",
+    "route_distance",
+    "route_hits",
+    "access_distance",
+    "route_pinch",
+    "entrance_relative",
+    "in_waiting",
+    "in_queue_accumulator",
+    "in_vestibule",
+    "in_back_office",
+    "in_staff_room",
 )
 
 
@@ -85,15 +95,26 @@ class Tree:
 
 @dataclass(frozen=True)
 class Quality:
-    """Голова, предсказывающая величину цели: чем меньше, тем лучше расстановка."""
+    """Вторая голова: насколько хорошей будет расстановка, если объект встанет сюда.
+
+    Классификатор «место войдёт в лучшие» (loss="logistic") и голова, обученная на порядок
+    (loss="lambdarank"), отвечают «больше — лучше», регрессия на величину цели — «меньше —
+    лучше». Наружу отдаётся всегда «меньше — лучше», чтобы порядок проверки не зависел от того,
+    как голова обучена.
+    """
 
     trees: list[Tree]
     init: float
     learning_rate: float
     importance: dict[str, float]
+    loss: str = "squared"
+
+    def raw(self, row: list[float]) -> float:
+        return self.init + self.learning_rate * sum(tree.predict(row) for tree in self.trees)
 
     def value(self, row: list[float]) -> float:
-        return self.init + self.learning_rate * sum(tree.predict(row) for tree in self.trees)
+        raw = self.raw(row)
+        return -raw if self.loss in ("logistic", "lambdarank") else raw
 
     def explain(self) -> list[tuple[str, float]]:
         return sorted(self.importance.items(), key=lambda item: -item[1])
@@ -157,6 +178,7 @@ def _parse(data: dict) -> Model:
             init=float(head["init"]),
             learning_rate=float(head.get("learning_rate", 1.0)),
             importance={k: float(v) for k, v in head.get("importance", {}).items()},
+            loss=str(head.get("loss", "squared")),
         )
     return Model(
         trees=trees,

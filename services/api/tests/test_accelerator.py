@@ -38,10 +38,36 @@ def test_second_head_earns_its_place() -> None:
     model = accelerator.load()
     assert model is not None and model.quality is not None, "в поставке должны быть обе головы"
     metrics = model.metrics
-    # Проигрыш лучшему месту: чем меньше, тем ближе выбор сервиса к идеальному.
-    assert metrics["проигрыш лучшему месту — две головы"] < metrics["проигрыш лучшему месту — одна голова"]
-    assert metrics["проигрыш лучшему месту — одна голова"] < metrics["проигрыш лучшему месту — прежний порядок"]
-    assert metrics["лучшее место в первых 10 — две головы"] >= metrics["лучшее место в первых 10 — прежний порядок"]
+    top = search.DEFAULT_TOP_K
+    # Сервис полностью проверяет первые `top` мест: там и меряется проигрыш лучшему месту.
+    # Средний проигрыш на десятке шумный — его определяют несколько списков с крупным промахом,
+    # поэтому на десятке проверяется доля списков, где лучшее место вообще попало наверх.
+    assert metrics[f"проигрыш лучшему месту в первых {top} — две головы"] < metrics[f"проигрыш лучшему месту в первых {top} — одна голова"]
+    assert metrics[f"проигрыш лучшему месту в первых {top} — одна голова"] < metrics[f"проигрыш лучшему месту в первых {top} — прежний порядок"]
+    assert metrics[f"лучшее место в первых {top} — две головы"] > metrics[f"лучшее место в первых {top} — одна голова"]
+    assert metrics["лучшее место в первых 10 — две головы"] > metrics["лучшее место в первых 10 — одна голова"]
+    assert metrics["NDCG@10 второй головы"] > metrics["NDCG@10 — прежний порядок"]
+
+
+def test_ranking_head_answers_lower_is_better(plan: Plan) -> None:
+    """Классификатор «место войдёт в лучшие» отвечает «больше — лучше»; наружу — «меньше — лучше»."""
+    accelerator.reset()
+    model = accelerator.load()
+    assert model is not None and model.quality is not None
+    assert model.quality.loss == "logistic"
+    candidates, _ = search.generate(plan, "waiting_seat")
+    row = [float(candidates[0].features.get(name, 0.0)) for name in model.features]
+    assert model.quality.value(row) == pytest.approx(-model.quality.raw(row))
+
+
+def test_moving_an_object_ignores_the_second_head(plan: Plan, monkeypatch: pytest.MonkeyPatch) -> None:
+    """При перестановке порядок задаёт только первая голова: вторая училась на новых объектах."""
+    accelerator.reset()
+    candidates, _ = search.generate(plan, "waiting_seat")
+    candidates = candidates[:60]
+    moved = search._prioritise(candidates, with_quality=False)
+    monkeypatch.setattr(search, "QUALITY_WEIGHT", 0.0)
+    assert [c.position for c in moved] == [c.position for c in search._prioritise(candidates)]
 
 
 def test_file_without_second_head_still_loads(tmp_path: Path) -> None:

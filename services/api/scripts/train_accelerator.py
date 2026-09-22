@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import multiprocessing as mp
 import random
 from datetime import datetime, timezone
@@ -231,25 +232,63 @@ def collect(
     )
 
 
-def normalise(scores: np.ndarray, groups: np.ndarray) -> np.ndarray:
-    """Цель для второй головы: насколько место хуже обычного в своём списке.
+def relevance(scores: np.ndarray, labels: np.ndarray, groups: np.ndarray) -> np.ndarray:
+    """Цель второй головы: уровень места в своём списке кандидатов, от 4 до 0.
 
     Сама величина цели несравнима между планами: в тесном зале любая расстановка хуже, чем в
-    просторном. Модели же нужен порядок внутри одного списка кандидатов, поэтому значения
-    приводятся к нулевому среднему и единичному разбросу в пределах группы «план + тип объекта».
+    просторном. Сервису же нужен порядок внутри одного списка, поэтому голова учится порядку
+    (LambdaRank), а не величине. Уровни — по доле места в списке: лучшие 3 % — 4, до 10 % — 3,
+    до 25 % — 2, до половины — 1. Места, не прошедшие проверку, всегда 0: их сервис не выберет,
+    как бы хороша ни была остальная расстановка.
 
-    Считается это только по допустимым местам. Недопустимые различаются в основном числом
-    нарушений, а его и так предсказывает первая голова: если учить вторую на всех подряд, она
-    повторяет первую вместо того, чтобы различать удачное и просто терпимое. Проверено на
-    отложенных помещениях: проигрыш лучшему месту 2.50 против 2.72 при обучении на всех.
+    Этими уровнями меряется NDCG второй головы; учить на них можно ключом
+    --quality-target lambdarank, но по умолчанию голова учится на `best_places`.
+    """
+    levels = np.zeros(len(scores))
+    for group in np.unique(groups):
+        mask = groups == group
+        if mask.sum() < 2:
+            continue
+        share = np.argsort(np.argsort(scores[mask], kind="stable"), kind="stable") / mask.sum()
+        levels[mask] = np.select([share < 0.03, share < 0.10, share < 0.25, share < 0.50], [4, 3, 2, 1], 0)
+    return np.where(labels >= 0.5, levels, 0.0)
+
+
+def best_places(scores: np.ndarray, labels: np.ndarray, groups: np.ndarray, share: float = 0.05) -> np.ndarray:
+    """Цель второй головы по умолчанию: войдёт ли место в лучшие 5 % допустимых мест своего списка.
+
+    Сервис полностью проверяет только верхушку списка и берёт из неё лучшее, поэтому голове не
+    нужно упорядочивать весь список — только поднять наверх самые удачные места. Обычная
+    логистическая классификация делает ровно это и обучается устойчиво.
+
+    Сравнение на отложенных помещениях, доля списков, где лучшее место попало в первые 10:
+    без модели и с одной головой — 71 %, вторая голова регрессией на величину цели — 73–79 %,
+    LambdaRank по уровням `relevance` — 87 %, эта цель — 90 %. На верхушке 24 места, как в
+    сервисе: LambdaRank — 91 %, эта цель — 94 %. LambdaRank после 5–10 деревьев начинает портить
+    верхушку: он выравнивает весь список, где большинство пар — «среднее против плохого».
     """
     target = np.zeros(len(scores))
     for group in np.unique(groups):
+        mask = (groups == group) & (labels >= 0.5)
+        count = int(mask.sum())
+        if count == 0:
+            continue
+        # Не меньше одного места: единственное допустимое место в списке — лучшее по определению.
+        best = max(1, math.ceil(share * count))
+        rank = np.argsort(np.argsort(scores[mask], kind="stable"), kind="stable")
+        target[mask] = (rank < best).astype(float)
+    return target
+
+
+def per_group_standard(values: np.ndarray, groups: np.ndarray) -> np.ndarray:
+    """Оценки второй головы, приведённые к нулю и единице внутри списка — как в сервисе."""
+    result = np.zeros(len(values))
+    for group in np.unique(groups):
         mask = groups == group
-        values = scores[mask]
-        spread = float(values.std())
-        target[mask] = (values - values.mean()) / spread if spread > 1e-9 else 0.0
-    return np.clip(target, -4.0, 4.0)
+        spread = float(values[mask].std())
+        result[mask] = (values[mask] - values[mask].mean()) / spread if spread > 1e-9 else 0.0
+    return result
+
 
 def precision_at_k(order: np.ndarray, labels: np.ndarray, groups: np.ndarray, k: int = 10) -> float:
     """Доля подходящих мест в первых k позициях списка — то, ради чего нужна первая голова."""
@@ -358,7 +397,7 @@ def check_export(path: Path, passes: gbdt.Booster, quality: gbdt.Booster, sample
     mine_pass = np.array(
         [model.init + model.learning_rate * sum(t.predict(list(row)) for t in model.trees) for row in sample]
     )
-    mine_quality = np.array([model.quality.value(list(row)) for row in sample])
+    mine_quality = np.array([model.quality.raw(list(row)) for row in sample])
     return max(
         float(np.abs(passes.raw(sample) - mine_pass).max()),
         float(np.abs(quality.raw(sample) - mine_quality).max()),
@@ -373,10 +412,16 @@ def main() -> None:
     parser.add_argument("--synthetic", type=int, default=40)
     parser.add_argument("--trees", type=int, default=400)
     parser.add_argument("--depth", type=int, default=5)
-    parser.add_argument("--quality-depth", type=int, default=6, help="Глубина второй головы: цель сложнее")
+    parser.add_argument("--quality-depth", type=int, default=6, help="Глубина второй головы")
+    parser.add_argument("--quality-rate", type=float, default=0.08)
+    parser.add_argument("--quality-leaf", type=int, default=20, help="Наименьший лист второй головы")
+    parser.add_argument("--quality-target", choices=("best", "lambdarank"), default="best",
+                        help="best — лучшие 5 %% мест списка, lambdarank — порядок по уровням")
+    parser.add_argument("--quality-patience", type=int, default=50)
     parser.add_argument("--rate", type=float, default=0.08)
     parser.add_argument("--workers", type=int, default=max(1, mp.cpu_count() - 2))
     parser.add_argument("--cache", default="", help="Файл выборки: собрать один раз, обучать много")
+    parser.add_argument("--collect-only", action="store_true", help="Только собрать выборку в --cache")
     args = parser.parse_args()
 
     rng = random.Random(SEED)
@@ -395,19 +440,22 @@ def main() -> None:
             np.savez_compressed(cache, x=x, y=y, scores=scores, groups=groups)
     if len(y) < 1000:
         raise SystemExit(f"Слишком мало примеров: {len(y)}")
+    if args.collect_only:
+        print(f"Выборка собрана: {len(y)} примеров, {x.shape[1]} признаков", flush=True)
+        return
+
+    # Строки лежат в порядке генерации кандидатов, а он связан с качеством места: при равных
+    # оценках метрики верхушки списка подсматривали бы ответ. Перемешиваем один раз.
+    order = np.random.default_rng(SEED).permutation(len(y))
+    x, y, scores, groups = x[order], y[order], scores[order], groups[order]
 
     # Деление по планам, а не по строкам: модель проверяется на помещениях, которых не видела.
     unique_groups = sorted({g.split(":")[0] for g in groups})
     holdout = set(unique_groups[: max(1, len(unique_groups) // 5)])
     is_test = np.array([g.split(":")[0] in holdout for g in groups])
-    # Вторая голова учится только на допустимых местах — среди них и выбирает сервис.
-    suitable = y >= 0.5
-    target = np.zeros(len(scores))
-    target[suitable] = normalise(scores[suitable], groups[suitable])
+    levels = relevance(scores, y, groups)
     x_train, x_test = x[~is_test], x[is_test]
     y_train, y_test = y[~is_test], y[is_test]
-    quality_train = (~is_test) & suitable
-    quality_test = is_test & suitable
     scores_test, groups_test = scores[is_test], groups[is_test]
 
     print("Голова 1: пройдёт ли позиция полную проверку", flush=True)
@@ -415,31 +463,42 @@ def main() -> None:
         x_train, y_train, trees=args.trees, learning_rate=args.rate, max_depth=args.depth,
         seed=SEED, validation=(x_test, y_test),
     )
-    print(f"Голова 2: насколько хороша будет расстановка ({int(quality_train.sum())} мест)", flush=True)
-    quality = gbdt.train(
-        x[quality_train], target[quality_train], trees=args.trees, learning_rate=args.rate,
-        max_depth=args.quality_depth, seed=SEED,
-        validation=(x[quality_test], target[quality_test]), loss="squared",
-    )
+    print("Голова 2: какое место в списке лучше для расстановки", flush=True)
+    if args.quality_target == "lambdarank":
+        quality = gbdt.train(
+            x_train, levels[~is_test], trees=args.trees, learning_rate=args.quality_rate,
+            max_depth=args.quality_depth, min_samples_leaf=args.quality_leaf, seed=SEED,
+            validation=(x_test, levels[is_test]), patience=args.quality_patience, loss="lambdarank",
+            groups=groups[~is_test], validation_groups=groups_test,
+        )
+    else:
+        best = best_places(scores, y, groups)
+        quality = gbdt.train(
+            x_train, best[~is_test], trees=args.trees, learning_rate=args.quality_rate,
+            max_depth=args.quality_depth, min_samples_leaf=args.quality_leaf, seed=SEED,
+            validation=(x_test, best[is_test]), patience=args.quality_patience,
+        )
 
     probability = passes.probability(x_test)
     predicted = quality.raw(x_test)
     accuracy = float(((probability >= 0.5) == (y_test >= 0.5)).mean())
-    # Качество головы считается там, где она работает: на допустимых местах отложенных помещений.
     on_suitable = y_test >= 0.5
-    residual = float(((predicted[on_suitable] - target[quality_test]) ** 2).mean())
-    variance = float(target[quality_test].var()) or 1.0
+    test_index = gbdt._group_index(groups_test)
 
     # Порядок проверки — тот же, что в сервисе: оценка уместности, поправка на вероятность
     # прохождения и на предсказанное качество. Сортировка по убыванию, поэтому знаки такие.
     fitness = x_test[:, list(accelerator.FEATURES).index("fitness")]
     baseline_order = -fitness
     pass_order = -fitness + search.MODEL_WEIGHT * probability
-    full_order = pass_order - search.QUALITY_WEIGHT * predicted
+    full_order = pass_order + search.QUALITY_WEIGHT * per_group_standard(predicted, groups_test)
 
     regret_baseline, found_baseline = regret_at_k(baseline_order, scores_test, groups_test)
     regret_pass, found_pass = regret_at_k(pass_order, scores_test, groups_test)
     regret_full, found_full = regret_at_k(full_order, scores_test, groups_test)
+    # Столько мест сервис проверяет полностью по умолчанию.
+    top = search.DEFAULT_TOP_K
+    wide = {name: regret_at_k(order, scores_test, groups_test, k=top)
+            for name, order in (("прежний порядок", baseline_order), ("одна голова", pass_order), ("две головы", full_order))}
 
     metrics = {
         "доля верных ответов": round(accuracy, 4),
@@ -447,9 +506,11 @@ def main() -> None:
         "подходящих в первых 10 — модель": round(precision_at_k(pass_order, y_test, groups_test), 4),
         "подходящих в первых 10 — прежний порядок": round(precision_at_k(baseline_order, y_test, groups_test), 4),
         "доля подходящих мест в выборке": round(float(y.mean()), 4),
-        "доля объяснённого разброса качества": round(1.0 - residual / variance, 4),
+        "NDCG@10 второй головы": round(gbdt.ndcg_at(predicted, levels[is_test], test_index), 4),
+        "NDCG@10 — прежний порядок": round(gbdt.ndcg_at(baseline_order, levels[is_test], test_index), 4),
+        # Спирмен с минусом: голова отвечает «больше — лучше», а величина цели «меньше — лучше».
         "согласие порядков": round(
-            spearman(predicted[on_suitable], target[quality_test], groups_test[on_suitable]), 4
+            spearman(-predicted[on_suitable], scores_test[on_suitable], groups_test[on_suitable]), 4
         ),
         "проигрыш лучшему месту — прежний порядок": round(regret_baseline, 3),
         "проигрыш лучшему месту — одна голова": round(regret_pass, 3),
@@ -457,6 +518,8 @@ def main() -> None:
         "лучшее место в первых 10 — прежний порядок": round(found_baseline, 4),
         "лучшее место в первых 10 — одна голова": round(found_pass, 4),
         "лучшее место в первых 10 — две головы": round(found_full, 4),
+        **{f"проигрыш лучшему месту в первых {top} — {name}": round(value[0], 3) for name, value in wide.items()},
+        **{f"лучшее место в первых {top} — {name}": round(value[1], 4) for name, value in wide.items()},
     }
 
     out = Path(args.out)

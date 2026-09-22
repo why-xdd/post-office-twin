@@ -230,6 +230,11 @@ class _FeatureContext:
     region: Polygon
     occupied: Polygon | None
     size: tuple[float, float]
+    # Поток посетителей: линии от входа к месту посетителя у каждого окна, стойки и терминала,
+    # плюс типовые маршруты плана. По ним видно, какое место перекроет чей-то путь.
+    routes: list[LineString] = field(default_factory=list)
+    access_points: list[Point] = field(default_factory=list)
+    zones_by_kind: dict[str, list[Polygon]] = field(default_factory=dict)
 
 
 # Виды оборудования, которые модель различает отдельно: у каждого своя логика размещения.
@@ -244,6 +249,27 @@ TYPE_FLAGS = (
     "package_drop_box",
 )
 FREE_SPACE_RADIUS_M = 1.2
+# Ближе этого к линии движения объект уже сужает путь посетителя.
+ROUTE_BAND_M = 0.9
+ZONE_KINDS = ("waiting", "queue_accumulator", "vestibule", "back_office", "staff_room")
+
+
+def _flow_context(plan: Plan, entrance: tuple[float, float] | None, exclude: set[str]) -> tuple[list[LineString], list[Point]]:
+    """Линии движения посетителей и точки, где они стоят у объектов обслуживания."""
+    routes: list[LineString] = []
+    points: list[Point] = []
+    for item in plan.equipment:
+        if item.id in exclude or item.type not in VISITOR_TARGET_TYPES:
+            continue
+        access = passability.client_access_point(plan, item)
+        points.append(Point(access))
+        if entrance is not None and (abs(access[0] - entrance[0]) + abs(access[1] - entrance[1])) > 1e-6:
+            routes.append(LineString([entrance, access]))
+    if plan.flow_hints is not None:
+        for path in plan.flow_hints.typical_paths:
+            if len(path.waypoints) >= 2:
+                routes.append(LineString(path.waypoints))
+    return routes, points
 
 
 def _features(poly: Polygon, rotation: float, score: float, ctx: _FeatureContext) -> dict[str, float]:
@@ -305,6 +331,19 @@ def _features(poly: Polygon, rotation: float, score: float, ctx: _FeatureContext
     }
     for flag in TYPE_FLAGS:
         features[f"type_{flag}"] = 1.0 if ctx.type_code == flag else 0.0
+
+    # Признаки потока посетителей.
+    route_distances = [line.distance(poly) for line in ctx.routes]
+    features["route_distance"] = min(route_distances, default=10.0)
+    features["route_hits"] = float(sum(1 for d in route_distances if d < ROUTE_BAND_M))
+    features["access_distance"] = min((point.distance(poly) for point in ctx.access_points), default=10.0)
+    features["route_pinch"] = (
+        min(features["nearest_obstacle"], 3.0) if features["route_distance"] < ROUTE_BAND_M else 3.0
+    )
+    scale = math.sqrt(ctx.shape.area) if ctx.shape is not None and ctx.shape.area > 0 else 1.0
+    features["entrance_relative"] = features["entrance_distance"] / scale
+    for kind in ZONE_KINDS:
+        features[f"in_{kind}"] = 1.0 if any(z.contains(centre) for z in ctx.zones_by_kind.get(kind, [])) else 0.0
     return features
 
 
@@ -423,6 +462,10 @@ def generate(
         occupied=unary_union(obstacles) if obstacles else None,
         size=size,
     )
+    context.routes, context.access_points = _flow_context(plan, entrance, exclude)
+    context.zones_by_kind = {
+        kind: [core.zone_polygon(z) for z in plan.zones if z.type == kind] for kind in ZONE_KINDS
+    }
 
     min_x, min_y, max_x, max_y = region.bounds
     generated = 0
@@ -550,25 +593,33 @@ Ranker = Callable[[list[Candidate]], list[Candidate]]
 
 # Насколько сильно каждая голова модели сдвигает порядок относительно оценки уместности.
 MODEL_WEIGHT = 4.0
-QUALITY_WEIGHT = 1.0
+QUALITY_WEIGHT = 8.0
 
 
-def _prioritise(candidates: list[Candidate]) -> list[Candidate]:
-    """Порядок полной проверки: оценка уместности, уточнённая обеими головами модели.
+def _prioritise(candidates: list[Candidate], with_quality: bool = True) -> list[Candidate]:
+    """Порядок полной проверки: оценка уместности, уточнённая головами модели.
 
     Первая голова отвечает, пройдёт ли позиция полную проверку, — её предсказание поднимает
-    кандидата в списке. Вторая предсказывает величину цели, то есть каким получится план целиком;
-    меньше — лучше, поэтому она опускает кандидата тем сильнее, чем хуже ожидаемая расстановка.
-    Без файла весов порядок остаётся прежним, без второй головы — таким, как был до неё.
+    кандидата в списке. Вторая обучена на порядок мест для нового объекта: какое место в списке
+    даст лучшую расстановку. При перестановке уже стоящего объекта она не включается — на этом
+    сценарии она не училась, и сквозной замер показал, что там она мешает исправлять ошибки.
+    Без файла весов порядок остаётся прежним.
     """
     ranked = accelerator.rank_pairs([c.features for c in candidates])
     if ranked is None:
         return candidates
+    # Оценки второй головы нормируются внутри списка: важен порядок мест друг относительно
+    # друга, а не абсолютная величина, которая у разных помещений разная.
+    qualities = np.array([quality for _, quality in ranked], dtype=float)
+    spread = float(qualities.std())
+    normalised = (qualities - qualities.mean()) / spread if spread > 1e-9 else np.zeros(len(qualities))
+    if not with_quality:
+        normalised = np.zeros(len(candidates))
     paired = sorted(
-        zip(candidates, ranked),
-        key=lambda pair: pair[0].fitness - MODEL_WEIGHT * pair[1][0] + QUALITY_WEIGHT * pair[1][1],
+        zip(candidates, (p for p, _ in ranked), normalised),
+        key=lambda item: item[0].fitness - MODEL_WEIGHT * item[1] + QUALITY_WEIGHT * item[2],
     )
-    return [candidate for candidate, _ in paired]
+    return [candidate for candidate, _, _ in paired]
 
 
 def place(
@@ -598,7 +649,7 @@ def place(
         base_plan, type_code, size or (template.size_m if template else None), zone_id, exclude, prefer_near=prefer_near
     )
     passed = len(candidates)
-    ordered = ranker(candidates) if ranker is not None else _prioritise(candidates)
+    ordered = ranker(candidates) if ranker is not None else _prioritise(candidates, with_quality=template is None)
     shortlist = ordered[:top_k]
 
     types = equipment_types(plan)

@@ -84,6 +84,62 @@ class Booster:
         return self.raw(x) if self.loss == "squared" else self.probability(x)
 
 
+def _group_index(groups: np.ndarray) -> list[np.ndarray]:
+    """Номера строк каждого списка кандидатов."""
+    order = np.argsort(groups, kind="stable")
+    sorted_groups = groups[order]
+    cuts = np.flatnonzero(sorted_groups[1:] != sorted_groups[:-1]) + 1
+    return [part for part in np.split(order, cuts) if len(part) > 1]
+
+
+def _ideal_dcg(gains: np.ndarray, k: int) -> float:
+    top = np.sort(gains)[::-1][:k]
+    return float((top / np.log2(np.arange(2, len(top) + 2))).sum())
+
+
+def lambda_gradients(raw: np.ndarray, relevance: np.ndarray, index: list[np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
+    """Градиенты LambdaRank: пары «лучше — хуже» внутри одного списка.
+
+    Для каждой пары, где первое место объективно лучше второго, модель получает толчок поднять
+    первое и опустить второе. Сила толчка — насколько перестановка этой пары изменила бы NDCG
+    всего списка: ошибки в верхушке стоят дороже, чем в хвосте.
+    """
+    gradient = np.zeros(len(raw))
+    hessian = np.zeros(len(raw))
+    for rows in index:
+        s = raw[rows]
+        r = relevance[rows]
+        gains = 2.0**r - 1.0
+        idcg = _ideal_dcg(gains, len(rows))
+        if idcg <= 0:
+            continue
+        rank = np.empty(len(rows), dtype=int)
+        rank[np.argsort(-s, kind="stable")] = np.arange(len(rows))
+        discount = 1.0 / np.log2(rank + 2.0)
+        better = r[:, None] > r[None, :]
+        delta = np.abs((gains[:, None] - gains[None, :]) * (discount[:, None] - discount[None, :])) / idcg
+        rho = 1.0 / (1.0 + np.exp(np.clip(s[:, None] - s[None, :], -30, 30)))
+        lam = np.where(better, rho * delta, 0.0)
+        weight = np.where(better, rho * (1.0 - rho) * delta, 0.0)
+        gradient[rows] = -lam.sum(axis=1) + lam.sum(axis=0)
+        hessian[rows] = weight.sum(axis=1) + weight.sum(axis=0)
+    return gradient, np.maximum(hessian, 1e-6)
+
+
+def ndcg_at(raw: np.ndarray, relevance: np.ndarray, index: list[np.ndarray], k: int = 10) -> float:
+    """Средний NDCG@k по спискам: 1 — верхушка списка идеальна."""
+    values: list[float] = []
+    for rows in index:
+        gains = 2.0**relevance[rows] - 1.0
+        idcg = _ideal_dcg(gains, k)
+        if idcg <= 0:
+            continue
+        top = np.argsort(-raw[rows], kind="stable")[:k]
+        dcg = float((gains[top] / np.log2(np.arange(2, len(top) + 2))).sum())
+        values.append(dcg / idcg)
+    return float(np.mean(values)) if values else 0.0
+
+
 def _bin_edges(x: np.ndarray) -> list[np.ndarray]:
     """Границы корзин по квантилям: редкие значения не съедают разрешение."""
     edges: list[np.ndarray] = []
@@ -183,6 +239,8 @@ def train(
     validation: tuple[np.ndarray, np.ndarray] | None = None,
     patience: int = 30,
     loss: str = "logistic",
+    groups: np.ndarray | None = None,
+    validation_groups: np.ndarray | None = None,
 ) -> Booster:
     """Обучение с ранней остановкой по отложенной выборке.
 
@@ -190,8 +248,14 @@ def train(
     на величину, которую хотим предсказать. Различаются только начальное приближение, градиент,
     гессиан и то, по чему считается ошибка на отложенной выборке.
     """
-    if loss not in ("logistic", "squared"):
+    if loss not in ("logistic", "squared", "lambdarank"):
         raise ValueError(f"Неизвестная функция потерь: {loss}")
+    if loss == "lambdarank" and groups is None:
+        raise ValueError("Для обучения порядку нужны группы: какие строки — один список кандидатов")
+    index = _group_index(groups) if loss == "lambdarank" else []
+    validation_index = (
+        _group_index(validation_groups) if loss == "lambdarank" and validation_groups is not None else []
+    )
     rng = np.random.default_rng(seed)
     edges = _bin_edges(x)
     binned = np.empty(x.shape, dtype=np.int32)
@@ -200,6 +264,8 @@ def train(
 
     if loss == "squared":
         init = float(y.mean())
+    elif loss == "lambdarank":
+        init = 0.0
     else:
         share = float(np.clip(y.mean(), 1e-6, 1 - 1e-6))
         init = float(np.log(share / (1 - share)))
@@ -214,6 +280,8 @@ def train(
         if loss == "squared":
             gradient = raw - y
             hessian = np.ones(len(y))
+        elif loss == "lambdarank":
+            gradient, hessian = lambda_gradients(raw, y, index)
         else:
             probability = 1.0 / (1.0 + np.exp(-np.clip(raw, -30, 30)))
             gradient = probability - y
@@ -230,6 +298,8 @@ def train(
             validation_raw += learning_rate * tree.predict(validation[0])
             if loss == "squared":
                 current = float(np.mean((validation_raw - validation[1]) ** 2))
+            elif loss == "lambdarank":
+                current = -ndcg_at(validation_raw, validation[1], validation_index)
             else:
                 p = 1.0 / (1.0 + np.exp(-np.clip(validation_raw, -30, 30)))
                 current = float(

@@ -15,7 +15,6 @@
 | Файл | Что это |
 |---|---|
 | [`docs/demo-zarechnoe.zip`](docs/demo-zarechnoe.zip) | Демонстрационный проект: исходный и изменённый план, рекомендации ассистента, их эффект, заключение и инструкция повторного открытия |
-| [`docs/plan-ops-demo.mp4`](docs/plan-ops-demo.mp4) | Видео основного сценария, 69 секунд |
 | [`docs/plan-ops-presentation.pdf`](docs/plan-ops-presentation.pdf) | Презентация решения |
 
 ## Состав

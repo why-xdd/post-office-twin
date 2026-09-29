@@ -24,7 +24,7 @@ const DEFAULT_ITEM_HEIGHT_M = 1.0;
 const DEFAULT_MOUNT_M = 1.4;
 const EPS = 1e-6;
 
-export type PrismKind = 'wall' | 'partition' | 'equipment' | 'operator' | 'figure';
+export type PrismKind = 'wall' | 'partition' | 'equipment' | 'operator' | 'figure' | 'glazing';
 
 /** Всё в сцене — прямоугольная призма: так и упрощённый режим, и подробный рисуют одинаково. */
 export interface Prism {
@@ -143,15 +143,15 @@ function wallPrisms(plan: Plan, ceiling: number): Prism[] {
     const normal = outer && outline ? outwardNormal(plan, wall, outline) : ([0, 0] as Point);
     const shift = outer ? thickness / 2 : 0;
 
-    const piece = (at: number, size: number, base: number, height: number, tag: string) => {
+    const piece = (at: number, size: number, base: number, height: number, tag: string, kind?: PrismKind) => {
       if (size <= 0.02 || height <= 0.02) return;
       const mid = at + size / 2;
       prisms.push({
         id: `${wall.id}:${tag}`,
-        label: wall.label ?? (outer ? 'Наружная стена' : 'Перегородка'),
-        kind: outer ? 'wall' : 'partition',
+        label: kind === 'glazing' ? 'Остекление' : (wall.label ?? (outer ? 'Наружная стена' : 'Перегородка')),
+        kind: kind ?? (outer ? 'wall' : 'partition'),
         centre: [ax + ux * mid + normal[0] * shift, ay + uy * mid + normal[1] * shift],
-        size: [size, thickness],
+        size: [size, kind === 'glazing' ? Math.min(thickness, 0.04) : thickness],
         rotationDeg: angle,
         base,
         height,
@@ -169,6 +169,8 @@ function wallPrisms(plan: Plan, ceiling: number): Prism[] {
         piece(opening.at, opening.size, DOOR_HEIGHT_M, Math.max(0, ceiling - DOOR_HEIGHT_M), `d${index}`);
       } else {
         piece(opening.at, opening.size, 0, SILL_HEIGHT_M, `p${index}`);
+        // Сам проём — стекло: без него окно выглядит дырой в стене.
+        piece(opening.at, opening.size, SILL_HEIGHT_M, DOOR_HEIGHT_M - SILL_HEIGHT_M, `g${index}`, 'glazing');
         piece(opening.at, opening.size, DOOR_HEIGHT_M, Math.max(0, ceiling - DOOR_HEIGHT_M), `w${index}`);
       }
       cursor = opening.at + opening.size;

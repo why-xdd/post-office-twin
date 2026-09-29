@@ -246,7 +246,7 @@ export function Plan3D({ types }: Props) {
     if (!parts || !scene) return;
     parts.disposeContent?.();
     if (parts.content) parts.scene.remove(parts.content);
-    const built = build(scene, quality);
+    const built = build(scene, quality, parts.renderer.capabilities.getMaxAnisotropy());
     parts.scene.add(built.root);
     parts.content = built.root;
     parts.disposeContent = built.dispose;

@@ -27,15 +27,18 @@ const TOOLS: { tool: Tool; label: string; hotkey: string; icon: typeof MousePoin
   { tool: 'zone', label: 'Зона', hotkey: 'Z', icon: SquareDashed },
 ];
 
-const LAYER_LABELS: { key: keyof Layers; label: string }[] = [
+const LAYER_LABELS: { key: keyof Layers; label: string; onlyWithHeatmap?: boolean }[] = [
   { key: 'zones', label: 'Зоны' },
   { key: 'labels', label: 'Адреса и подписи' },
   { key: 'routes', label: 'Маршруты посетителей' },
   { key: 'grid', label: 'Сетка 25 см' },
+  // Тепловая карта показывается в списке слоёв только после разбора записи с камеры.
+  { key: 'heat', label: 'Тепловая карта камеры', onlyWithHeatmap: true },
 ];
 
 export function Library({ types, zoneTypes, layers, onLayers, onNotice }: LibraryProps) {
   const tool = useWorkspace((s) => s.tool);
+  const heatmap = useWorkspace((s) => s.heatmap);
   const placingType = useWorkspace((s) => s.placingType);
   const mode = useWorkspace((s) => s.mode);
   const setTool = useWorkspace((s) => s.setTool);
@@ -186,7 +189,7 @@ export function Library({ types, zoneTypes, layers, onLayers, onNotice }: Librar
 
       <fieldset className="library__layers">
         <legend>Слои</legend>
-        {LAYER_LABELS.map(({ key: k, label }) => (
+        {LAYER_LABELS.filter((layer) => !layer.onlyWithHeatmap || heatmap).map(({ key: k, label }) => (
           <label key={k} className="layer">
             <input type="checkbox" checked={layers[k]} onChange={(event) => onLayers({ ...layers, [k]: event.target.checked })} />
             <span className="layer__box" aria-hidden="true" />

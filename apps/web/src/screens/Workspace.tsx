@@ -38,6 +38,7 @@ import { Assistant } from '../panels/Assistant';
 import { Checks } from '../panels/Checks';
 import { Inventory } from '../panels/Inventory';
 import { Library } from '../panels/Library';
+import { Camera } from '../panels/Camera';
 import { Passport } from '../panels/Passport';
 import { Properties } from '../panels/Properties';
 import { Review } from '../panels/Review';
@@ -112,7 +113,7 @@ export function Workspace({ planId }: WorkspaceProps) {
   const [types, setTypes] = useState<EquipmentTypeInfo[]>([]);
   const [zoneTypes, setZoneTypes] = useState<ZoneTypeInfo[]>([]);
   const [rules, setRules] = useState<Rule[]>([]);
-  const [layers, setLayers] = useState<Layers>({ zones: true, labels: true, routes: false, grid: true });
+  const [layers, setLayers] = useState<Layers>({ zones: true, labels: true, routes: false, grid: true, heat: true });
   const [fitSignal, setFitSignal] = useState(0);
   const [focus, setFocus] = useState<{ id: string; nonce: number } | null>(null);
   const [view, setView] = useState<View | null>(null);
@@ -470,6 +471,7 @@ export function Workspace({ planId }: WorkspaceProps) {
       : [
           { id: 'passport', label: 'Паспорт' },
           { id: 'inventory', label: 'Инвентарь' },
+          { id: 'camera', label: 'Камера' },
         ];
 
   const area = planArea(doc);
@@ -780,6 +782,7 @@ export function Workspace({ planId }: WorkspaceProps) {
           {panel === 'assistant' && <Assistant book={book} types={types} onFocusObject={focusObject} onNotice={setNotice} />}
           {panel === 'inventory' && <Inventory book={book} types={typeMap} onFocusObject={focusObject} />}
           {panel === 'passport' && <Passport book={book} types={typeMap} />}
+          {panel === 'camera' && <Camera />}
         </div>
       </aside>
 

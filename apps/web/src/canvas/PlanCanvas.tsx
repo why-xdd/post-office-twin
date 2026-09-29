@@ -42,6 +42,8 @@ export interface Layers {
   labels: boolean;
   routes: boolean;
   grid: boolean;
+  /** Тепловая карта по записи с камеры; появляется в списке слоёв только когда расчёт сделан. */
+  heat: boolean;
 }
 
 interface PlanCanvasProps {
@@ -84,6 +86,7 @@ const ZONE_FILL: Record<string, string> = {
 
 function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, onCursor, onNotice }: PlanCanvasProps) {
   const doc = useWorkspace((s) => s.doc);
+  const heatmap = useWorkspace((s) => s.heatmap);
   const selection = useWorkspace((s) => s.selection);
   const highlighted = useWorkspace((s) => s.highlighted);
   const tool = useWorkspace((s) => s.tool);
@@ -626,6 +629,32 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
               />
             );
           })}
+
+        {/* Тепловая карта посещаемости: где посетители стояли чаще всего */}
+        {layers.heat && heatmap && (
+          <g className="plan-heat" aria-hidden="true">
+            {heatmap.values.map((value, index) => {
+              if (value < 0.06) return null;
+              const col = index % heatmap.cols;
+              const row = Math.floor(index / heatmap.cols);
+              const x = heatmap.origin[0] + col * heatmap.cell_m;
+              const y = heatmap.origin[1] + row * heatmap.cell_m;
+              const [sx, sy] = toScreen(view, [x, y + heatmap.cell_m]);
+              const side = heatmap.cell_m * view.scale;
+              return (
+                <rect
+                  key={index}
+                  x={sx}
+                  y={sy}
+                  width={side}
+                  height={side}
+                  fill={`color-mix(in oklab, var(--heat-hot) ${Math.round(Math.sqrt(value) * 100)}%, var(--heat-cold))`}
+                  opacity={0.34 + Math.sqrt(value) * 0.5}
+                />
+              );
+            })}
+          </g>
+        )}
 
         {/* Маршруты посетителей */}
         {layers.routes &&

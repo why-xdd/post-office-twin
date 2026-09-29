@@ -17,6 +17,7 @@ import type {
   PlanMetrics,
   QueueLogReport,
   Reconciliation,
+  VisionReport,
   Recommendation,
   Rule,
   ValidationReport,
@@ -201,6 +202,23 @@ export const api = {
     const disposition = response.headers.get('content-disposition') ?? '';
     const encoded = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
     return { blob: await response.blob(), filename: encoded ? decodeURIComponent(encoded) : 'опись для 1С.csv' };
+  },
+
+  /** Кадры записи с камеры: считает людей и строит тепловую карту по плану. */
+  visionAnalyze: (
+    document: Plan,
+    frames: Blob[],
+    seconds: number[],
+    calibration: { frame: [number, number][]; plan: [number, number][]; frame_size: [number, number] },
+    personAreaSqm?: number,
+  ) => {
+    const form = new FormData();
+    form.append('document', JSON.stringify(document));
+    form.append('calibration', JSON.stringify(calibration));
+    form.append('seconds', JSON.stringify(seconds));
+    if (personAreaSqm) form.append('person_area_sqm', String(personAreaSqm));
+    frames.forEach((frame, index) => form.append('frames', frame, `${String(index).padStart(3, '0')}.jpg`));
+    return request<VisionReport>('/api/vision/analyze', { method: 'POST', body: form });
   },
 
   queueLog: (document: Plan, file: File) => {

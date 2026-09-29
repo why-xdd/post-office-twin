@@ -9,7 +9,7 @@
 import { create } from 'zustand';
 import { transformInPlace } from '../lib/equipmentOps';
 import { removeWall } from '../lib/wallEdit';
-import type { Equipment, Plan, ValidationReport, Zone } from '../lib/plan';
+import type { Equipment, Plan, ValidationReport, VisionHeatmap, Zone } from '../lib/plan';
 
 export type SelectionKind = 'equipment' | 'zone' | 'wall' | 'door' | 'window';
 
@@ -22,7 +22,7 @@ export type Tool = 'select' | 'zone' | 'wall' | 'outline' | 'equipment';
 /** Обзор — простой показ нарушений и исправления; редактор и эксплуатация — полные режимы. */
 export type Mode = 'review' | 'design' | 'operate';
 export type ViewKind = '2d' | '3d';
-export type SidePanel = 'review' | 'properties' | 'checks' | 'assistant' | 'inventory' | 'passport';
+export type SidePanel = 'review' | 'properties' | 'checks' | 'assistant' | 'inventory' | 'passport' | 'camera';
 
 export interface Change {
   op: 'add' | 'move' | 'remove';
@@ -67,6 +67,8 @@ interface WorkspaceState {
   latched: string[];
   /** Номер нарушения, открытого в обзоре: по нему на плане выделяется метка. */
   activeFinding: number | null;
+  /** Тепловая карта посещаемости по записи с камеры: рисуется слоем поверх плана. */
+  heatmap: VisionHeatmap | null;
 
   open: (planId: string | null, title: string, version: number, doc: Plan) => void;
   close: () => void;
@@ -87,6 +89,7 @@ interface WorkspaceState {
   setMode: (mode: Mode) => void;
   setView: (view: ViewKind) => void;
   setPanel: (panel: SidePanel) => void;
+  setHeatmap: (heatmap: VisionHeatmap | null) => void;
   setReport: (report: ValidationReport | null, state: WorkspaceState['reportState']) => void;
   setPreview: (changes: Change[] | null) => void;
   latch: (ids: string[]) => void;
@@ -121,6 +124,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   preview: null,
   latched: [],
   activeFinding: null,
+  heatmap: null,
 
   open: (planId, title, version, doc) =>
     set({
@@ -142,6 +146,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       mode: 'review',
       panel: 'review',
       activeFinding: null,
+      heatmap: null,
     }),
 
   close: () => set({ doc: null, planId: null, title: '', past: [], future: [], preview: null }),
@@ -234,6 +239,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     })),
   setView: (view) => set({ view }),
   setPanel: (panel) => set({ panel }),
+  setHeatmap: (heatmap) => set({ heatmap }),
   setReport: (report, reportState) => set({ report, reportState }),
   setPreview: (preview) => set({ preview }),
   setActiveFinding: (activeFinding) => set({ activeFinding }),

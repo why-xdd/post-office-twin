@@ -28,6 +28,7 @@ from app.geometry import core
 from app.importer import build as importer
 from app.models import Plan, duplicate_ids
 from app.rules.catalog import DEFAULT_RULES, Rule, rules_by_id
+from app.vision import counter as vision
 from app.rules.engine import ValidationReport, validate
 from app.storage import open_store
 
@@ -326,6 +327,53 @@ def get_dictionaries(payload: SaveVersionRequest | None = None) -> dict[str, Any
 @app.post("/api/capacity", response_model=CapacityReport, summary="Пропускная способность в час пик")
 def plan_capacity(payload: SaveVersionRequest) -> CapacityReport:
     return capacity_model.analyze(_parse_plan(payload.document))
+
+
+MAX_VISION_FRAMES = 180
+
+
+@app.post("/api/vision/analyze", response_model=vision.VisionReport, summary="Посетители по кадрам камеры")
+async def vision_analyze(
+    document: str = Form(..., description="План отделения в JSON"),
+    calibration: str = Form(
+        ...,
+        description='Привязка кадра к плану: {"frame": [[x,y]×4], "plan": [[x,y]×4], "frame_size": [ширина, высота]}',
+    ),
+    seconds: str = Form(..., description="Секунда записи для каждого кадра, JSON-список"),
+    person_area_sqm: float = Form(vision.PERSON_AREA_SQM, gt=0.02, le=2.0),
+    frames: list[UploadFile] = File(..., description="Кадры записи по порядку"),
+) -> vision.VisionReport:
+    """Кадры камеры зала: сколько людей, где стоят, хватает ли мест.
+
+    Видео целиком на сервер не загружается: браузер раскладывает запись на кадры и шлёт их
+    уменьшенными. Так хватает и бесплатного хостинга, и записи любой длины.
+    """
+    if not 8 <= len(frames) <= MAX_VISION_FRAMES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Кадров должно быть от 8 до {MAX_VISION_FRAMES}: пришло {len(frames)}.",
+        )
+    try:
+        plan = _parse_plan(json.loads(document))
+        marks = json.loads(calibration)
+        moments = [float(value) for value in json.loads(seconds)]
+    except (json.JSONDecodeError, TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="План, привязка или секунды пришли не в JSON.") from None
+    if len(moments) != len(frames):
+        raise HTTPException(status_code=422, detail="На каждый кадр нужна его секунда записи.")
+
+    payload = [await frame.read() for frame in frames]
+    try:
+        images, source = vision.decode_frames(payload)
+        size = tuple(marks.get("frame_size") or source)
+        matrix = vision.homography(
+            [tuple(point) for point in marks["frame"]], [tuple(point) for point in marks["plan"]]
+        )
+        return vision.analyze(plan, images, moments, matrix, size, person_area_sqm)
+    except KeyError:
+        raise HTTPException(status_code=422, detail="В привязке нужны поля frame и plan по четыре точки.") from None
+    except vision.VisionError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from None
 
 
 @app.post("/api/capacity/log", response_model=queue_log.QueueLogReport, summary="Очередь по журналу или счётчику")

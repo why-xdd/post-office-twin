@@ -66,6 +66,10 @@
   --zone-edge: rgba(28, 32, 35, 0.35);
 
   /* Оборудование на плане */
+  /* Тепловая карта посещаемости: одна тёплая шкала от «редко» к «часто» */
+  --heat-cold: #efd9a8;
+  --heat-hot: #a8300f;
+
   --equip-fill: #fbf9f3;
   --equip-stroke: #1c2023;
   --equip-wall-mounted: #5c6265;

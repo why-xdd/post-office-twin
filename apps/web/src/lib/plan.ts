@@ -467,3 +467,38 @@ export interface QueueLogReport {
   summary: string[];
   assumptions: string[];
 }
+
+/** Разбор записи с камеры зала: сколько людей, где стоят, хватает ли мест. */
+export interface VisionZoneLoad {
+  zone_id?: string | null;
+  label: string;
+  mean_people: number;
+  peak_people: number;
+  seats?: number | null;
+  over_capacity_share?: number | null;
+}
+
+export interface VisionMoment {
+  second: number;
+  people: number;
+}
+
+export interface VisionHeatmap {
+  origin: [number, number];
+  cell_m: number;
+  cols: number;
+  rows: number;
+  values: number[];
+}
+
+export interface VisionReport {
+  frames: number;
+  duration_s: number;
+  people_mean: number;
+  people_peak: number;
+  zones: VisionZoneLoad[];
+  timeline: VisionMoment[];
+  heatmap: VisionHeatmap;
+  summary: string[];
+  assumptions: string[];
+}

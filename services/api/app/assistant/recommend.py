@@ -181,18 +181,18 @@ def _effects(before: dict[str, Any], after: dict[str, Any], type_code: str | Non
         return Effect(key=key, label=label, before=b, after=a, unit=unit, improved=improved)
 
     effects = [
-        eff("errors", "Ошибок проверки", "", True),
-        eff("warnings", "Предупреждений", "", True),
+        eff("errors", "Нарушений", "", True),
+        eff("warnings", "Замечаний", "", True),
         eff("free_area", "Свободная площадь", "м²", False),
         eff("occupied_area", "Занято оборудованием", "м²", True),
         eff("entrance_route_width", "Ширина прохода от входа", "м", False),
         eff("min_route_width", "Самое узкое место пути посетителя", "м", False),
         eff("waiting_capacity", "Вместимость зоны ожидания", "чел.", False),
     ]
-    effects[3].improved = None  # занятая площадь сама по себе не хороша и не плоха
-    if before.get("equipment_total") == after.get("equipment_total"):
-        # При перестановке площадь меняется только из-за снятых наложений и выхода за контур.
-        effects[2].improved = None
+    # Площади сами по себе не хороши и не плохи: новый предмет всегда занимает место, и
+    # помечать это «хуже» — значит ругать любую покупку. Качество видно по нарушениям и проходам.
+    effects[2].improved = None
+    effects[3].improved = None
     if type_code is not None:
         effects.append(
             Effect(

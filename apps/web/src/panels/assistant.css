@@ -627,3 +627,22 @@
 .assistant__more[open] > summary svg {
   transform: rotate(180deg);
 }
+
+/* Предупреждение перед «Принять»: рекомендация добавляет нарушений или замечаний */
+.rec__caution {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  padding: var(--s-2) var(--s-3);
+  border-radius: 2px;
+  background: var(--caution-bg);
+  color: var(--ink);
+  font-size: var(--text-12);
+  line-height: 1.45;
+}
+
+.rec__caution svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--caution);
+}

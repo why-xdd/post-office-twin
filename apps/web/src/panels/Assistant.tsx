@@ -458,6 +458,14 @@ function RecommendationCard({
 }) {
   const doc = useWorkspace((s) => s.doc);
   const actionable = rec.changes.length > 0;
+  // Рекомендация, которая добавляет нарушений или замечаний, предупреждает об этом до «Принять».
+  const worse = rec.effects.filter(
+    (effect) =>
+      (effect.key === 'errors' || effect.key === 'warnings') &&
+      effect.before !== null &&
+      effect.after !== null &&
+      effect.after > effect.before,
+  );
   return (
     <li
       className={`rec${previewing ? ' rec--previewing' : ''}`}
@@ -512,6 +520,17 @@ function RecommendationCard({
               {OP_LABEL[change.op]} {book.byId.get(key('equipment', change.object_id)) ?? 'новый объект'}
             </span>
           ))}
+        </p>
+      )}
+
+      {actionable && worse.length > 0 && (
+        <p className="rec__caution" role="note">
+          <TriangleAlert size={14} aria-hidden="true" />
+          <span>
+            После «Принять» станет больше:{' '}
+            {worse.map((effect) => `${effect.label.toLowerCase()} ${effect.before} → ${effect.after}`).join(', ')}.
+            Посмотрите на плане, какие именно, прежде чем принимать.
+          </span>
         </p>
       )}
 

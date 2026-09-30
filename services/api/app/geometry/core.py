@@ -96,6 +96,12 @@ def zone_polygon(zone: Zone) -> Polygon:
     return _zone_shape(tuple((float(x), float(y)) for x, y in zone.polygon))
 
 
+def reset_caches() -> None:
+    """Забыть посчитанные фигуры. Нужно замерам времени, чтобы они мерили расчёт, а не кэш."""
+    _rectangle.cache_clear()
+    _zone_shape.cache_clear()
+
+
 def outline(plan: Plan) -> Polygon | None:
     """Контур помещения по наружным стенам.
 

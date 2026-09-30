@@ -25,8 +25,10 @@ from __future__ import annotations
 import json
 import math
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+
+import numpy as np
 
 MODEL_PATH = Path(__file__).with_name("accelerator_model.json")
 
@@ -94,6 +96,53 @@ class Tree:
 
 
 @dataclass(frozen=True)
+class Ensemble:
+    """Ансамбль в массивах numpy: оценка сразу всех позиций одним спуском по дереву.
+
+    На большом зале мест несколько тысяч, а деревьев полторы сотни. Поштучный спуск по дереву
+    на чистом Python занимал больше времени, чем вся остальная геометрия поиска. Порядок
+    сложения деревьев тот же, что при поштучном счёте, поэтому ответы совпадают до бита.
+    """
+
+    nodes: tuple[dict[str, np.ndarray], ...]
+
+    @classmethod
+    def of(cls, trees: list[Tree]) -> "Ensemble":
+        return cls(
+            tuple(
+                {
+                    "feature": np.array(tree.feature, dtype=np.intp),
+                    "threshold": np.array(tree.threshold, dtype=float),
+                    "left": np.array(tree.left, dtype=np.intp),
+                    "right": np.array(tree.right, dtype=np.intp),
+                    "value": np.array(tree.value, dtype=float),
+                }
+                for tree in trees
+            )
+        )
+
+    def total(self, rows: np.ndarray) -> np.ndarray:
+        """Сумма ответов всех деревьев для каждой строки признаков."""
+        count = len(rows)
+        index = np.arange(count)
+        result = np.zeros(count, dtype=float)
+        for tree in self.nodes:
+            node = np.zeros(count, dtype=np.intp)
+            while True:
+                split = tree["feature"][node]
+                inner = split >= 0
+                if not inner.any():
+                    break
+                # У листа номера признака нет: чтобы не выйти за границы массива, читается
+                # нулевой столбец, а результат для листьев всё равно отбрасывается.
+                safe = np.where(inner, split, 0)
+                left = rows[index, safe] <= tree["threshold"][node]
+                node = np.where(inner, np.where(left, tree["left"][node], tree["right"][node]), node)
+            result += tree["value"][node]
+        return result
+
+
+@dataclass(frozen=True)
 class Quality:
     """Вторая голова: насколько хорошей будет расстановка, если объект встанет сюда.
 
@@ -108,12 +157,19 @@ class Quality:
     learning_rate: float
     importance: dict[str, float]
     loss: str = "squared"
+    batch: Ensemble | None = field(default=None, compare=False)
 
     def raw(self, row: list[float]) -> float:
         return self.init + self.learning_rate * sum(tree.predict(row) for tree in self.trees)
 
     def value(self, row: list[float]) -> float:
         raw = self.raw(row)
+        return -raw if self.loss in ("logistic", "lambdarank") else raw
+
+    def values(self, rows: np.ndarray) -> np.ndarray:
+        """Ожидаемое качество для всех позиций сразу, в той же ориентации «меньше — лучше»."""
+        batch = self.batch or Ensemble.of(self.trees)
+        raw = self.init + self.learning_rate * batch.total(rows)
         return -raw if self.loss in ("logistic", "lambdarank") else raw
 
     def explain(self) -> list[tuple[str, float]]:
@@ -133,9 +189,25 @@ class Model:
     samples: int
     features: tuple[str, ...] = FEATURES
     quality: Quality | None = None
+    batch: Ensemble | None = field(default=None, compare=False)
 
     def row(self, features: dict[str, float]) -> list[float]:
         return [float(features.get(name, 0.0)) for name in self.features]
+
+    def rows(self, candidates: list[dict[str, float]]) -> np.ndarray:
+        return np.array([self.row(features) for features in candidates], dtype=float)
+
+    def probabilities(self, rows: np.ndarray) -> np.ndarray:
+        """Вероятности «позиция пройдёт проверку» для всех позиций сразу."""
+        batch = self.batch or Ensemble.of(self.trees)
+        raw = self.init + self.learning_rate * batch.total(rows)
+        return 1.0 / (1.0 + np.exp(-np.clip(raw, -30.0, 30.0)))
+
+    def expected_scores(self, rows: np.ndarray) -> np.ndarray:
+        """Ожидаемая величина цели для всех позиций. Нули, если вторая голова не обучена."""
+        if self.quality is None:
+            return np.zeros(len(rows), dtype=float)
+        return self.quality.values(rows)
 
     def probability(self, features: dict[str, float]) -> float:
         # Строка признаков собирается один раз на позицию: в ансамбле сто с лишним деревьев.
@@ -181,6 +253,7 @@ def _parse(data: dict) -> Model:
             learning_rate=float(head.get("learning_rate", 1.0)),
             importance={k: float(v) for k, v in head.get("importance", {}).items()},
             loss=str(head.get("loss", "squared")),
+            batch=Ensemble.of(_trees(head["trees"])),
         )
     return Model(
         trees=trees,
@@ -192,6 +265,7 @@ def _parse(data: dict) -> Model:
         trained_at=str(data.get("trained_at", "")),
         samples=int(data.get("samples", 0)),
         features=tuple(data.get("features", FEATURES)),
+        batch=Ensemble.of(trees),
     )
 
 
@@ -226,7 +300,9 @@ def rank(candidates: list[dict[str, float]]) -> list[float] | None:
     model = load()
     if model is None:
         return None
-    return [model.probability(features) for features in candidates]
+    if not candidates:
+        return []
+    return [float(value) for value in model.probabilities(model.rows(candidates))]
 
 
 def rank_pairs(candidates: list[dict[str, float]]) -> list[tuple[float, float]] | None:
@@ -238,4 +314,7 @@ def rank_pairs(candidates: list[dict[str, float]]) -> list[tuple[float, float]] 
     model = load()
     if model is None:
         return None
-    return [(model.probability(features), model.expected_score(features)) for features in candidates]
+    if not candidates:
+        return []
+    rows = model.rows(candidates)
+    return list(zip(model.probabilities(rows).tolist(), model.expected_scores(rows).tolist()))

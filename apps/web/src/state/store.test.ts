@@ -4,7 +4,7 @@
  */
 
 import { beforeEach, describe, expect, it } from 'vitest';
-import type { Change, Plan } from '../lib/plan';
+import type { Plan, RecommendationChange } from '../lib/plan';
 import { useWorkspace } from './store';
 
 const plan = (): Plan => ({
@@ -24,8 +24,10 @@ const plan = (): Plan => ({
   ],
 }) as Plan;
 
-const change = (partial: Partial<Change> & { op: Change['op']; object_id: string }): Change =>
-  ({ equipment_type: 'atm', ...partial }) as Change;
+const change = (
+  partial: Partial<RecommendationChange> & { op: RecommendationChange['op']; object_id: string },
+): RecommendationChange =>
+  ({ equipment_type: 'atm', ...partial }) as RecommendationChange;
 
 describe('применение рекомендаций', () => {
   beforeEach(() => {

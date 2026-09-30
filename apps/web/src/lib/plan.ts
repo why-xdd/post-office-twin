@@ -361,6 +361,8 @@ export interface AssistantReport {
   capacity: CapacityReport;
   summary: Record<string, unknown>;
   elapsed_ms: number;
+  /** Отведённое время кончилось: показано то, что сервис успел подобрать. */
+  partial?: boolean;
 }
 
 export interface ImportResult {
@@ -389,6 +391,8 @@ export interface ImprovementReport {
   improved_plan: Plan;
   effects: Effect[];
   elapsed_ms: number;
+  /** Отведённое время кончилось: показаны найденные шаги. */
+  partial?: boolean;
 }
 
 /** Сверка плана с ведомостью основных средств из учётной системы (1С). */

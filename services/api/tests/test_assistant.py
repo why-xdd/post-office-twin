@@ -204,3 +204,21 @@ def test_conclusion_is_built_from_computed_numbers(plan: Plan) -> None:
     assert "eq_" not in result.text
     assert result.facts["нарушений"] == 7
     assert result.facts["после_исправления"]["нарушений"] == 0
+
+
+def test_assistant_answers_within_its_time_budget(plan: Plan) -> None:
+    """Когда отведённое время кончилось, ответ приходит неполным, но приходит."""
+    report = recommend.advise(plan, deadline=recommend.Deadline(0.01))
+    assert report.partial is True
+    assert report.recommendations, "первое семейство рекомендаций считается всегда"
+    assert report.capacity is not None
+
+    improvement = recommend.improve(plan, deadline=recommend.Deadline(0.01))
+    assert improvement.partial is True
+    assert len(improvement.steps) >= 1, "первый шаг делается всегда"
+    Plan.model_validate(improvement.improved_plan)
+
+
+def test_full_report_is_not_marked_partial(plan: Plan) -> None:
+    """Обычный ответ не должен помечаться неполным: иначе предупреждение теряет смысл."""
+    assert recommend.advise(plan).partial is False

@@ -136,3 +136,18 @@ def test_model_puts_suitable_places_first(plan: Plan) -> None:
         return count
 
     assert accepted(with_model) >= accepted(candidates[:10])
+
+
+def test_batch_scoring_matches_one_by_one() -> None:
+    """Пакетная оценка мест обязана совпадать с поштучной: иначе порядок проверки меняется."""
+    model = accelerator.load()
+    assert model is not None, "файл модели должен лежать в поставке"
+    plan = Plan.model_validate(json.loads(SAMPLE.read_text(encoding="utf-8")))
+    candidates, _ = search.generate(plan, "waiting_seat")
+    features = [candidate.features for candidate in candidates[:64]]
+    assert features, "на демо-плане место для скамьи находится"
+    batch = accelerator.rank_pairs(features)
+    assert batch is not None
+    for (probability, quality), row in zip(batch, features):
+        assert probability == pytest.approx(model.probability(row), abs=1e-12)
+        assert quality == pytest.approx(model.expected_score(row), abs=1e-9)

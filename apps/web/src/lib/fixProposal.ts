@@ -75,3 +75,24 @@ export function proposeFix(doc: Plan): Promise<FixProposal> {
   }
   return pending;
 }
+
+let queue: Promise<unknown> = Promise.resolve();
+let newest = '';
+
+/**
+ * Тот же расчёт, но заранее и в фоне: не больше одного разом и только для последней правки.
+ *
+ * Расчёт занимает на сервере секунды и идёт по одному запросу за раз. Пока он шёл, редактор
+ * успевал измениться ещё несколько раз, и каждая правка ставила в очередь новый расчёт —
+ * очередь росла, а нужен из неё был только последний. Устаревшая заявка теперь отменяется:
+ * ответ null означает «документ уже другой, считать нечего».
+ */
+export function precomputeFix(doc: Plan): Promise<FixProposal | null> {
+  const key = JSON.stringify(doc);
+  newest = key;
+  const known = cache.get(key);
+  if (known) return known;
+  const pending = queue.then(() => (newest === key ? proposeFix(doc) : null));
+  queue = pending.catch(() => undefined);
+  return pending;
+}

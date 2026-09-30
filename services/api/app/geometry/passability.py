@@ -73,6 +73,15 @@ def _remember(cache: dict, key: tuple, value: object) -> None:
     cache[key] = value
 
 
+def reset_caches() -> None:
+    """Забыть всё посчитанное. Нужно замерам времени: иначе второй прогон измеряет кэш."""
+    _FREE_SPACE_CACHE.clear()
+    _EROSION_CACHE.clear()
+    _ENTRANCE_CACHE.clear()
+    _CIRCLE_CACHE.clear()
+    core.reset_caches()
+
+
 def free_space(plan: Plan, exclude: set[str] | None = None) -> Polygon | MultiPolygon | None:
     """Площадь пола, свободная от оборудования. Внутренние перегородки считаются препятствием."""
     excluded = frozenset(exclude or ())

@@ -35,6 +35,11 @@ from app.rules.engine import SERVICE_WINDOW_TYPES, VISITOR_TARGET_TYPES, validat
 GRID_STEP = 0.25
 DEFAULT_TOP_K = 24
 WALL_MOUNT_TOLERANCE = 0.15
+# Сколько позиций сетки перебирать за один поиск. Шаг 25 см на зале в 300 м² даёт пять тысяч
+# позиций, и почти все они отличаются друг от друга на четверть метра — различие, которое
+# всё равно стирается прижатием к стене и к соседям. На отделении обычного размера шаг
+# остаётся прежним, на большом зале укрупняется, и время поиска перестаёт расти как площадь.
+POSITION_BUDGET = 1600
 
 
 @dataclass
@@ -69,8 +74,29 @@ class SearchResult:
     best: list[Evaluated]
 
 
+_WALLS_CACHE: dict[tuple, tuple[list[LineString], np.ndarray]] = {}
+
+
+def _wall_geometry(plan: Plan) -> tuple[list[LineString], np.ndarray]:
+    """Стены плана списком и массивом сразу.
+
+    Оценка уместности спрашивает стены на каждую позицию сетки — это десятки тысяч раз за один
+    подбор, и создавать отрезки заново каждый раз дороже самого расчёта. Массив нужен, чтобы
+    расстояние до всех стен считалось одним вызовом shapely.
+    """
+    key = tuple((wall.id, wall.from_, wall.to) for wall in plan.walls)
+    known = _WALLS_CACHE.get(key)
+    if known is None:
+        lines = [LineString([wall.from_, wall.to]) for wall in plan.walls]
+        known = (lines, np.array(lines, dtype=object))
+        if len(_WALLS_CACHE) >= 64:
+            _WALLS_CACHE.clear()
+        _WALLS_CACHE[key] = known
+    return known
+
+
 def _walls(plan: Plan) -> list[LineString]:
-    return [LineString([w.from_, w.to]) for w in plan.walls]
+    return _wall_geometry(plan)[0]
 
 
 def _allowed_region(plan: Plan, type_def: EquipmentType, zone_id: str | None) -> Polygon | None:
@@ -178,11 +204,14 @@ def _axes(rotation_deg: float, size: tuple[float, float]) -> tuple[tuple[float, 
     return (x_axis, y_axis) if size[0] >= size[1] else (y_axis, x_axis)
 
 
-def _wall_alignment(poly: Polygon, rotation: float, size: tuple[float, float], walls: list[LineString]) -> tuple[float, float]:
+def _wall_alignment(plan: Plan, poly: Polygon, rotation: float, size: tuple[float, float]) -> tuple[float, float]:
     """Расстояние до ближайшей стены и перекос: длинная сторона должна идти вдоль стены."""
     center = poly.centroid
-    nearest_wall = min(walls, key=lambda w: w.distance(poly))
-    distance = nearest_wall.distance(poly)
+    walls, array = _wall_geometry(plan)
+    distances = shapely.distance(array, poly)
+    index = int(distances.argmin())
+    nearest_wall = walls[index]
+    distance = float(distances[index])
     (x1, y1), (x2, y2) = nearest_wall.coords[0], nearest_wall.coords[-1]
     length = math.hypot(x2 - x1, y2 - y1) or 1.0
     wall_dir = ((x2 - x1) / length, (y2 - y1) / length)
@@ -238,6 +267,10 @@ class _FeatureContext:
     # Дерево габаритов оборудования: по нему свободная площадь вокруг кандидата считается
     # вычитанием только соседних объектов, а не всей занятой площади плана.
     tree: STRtree | None = None
+    # Те же препятствия массивами: расстояние до всех сразу считается одним вызовом shapely,
+    # а не десятками обращений по одному. На зале с тридцатью объектами это главная статья
+    # расходов поиска — до миллиона отдельных замеров расстояния на один подбор.
+    arrays: dict[str, np.ndarray] = field(default_factory=dict)
     # Признаки, одинаковые для всех кандидатов поиска, и признаки зон: считаются один раз.
     constants: dict[str, float] = field(default_factory=dict)
     zone_features: dict[str | None, dict[str, float]] = field(default_factory=dict)
@@ -246,6 +279,22 @@ class _FeatureContext:
     scale: float = 1.0
 
     def prepare(self) -> None:
+        self.arrays = {
+            name: np.array(items, dtype=object)
+            for name, items in (
+                ("walls", self.walls),
+                ("obstacles", self.obstacles),
+                ("windows", self.windows),
+                ("door_squares", self.door_squares),
+                ("partitions", self.partitions),
+                ("routes", self.routes),
+                ("access_points", self.access_points),
+                (
+                    "window_axes",
+                    [LineString([self.entrance, w.centroid]) for w in self.windows] if self.entrance else [],
+                ),
+            )
+        }
         plan_area = self.shape.area if self.shape is not None else 0.0
         width, depth = self.size
         self.constants = {
@@ -319,6 +368,13 @@ def _flow_context(plan: Plan, entrance: tuple[float, float] | None, exclude: set
     return routes, points
 
 
+def _nearest(geometries: np.ndarray, poly: Polygon, default: float = 10.0) -> float:
+    """Расстояние до ближайшей из фигур. Пустой набор даёт значение по умолчанию."""
+    if not len(geometries):
+        return default
+    return float(shapely.distance(geometries, poly).min())
+
+
 def _features(poly: Polygon, rotation: float, score: float, ctx: _FeatureContext) -> dict[str, float]:
     """Признаки позиции для обучаемого ускорителя.
 
@@ -337,34 +393,32 @@ def _features(poly: Polygon, rotation: float, score: float, ctx: _FeatureContext
         if len(near):
             free_area = free_circle.difference(unary_union([ctx.obstacles[h] for h in near])).area
     entrance_point = Point(ctx.entrance) if ctx.entrance else None
-    window_axis = 10.0
-    if entrance_point is not None and ctx.windows:
-        # Расстояние до линии «вход — окно обслуживания»: объект на этой линии мешает проходу.
-        window_axis = min(
-            LineString([entrance_point, w.centroid]).distance(poly) for w in ctx.windows
-        )
+    arrays = ctx.arrays
     features: dict[str, float] = {
         **ctx.constants,
         **ctx.zone(zone),
         "fitness": score,
-        "wall_distance": min((w.distance(poly) for w in ctx.walls), default=0.0),
+        "wall_distance": _nearest(arrays["walls"], poly, default=0.0),
         "entrance_distance": poly.distance(entrance_point) if entrance_point else 0.0,
-        "nearest_obstacle": min((o.distance(poly) for o in ctx.obstacles), default=10.0),
+        "nearest_obstacle": _nearest(arrays["obstacles"], poly),
         "rotation": rotation,
         "area": poly.area,
         "boundary_distance": ctx.shape.exterior.distance(poly) if ctx.shape is not None else 0.0,
-        "door_distance": min((sq.distance(poly) for sq in ctx.door_squares), default=10.0),
-        "partition_distance": min((p.distance(poly) for p in ctx.partitions), default=10.0),
-        "window_distance": min((w.distance(poly) for w in ctx.windows), default=10.0),
-        "entrance_axis_distance": window_axis,
+        "door_distance": _nearest(arrays["door_squares"], poly),
+        "partition_distance": _nearest(arrays["partitions"], poly),
+        "window_distance": _nearest(arrays["windows"], poly),
+        # Расстояние до линии «вход — окно обслуживания»: объект на этой линии мешает проходу.
+        "entrance_axis_distance": _nearest(arrays["window_axes"], poly),
         "free_around": free_area / (math.pi * FREE_SPACE_RADIUS_M**2),
     }
 
     # Признаки потока посетителей.
-    route_distances = [line.distance(poly) for line in ctx.routes]
-    features["route_distance"] = min(route_distances, default=10.0)
-    features["route_hits"] = float(sum(1 for d in route_distances if d < ROUTE_BAND_M))
-    features["access_distance"] = min((point.distance(poly) for point in ctx.access_points), default=10.0)
+    route_distances = (
+        shapely.distance(arrays["routes"], poly) if len(arrays["routes"]) else np.empty(0)
+    )
+    features["route_distance"] = float(route_distances.min()) if len(route_distances) else 10.0
+    features["route_hits"] = float((route_distances < ROUTE_BAND_M).sum())
+    features["access_distance"] = _nearest(arrays["access_points"], poly)
     features["route_pinch"] = (
         min(features["nearest_obstacle"], 3.0) if features["route_distance"] < ROUTE_BAND_M else 3.0
     )
@@ -378,7 +432,7 @@ def _fitness_for(type_code: str, type_def: EquipmentType) -> FitnessFn:
     """Оценка уместности позиции: чем меньше, тем лучше."""
 
     def near_wall(plan: Plan, poly: Polygon, rot: float, size: tuple[float, float]) -> float:
-        distance, skew = _wall_alignment(poly, rot, size, _walls(plan))
+        distance, skew = _wall_alignment(plan, poly, rot, size)
         return distance + 2.0 * skew
 
     def near_entrance(plan: Plan, poly: Polygon, rot: float, size: tuple[float, float]) -> float:
@@ -408,13 +462,13 @@ def _fitness_for(type_code: str, type_def: EquipmentType) -> FitnessFn:
     def far_from_entrance_on_wall(plan: Plan, poly: Polygon, rot: float, size: tuple[float, float]) -> float:
         """Камера на стене напротив входа: вход и окна попадают в кадр."""
         entrance = passability.entrance_point(plan)
-        wall_distance, _ = _wall_alignment(poly, rot, size, _walls(plan))
+        wall_distance, _ = _wall_alignment(plan, poly, rot, size)
         view = -poly.distance(Point(entrance)) if entrance else 0.0
         return wall_distance * 5.0 + view * 0.2
 
     def visible_from_waiting(plan: Plan, poly: Polygon, rot: float, size: tuple[float, float]) -> float:
         """Табло на стене, ближайшей к зонам ожидания и накопителю очереди."""
-        wall_distance, skew = _wall_alignment(poly, rot, size, _walls(plan))
+        wall_distance, skew = _wall_alignment(plan, poly, rot, size)
         waiting = core.zone_by_type(plan, "waiting", "queue_accumulator")
         if not waiting:
             return wall_distance * 5.0 + skew
@@ -432,6 +486,13 @@ def _fitness_for(type_code: str, type_def: EquipmentType) -> FitnessFn:
     if type_code in ("info_display", "media_panel"):
         return visible_from_waiting
     return near_wall
+
+
+def _grid_step(step: float, area: float) -> float:
+    """Шаг сетки под площадь области поиска, но не мельче заданного."""
+    if area <= 0:
+        return step
+    return max(step, round(math.sqrt(area / POSITION_BUDGET), 2))
 
 
 def generate(
@@ -497,6 +558,7 @@ def generate(
     }
 
     min_x, min_y, max_x, max_y = region.bounds
+    step = _grid_step(step, (max_x - min_x) * (max_y - min_y))
     generated = 0
     result: list[Candidate] = []
     prepared_region = region.buffer(1e-6)
@@ -709,14 +771,7 @@ def place(
     accepted = [e for e in evaluated if e.accepted]
     # Сначала меньше нарушений, при равенстве — лучшая расстановка целиком: проход, места
     # ожидания, путь посетителя и величина переноса.
-    accepted.sort(
-        key=lambda e: (
-            e.errors,
-            e.score.total if e.score is not None else 0.0,
-            -(e.min_route_width if e.min_route_width is not None else 10.0),
-            e.candidate.fitness,
-        )
-    )
+    accepted.sort(key=_rank_key)
     return SearchResult(
         equipment_type=type_code,
         generated=generated,
@@ -725,6 +780,16 @@ def place(
         elapsed_ms=round((time.perf_counter() - started) * 1000, 1),
         baseline_errors=baseline_errors,
         best=_distinct(accepted, keep),
+    )
+
+
+def _rank_key(item: "Evaluated") -> tuple[float, float, float, float]:
+    """Порядок вариантов: сначала меньше нарушений, потом лучше расстановка целиком."""
+    return (
+        float(item.errors),
+        item.score.total if item.score is not None else 0.0,
+        -(item.min_route_width if item.min_route_width is not None else 10.0),
+        item.candidate.fitness,
     )
 
 

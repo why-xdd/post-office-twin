@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from train_accelerator import TRAIN_TYPES, synthetic_plan  # noqa: E402
 
 from app.assistant import accelerator, search  # noqa: E402
+from app.geometry import passability  # noqa: E402
 from app.assistant.search import equipment_types  # noqa: E402
 from app.models import Plan  # noqa: E402
 
@@ -41,6 +42,10 @@ SETUPS = (
 
 
 def _best(plan: Plan, type_code: str, top_k: int) -> tuple[float | None, float]:
+    """Оценка лучшего найденного места и время подбора."""
+    # Кэш геометрии сбрасывается перед каждым замером: иначе следующая оснастка считает по
+    # готовому от предыдущей, и столбец времени показывает не расчёт, а попадание в кэш.
+    passability.reset_caches()
     result = search.place(plan, type_code, new_id="__new__", top_k=top_k, keep=1)
     return (result.best[0].score.total if result.best else None), result.elapsed_ms / 1000
 

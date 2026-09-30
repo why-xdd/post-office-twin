@@ -9,7 +9,7 @@ import { ArrowRight, Check, ChevronDown, CircleCheck, LoaderCircle, Save, Undo2,
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AddressBook } from '../lib/addresses';
 import { ApiError } from '../lib/api';
-import { proposeFix, type FixProposal, type Shift } from '../lib/fixProposal';
+import { precomputeFix, proposeFix, type FixProposal, type Shift } from '../lib/fixProposal';
 import { humanize } from '../lib/humanize';
 import type { Finding } from '../lib/plan';
 import { objectName, plainFinding } from '../lib/plainFindings';
@@ -31,8 +31,9 @@ type FixState =
   | { kind: 'shown'; proposal: FixProposal }
   | { kind: 'failed'; message: string };
 
-/** Пока план не менялся, расчёт исправления не запускается повторно при каждой проверке. */
-const PRECOMPUTE_DELAY_MS = 600;
+/** Пока план не менялся, расчёт исправления не запускается повторно при каждой проверке.
+ *  Пауза заметно длиннее одного перетаскивания: пока объект двигают, считать нечего. */
+const PRECOMPUTE_DELAY_MS = 1200;
 
 export function Review({ book, saving, onSave, onFocusObject, onNotice }: ReviewProps) {
   const doc = useWorkspace((s) => s.doc);
@@ -62,9 +63,9 @@ export function Review({ book, saving, onSave, onFocusObject, onNotice }: Review
     if (!doc || !report || reportState !== 'ready' || report.errors === 0) return;
     let cancelled = false;
     const timer = window.setTimeout(() => {
-      proposeFix(doc)
+      precomputeFix(doc)
         .then((proposal) => {
-          if (cancelled) return;
+          if (cancelled || proposal === null) return;
           setReady(proposal);
           if (requested.current) {
             requested.current = false;

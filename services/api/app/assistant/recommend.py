@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 from typing import Any
 
@@ -102,6 +103,36 @@ class AssistantReport(BaseModel):
     completeness: list[completeness_model.CompletenessIssue]
     summary: dict[str, Any]
     elapsed_ms: float
+    partial: bool = Field(
+        default=False, description="Отведённое время кончилось: показано то, что успели подобрать"
+    )
+
+
+def _budget() -> float:
+    """Сколько секунд ассистент тратит на один запрос."""
+    try:
+        return max(1.0, float(os.environ.get("OPS_TWIN_ASSISTANT_BUDGET", DEFAULT_BUDGET_S)))
+    except ValueError:
+        return DEFAULT_BUDGET_S
+
+
+# Зал в 400 м² с шестью десятками объектов даёт сотни вариантов расстановки на каждое нарушение,
+# и полный перебор рекомендаций там занимает больше минуты. Честный неполный ответ за разумное
+# время полезнее: человек видит найденное и знает, что подбор остановлен по времени.
+DEFAULT_BUDGET_S = 25.0
+
+
+class Deadline:
+    """Отсечка по времени для подбора рекомендаций."""
+
+    def __init__(self, seconds: float | None = None) -> None:
+        self.until = time.perf_counter() + (seconds if seconds is not None else _budget())
+        self.reached = False
+
+    def spent(self) -> bool:
+        if not self.reached and time.perf_counter() >= self.until:
+            self.reached = True
+        return self.reached
 
 
 def _narrowest_targets(routes: list[passability.RouteWidth]) -> list[str]:
@@ -360,11 +391,17 @@ def recommend_path_fix(plan: Plan, before: dict[str, Any]) -> Recommendation | N
     )
 
 
-def recommend_fixes(plan: Plan, before: dict[str, Any], limit: int | None = None) -> list[Recommendation]:
+def recommend_fixes(
+    plan: Plan,
+    before: dict[str, Any],
+    limit: int | None = None,
+    deadline: "Deadline | None" = None,
+) -> list[Recommendation]:
     """Для объектов, участвующих в ошибках, ищется перенос, который уменьшает число ошибок.
 
     limit останавливает поиск после стольких найденных рекомендаций: при пошаговом улучшении
-    применяется одна, и перебирать остальные незачем.
+    применяется одна, и перебирать остальные незачем. deadline прекращает перебор объектов,
+    когда отведённое на подбор время кончилось.
     """
     path_fix = recommend_path_fix(plan, before)
     if path_fix is not None and limit == 1:
@@ -387,6 +424,8 @@ def recommend_fixes(plan: Plan, before: dict[str, Any], limit: int | None = None
     results: list[Recommendation] = [path_fix] if path_fix is not None else []
     for item in movable:
         if limit is not None and len(results) >= limit:
+            break
+        if results and deadline is not None and deadline.spent():
             break
         found = search.place(
             plan,
@@ -524,11 +563,14 @@ def recommend_completeness(
     before: dict[str, Any],
     capacity: capacity_model.CapacityReport,
     limit: int | None = None,
+    deadline: "Deadline | None" = None,
 ) -> list[Recommendation]:
     results: list[Recommendation] = []
     working = plan
     for issue in completeness_model.analyze(plan, capacity):
         if limit is not None and sum(1 for r in results if r.changes) >= limit:
+            break
+        if results and deadline is not None and deadline.spent():
             break
         label = _label(plan, issue.equipment_type)
         reason = Reason(text=issue.message.replace(f"«{issue.equipment_type}»", f"«{label}»"), source=issue.source, clause=issue.clause)
@@ -634,12 +676,15 @@ def recommend_capacity(
     before: dict[str, Any],
     capacity: capacity_model.CapacityReport,
     limit: int | None = None,
+    deadline: "Deadline | None" = None,
 ) -> list[Recommendation]:
     results: list[Recommendation] = []
     if not capacity.available:
         return results
     for group in capacity.groups:
         if limit is not None and sum(1 for r in results if r.changes) >= limit:
+            break
+        if results and deadline is not None and deadline.spent():
             break
         short = len(group.windows) < group.windows_needed
         low_reserve = group.reserve_percent is not None and group.reserve_percent < LOW_RESERVE_PERCENT
@@ -768,6 +813,9 @@ class ImprovementReport(BaseModel):
     improved_plan: dict[str, Any]
     effects: list[Effect]
     elapsed_ms: float
+    partial: bool = Field(
+        default=False, description="Отведённое время кончилось: показаны найденные шаги"
+    )
 
 
 def apply_changes(plan: Plan, changes: list[Change]) -> Plan:
@@ -820,7 +868,9 @@ def _step_key(rec: Recommendation) -> str:
     return f"{rec.id}|{places}"
 
 
-def improve(plan: Plan, max_steps: int = 12, fixes_only: bool = False) -> ImprovementReport:
+def improve(
+    plan: Plan, max_steps: int = 12, fixes_only: bool = False, deadline: Deadline | None = None
+) -> ImprovementReport:
     """Последовательное улучшение плана.
 
     На каждом шаге рекомендации пересчитываются для текущего состояния, и применяется лучшая:
@@ -829,6 +879,7 @@ def improve(plan: Plan, max_steps: int = 12, fixes_only: bool = False) -> Improv
     fixes_only ограничивает улучшение устранением нарушений: план не пополняется оборудованием.
     """
     started = time.perf_counter()
+    deadline = deadline or Deadline()
     initial = summarize(plan)
     current = plan
     steps: list[ImprovementStep] = []
@@ -838,19 +889,25 @@ def improve(plan: Plan, max_steps: int = 12, fixes_only: bool = False) -> Improv
     touched: set[str] = set()
 
     for _ in range(max_steps):
+        if steps and deadline.spent():
+            break
         state = summarize(current)
         capacity = capacity_model.analyze(current)
-        candidates = [r for r in recommend_fixes(current, state, limit=1) if _step_key(r) not in applied]
+        candidates = [
+            r
+            for r in recommend_fixes(current, state, limit=1, deadline=deadline)
+            if _step_key(r) not in applied
+        ]
         if not candidates and not fixes_only:
             candidates = [
                 r
-                for r in recommend_capacity(current, state, capacity, limit=1)
+                for r in recommend_capacity(current, state, capacity, limit=1, deadline=deadline)
                 if _step_key(r) not in applied and r.changes
             ]
         if not candidates and not fixes_only:
             candidates = [
                 r
-                for r in recommend_completeness(current, state, capacity, limit=1)
+                for r in recommend_completeness(current, state, capacity, limit=1, deadline=deadline)
                 if _step_key(r) not in applied and r.changes
             ]
         if not candidates:
@@ -882,7 +939,7 @@ def improve(plan: Plan, max_steps: int = 12, fixes_only: bool = False) -> Improv
 
     # Полируется то, что действительно переехало: идентификаторы объектов, а не рекомендаций.
     moved_objects = {c.object_id for step in steps for c in step.recommendation.changes if c.op == "move"}
-    current, polish_steps = _polish(plan, current, moved_objects)
+    current, polish_steps = _polish(plan, current, moved_objects, deadline=deadline)
     steps.extend(polish_steps)
 
     final = summarize(current)
@@ -893,10 +950,17 @@ def improve(plan: Plan, max_steps: int = 12, fixes_only: bool = False) -> Improv
         improved_plan=current.model_dump(by_alias=True, exclude_none=True),
         effects=_effects(initial, final),
         elapsed_ms=round((time.perf_counter() - started) * 1000, 1),
+        partial=deadline.reached,
     )
 
 
-def _polish(original: Plan, plan: Plan, moved: set[str], max_steps: int = 4) -> tuple[Plan, list[ImprovementStep]]:
+def _polish(
+    original: Plan,
+    plan: Plan,
+    moved: set[str],
+    max_steps: int = 4,
+    deadline: "Deadline | None" = None,
+) -> tuple[Plan, list[ImprovementStep]]:
     """Возврат перенесённых объектов ближе к их прежнему месту, если план от этого выигрывает.
 
     Устранение нарушений иногда уводит скамью из зоны ожидания или стойку от окон: ошибок нет,
@@ -907,6 +971,8 @@ def _polish(original: Plan, plan: Plan, moved: set[str], max_steps: int = 4) -> 
     current = plan
     before_zone = {item.id: item.zone for item in original.equipment}
     for object_id in sorted(moved)[:max_steps]:
+        if deadline is not None and deadline.spent():
+            break
         item = next((e for e in current.equipment if e.id == object_id), None)
         source = next((e for e in original.equipment if e.id == object_id), None)
         if item is None or source is None or item.zone == before_zone.get(object_id):
@@ -988,7 +1054,7 @@ def _polish_gain(before: objective.Score, after: objective.Score) -> str:
     return ("Улучшение: " + ", ".join(parts) + ".") if parts else "План становится удобнее."
 
 
-def recommend_zone_moves(plan: Plan) -> list[Recommendation]:
+def recommend_zone_moves(plan: Plan, deadline: "Deadline | None" = None) -> list[Recommendation]:
     """Объекты не в своей зоне по справочнику: перенос в ближайшую допустимую зону.
 
     Стеллаж посреди клиентского зала проход не перекрывает и ошибкой не считается, но стоит
@@ -998,6 +1064,8 @@ def recommend_zone_moves(plan: Plan) -> list[Recommendation]:
     types = equipment_types(plan)
     results: list[Recommendation] = []
     for problem in core.misplaced_by_type(plan, {code: t.allowed_zones for code, t in types.items()}):
+        if results and deadline is not None and deadline.spent():
+            break
         item = next(e for e in plan.equipment if e.id == problem["объект"])
         allowed = [z for z in plan.zones if z.type in problem["допустимые"]]
         if not allowed:
@@ -1036,17 +1104,28 @@ def recommend_zone_moves(plan: Plan) -> list[Recommendation]:
     return results
 
 
-def advise(plan: Plan) -> AssistantReport:
+def advise(plan: Plan, deadline: Deadline | None = None) -> AssistantReport:
+    """Все рекомендации по плану: сначала нарушения, потом зоны, пропускная способность и состав.
+
+    Семейства считаются по очереди и в порядке важности: если отведённое время кончилось,
+    оставшиеся не считаются, а ответ помечается неполным.
+    """
     started = time.perf_counter()
+    deadline = deadline or Deadline()
     before = summarize(plan)
     capacity = capacity_model.analyze(plan)
     completeness = completeness_model.analyze(plan, capacity)
-    recommendations = [
-        *recommend_fixes(plan, before),
-        *recommend_zone_moves(plan),
-        *recommend_capacity(plan, before, capacity),
-        *recommend_completeness(plan, before, capacity),
-    ]
+    recommendations: list[Recommendation] = []
+    families = (
+        lambda: recommend_fixes(plan, before, deadline=deadline),
+        lambda: recommend_zone_moves(plan, deadline=deadline),
+        lambda: recommend_capacity(plan, before, capacity, deadline=deadline),
+        lambda: recommend_completeness(plan, before, capacity, deadline=deadline),
+    )
+    for family in families:
+        if recommendations and deadline.spent():
+            break
+        recommendations.extend(family())
     recommendations.sort(key=lambda r: r.priority)
     return AssistantReport(
         recommendations=recommendations,
@@ -1054,6 +1133,7 @@ def advise(plan: Plan) -> AssistantReport:
         completeness=completeness,
         summary=before,
         elapsed_ms=round((time.perf_counter() - started) * 1000, 1),
+        partial=deadline.reached,
     )
 
 

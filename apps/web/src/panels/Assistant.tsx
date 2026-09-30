@@ -73,6 +73,8 @@ export function Assistant({ book, types, onFocusObject, onNotice }: AssistantPro
   const [recommendations, setRecommendations] = useState<Recommendation[] | null>(null);
   const [capacity, setCapacity] = useState<CapacityReport | null>(null);
   const [improvement, setImprovement] = useState<ImprovementReport | null>(null);
+  // Подбор остановлен по времени: об этом нужно сказать, иначе список выглядит полным.
+  const [partial, setPartial] = useState(false);
   const [placeType, setPlaceType] = useState('storage_rack');
   const [placeResult, setPlaceResult] = useState<Recommendation | null>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
@@ -122,6 +124,7 @@ export function Assistant({ book, types, onFocusObject, onNotice }: AssistantPro
       setRecommendations(result.recommendations);
       setCapacity(result.capacity);
       setImprovement(null);
+      setPartial(Boolean(result.partial));
     });
 
   const improve = () =>
@@ -137,6 +140,7 @@ export function Assistant({ book, types, onFocusObject, onNotice }: AssistantPro
       // Рекомендации команды показываются тем же списком: у них та же карточка и то же «Принять».
       setRecommendations(result.recommendations);
       setImprovement(null);
+      setPartial(false);
     });
   };
 
@@ -296,6 +300,12 @@ export function Assistant({ book, types, onFocusObject, onNotice }: AssistantPro
               {formatNumber(improvement.elapsed_ms / 1000, 1)} с
             </span>
           </header>
+          {improvement.partial && (
+            <p className="assistant__stale">
+              Подбор остановлен по отведённому времени: показаны шаги, которые сервис успел найти.
+              Повторный запуск продолжит улучшение с этого плана.
+            </p>
+          )}
           <EffectTable effects={improvement.effects} />
           <ol className="steps">
             {improvement.steps.map((step, index) => (
@@ -338,6 +348,12 @@ export function Assistant({ book, types, onFocusObject, onNotice }: AssistantPro
               {recommendations.length} {plural(recommendations.length, 'рекомендация', 'рекомендации', 'рекомендаций')}
             </span>
           </header>
+          {partial && recommendations.length > 0 && (
+            <p className="assistant__stale">
+              Подбор остановлен по отведённому времени: показано то, что сервис успел найти. Это
+              бывает на очень больших залах — важные рекомендации считаются первыми.
+            </p>
+          )}
           {recommendations.length === 0 ? (
             <p className="assistant__empty">Рекомендаций нет: ошибок проверки нет, комплектность и пропускная способность в норме.</p>
           ) : (

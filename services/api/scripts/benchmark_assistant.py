@@ -15,12 +15,15 @@ import time
 from pathlib import Path
 
 from app.assistant import accelerator, objective, recommend, search
+from app.geometry import passability
 from app.models import Plan
 
 
 def measure(plan: Plan, with_model: bool, with_quality: bool = True) -> dict:
     """Один и тот же сценарий при разной оснастке поиска."""
     accelerator.reset()
+    # Замер должен считать заново: кэш геометрии живёт между вызовами и исказил бы время.
+    passability.reset_caches()
     original = accelerator.MODEL_PATH
     weight = search.QUALITY_WEIGHT
     if not with_model:

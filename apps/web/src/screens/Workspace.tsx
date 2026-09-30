@@ -55,7 +55,7 @@ import type { View } from '../lib/geometry';
 import type { EquipmentTypeInfo, Point, Rule, ZoneTypeInfo } from '../lib/plan';
 import { formatNumber, planArea, plural } from '../lib/planFacts';
 import { plainFinding, sortFindings } from '../lib/plainFindings';
-import { withTransform } from '../lib/equipmentOps';
+import { transformInPlace, withTransform } from '../lib/equipmentOps';
 import { fitsRoom } from '../lib/room';
 import { navigate } from '../lib/router';
 import { clearDraft, readDraft, saveDraft } from '../lib/draft';
@@ -97,6 +97,9 @@ const HOTKEYS: [string, string][] = [
   ['R · Shift + R', 'повернуть на 90° · на 15°'],
   ['Стрелки · Shift + стрелки', 'сдвинуть на 5 см · на 25 см'],
   ['Ctrl при перетаскивании', 'без привязки к стенам'],
+  ['Shift + щелчок', 'добавить объект к выделению'],
+  ['Shift + рамка', 'выделить объекты рамкой'],
+  ['Ctrl + A', 'выделить всё оборудование'],
   ['Del', 'удалить выделенное'],
   ['F', 'вписать план в экран'],
   ['/', 'перейти по адресу'],
@@ -161,6 +164,7 @@ export function Workspace({ planId }: WorkspaceProps) {
   const previewing = useWorkspace((s) => s.preview !== null);
   const activeFinding = useWorkspace((s) => s.activeFinding);
   const setActiveFinding = useWorkspace((s) => s.setActiveFinding);
+  const group = useWorkspace((s) => s.group);
 
   const [load, setLoad] = useState<LoadState>({ kind: 'loading' });
   const [types, setTypes] = useState<EquipmentTypeInfo[]>([]);
@@ -347,6 +351,68 @@ export function Workspace({ planId }: WorkspaceProps) {
 
   // Горячие клавиши
   useEffect(() => {
+    // Клавиши для группы: удалить, сдвинуть, дублировать. Поворот — только по одному объекту.
+    const onGroupKey = (event: KeyboardEvent, mod: boolean, state: ReturnType<typeof useWorkspace.getState>) => {
+      const doc = state.doc!;
+      const members = state.group
+        .map((id) => doc.equipment?.find((e) => e.id === id))
+        .filter((member): member is NonNullable<typeof member> => Boolean(member));
+      const count = members.length;
+      const objects = `${count} ${plural(count, 'объект', 'объекта', 'объектов')}`;
+      if (event.key === 'Delete' || event.key === 'Backspace') {
+        event.preventDefault();
+        state.removeSelection();
+        setNotice(`Удалено ${objects}. Отменить — Ctrl+Z`);
+        return;
+      }
+      if (event.code === 'KeyR' && !mod) {
+        setNotice('Группу не повернуть: поверните объекты по одному');
+        return;
+      }
+      if (mod && event.code === 'KeyD') {
+        event.preventDefault();
+        const stamp = Date.now().toString(36);
+        const copies = members.map((member, index) => ({
+          ...structuredClone(member),
+          ...withTransform(member, { position: [member.position[0] + 0.5, member.position[1] - 0.5] }),
+          id: `${member.type}_${stamp}${index}`,
+        }));
+        state.commit((draft) => {
+          draft.equipment = [...(draft.equipment ?? []), ...copies];
+        });
+        state.setGroup(copies.map((copy) => copy.id));
+        setNotice(`Скопировано ${objects}`);
+        return;
+      }
+      const nudge = event.shiftKey ? 0.25 : 0.05;
+      const delta: Record<string, [number, number]> = {
+        ArrowLeft: [-nudge, 0],
+        ArrowRight: [nudge, 0],
+        ArrowUp: [0, nudge],
+        ArrowDown: [0, -nudge],
+      };
+      const step = delta[event.key];
+      if (!step) return;
+      event.preventDefault();
+      const moved = members.map((member) => ({
+        member,
+        position: [Math.round((member.position[0] + step[0]) * 1000) / 1000, Math.round((member.position[1] + step[1]) * 1000) / 1000] as [number, number],
+      }));
+      const stuck = moved.find(
+        ({ member, position }) => (typesRef.current.get(member.type)?.floor_object ?? true) && !fitsRoom(doc, { ...member, position }),
+      );
+      if (stuck) {
+        setNotice(`Группа упирается в стену: «${stuck.member.label || stuck.member.type}» дальше не пройдёт`);
+        return;
+      }
+      state.commit((draft) => {
+        for (const { member, position } of moved) {
+          const target = draft.equipment?.find((e) => e.id === member.id);
+          if (target) transformInPlace(target, { position });
+        }
+      });
+    };
+
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement;
       const typing = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT';
@@ -400,6 +466,16 @@ export function Workspace({ planId }: WorkspaceProps) {
       if (event.code === 'KeyW') state.setTool('wall');
       if (event.code === 'KeyO' && !mod) state.setTool('outline');
       if (event.code === 'KeyZ' && !mod) state.setTool('zone');
+
+      if (mod && event.code === 'KeyA') {
+        event.preventDefault();
+        state.setGroup((state.doc?.equipment ?? []).map((e) => e.id));
+        return;
+      }
+      if (state.group.length > 1 && state.doc) {
+        onGroupKey(event, mod, state);
+        return;
+      }
 
       const sel = state.selection;
       if ((event.key === 'Delete' || event.key === 'Backspace') && sel) {
@@ -1016,10 +1092,16 @@ export function Workspace({ planId }: WorkspaceProps) {
             {plural(doc.equipment?.length ?? 0, 'объект', 'объекта', 'объектов')}, {doc.zones?.length ?? 0}{' '}
             {plural(doc.zones?.length ?? 0, 'зона', 'зоны', 'зон')}
           </span>
-          {selection && (
+          {group.length > 1 ? (
             <span>
-              Выбрано: {book.byId.get(`${selection.kind}:${selection.id}`)} — {ADDRESS_KIND_LABEL[selection.kind]}
+              Выбрано: {group.length} {plural(group.length, 'объект', 'объекта', 'объектов')}
             </span>
+          ) : (
+            selection && (
+              <span>
+                Выбрано: {book.byId.get(`${selection.kind}:${selection.id}`)} — {ADDRESS_KIND_LABEL[selection.kind]}
+              </span>
+            )
           )}
           <span className="ws-status__hint">
             {viewKind === '3d'

@@ -63,6 +63,11 @@ interface WorkspaceState {
   transientBase: Plan | null;
 
   selection: Selection | null;
+  /**
+   * Групповое выделение оборудования: два объекта и больше. Они двигаются, выравниваются и
+   * удаляются вместе; selection при этом — последний добавленный. Пусто — обычный выбор.
+   */
+  group: string[];
   highlighted: string[];
   tool: Tool;
   placingType: string | null;
@@ -97,6 +102,10 @@ interface WorkspaceState {
   restoreVersion: (doc: Plan) => void;
 
   select: (selection: Selection | null) => void;
+  /** Добавить объект к группе или убрать из неё (Shift + щелчок). */
+  toggleGroup: (id: string) => void;
+  /** Выделить сразу несколько объектов: рамкой или «всё оборудование». */
+  setGroup: (ids: string[]) => void;
   highlight: (ids: string[]) => void;
   setTool: (tool: Tool, placingType?: string | null) => void;
   setMode: (mode: Mode) => void;
@@ -125,6 +134,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   transientBase: null,
 
   selection: null,
+  group: [],
   highlighted: [],
   tool: 'select',
   placingType: null,
@@ -150,6 +160,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       future: [],
       transientBase: null,
       selection: null,
+      group: [],
       highlighted: [],
       tool: 'select',
       placingType: null,
@@ -227,15 +238,25 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   restoreVersion: (doc) => {
     const { doc: current, past } = get();
     if (!current) return;
-    set({ doc: clone(doc), past: [...past, current].slice(-HISTORY_LIMIT), future: [], preview: null, selection: null });
+    set({ doc: clone(doc), past: [...past, current].slice(-HISTORY_LIMIT), future: [], preview: null, selection: null, group: [] });
   },
 
-  select: (selection) => set({ selection }),
+  select: (selection) => set({ selection, group: [] }),
+  toggleGroup: (id) =>
+    set((state) => {
+      const base = state.group.length > 0 ? state.group : state.selection?.kind === 'equipment' ? [state.selection.id] : [];
+      const group = base.includes(id) ? base.filter((other) => other !== id) : [...base, id];
+      const primary = group[group.length - 1];
+      return { group: group.length > 1 ? group : [], selection: primary ? { kind: 'equipment', id: primary } : null };
+    }),
+  setGroup: (ids) =>
+    set({ group: ids.length > 1 ? ids : [], selection: ids.length ? { kind: 'equipment', id: ids[ids.length - 1] } : null }),
   highlight: (ids) => set({ highlighted: ids }),
   setTool: (tool, placingType = null) => set({ tool, placingType }),
   setMode: (mode) =>
     set((state) => ({
       mode,
+      group: [],
       tool: 'select',
       placingType: null,
       preview: null,
@@ -288,7 +309,14 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     }),
 
   removeSelection: () => {
-    const { selection } = get();
+    const { selection, group } = get();
+    if (group.length > 1) {
+      get().commit((draft) => {
+        draft.equipment = (draft.equipment ?? []).filter((e) => !group.includes(e.id));
+      });
+      set({ selection: null, group: [] });
+      return;
+    }
     if (!selection) return;
     get().commit((draft) => {
       if (selection.kind === 'equipment') {

@@ -2,19 +2,36 @@
  * Свойства выделенного: объекта, зоны, стены, проёма — или всего плана, если ничего не выбрано.
  */
 
-import { CircleCheck, Copy, OctagonAlert, RotateCw, Trash2, TriangleAlert } from 'lucide-react';
+import {
+  AlignCenterHorizontal,
+  AlignCenterVertical,
+  AlignEndHorizontal,
+  AlignEndVertical,
+  AlignHorizontalSpaceBetween,
+  AlignStartHorizontal,
+  AlignStartVertical,
+  AlignVerticalSpaceBetween,
+  CircleCheck,
+  Copy,
+  OctagonAlert,
+  RotateCw,
+  Trash2,
+  TriangleAlert,
+  type LucideIcon,
+} from 'lucide-react';
 import { useState } from 'react';
 import { NumberField, ReadonlyField, SelectField, TextField } from '../components/fields';
 import { Plate } from '../components/Plate';
 import type { AddressBook } from '../lib/addresses';
 import { formatAddress, key } from '../lib/addresses';
+import { alignGroup, type AlignMode } from '../lib/align';
 import { transformInPlace, withTransform } from '../lib/equipmentOps';
 import { round3, uniqueId, zoneAt } from '../lib/geometry';
 import type { Door, Equipment, EquipmentTypeInfo, Plan, WindowOpening, ZoneTypeInfo } from '../lib/plan';
 import { isNormFinding, plainFinding } from '../lib/plainFindings';
-import { hostWall } from '../lib/room';
+import { fitsRoom, hostWall } from '../lib/room';
 import { MIN_WALL_M, openingPlacement, resizeOpening, wallAxis, wallLength } from '../lib/wallEdit';
-import { formatNumber, planArea, polygonArea } from '../lib/planFacts';
+import { formatNumber, planArea, plural, polygonArea } from '../lib/planFacts';
 import { useWorkspace } from '../state/store';
 import { glyphFor } from '../canvas/glyphs';
 import '../components/fields.css';
@@ -36,8 +53,13 @@ export function Properties({ book, types, zoneTypes }: PropertiesProps) {
   const updateZone = useWorkspace((s) => s.updateZone);
   const removeSelection = useWorkspace((s) => s.removeSelection);
   const select = useWorkspace((s) => s.select);
+  const group = useWorkspace((s) => s.group);
 
   if (!doc) return null;
+
+  // После отмены в группе могут остаться объекты, которых на плане уже нет.
+  const liveGroup = group.filter((id) => doc.equipment?.some((e) => e.id === id));
+  if (liveGroup.length > 1) return <GroupProperties ids={liveGroup} book={book} types={types} />;
 
   if (selection?.kind === 'equipment') {
     const item = doc.equipment?.find((e) => e.id === selection.id);
@@ -388,6 +410,127 @@ function PlanProperties({ doc }: { doc: Plan }) {
           value={doc.flow_hints?.typical_visit_duration_min}
           onCommit={(v) => setFlow({ typical_visit_duration_min: v ?? undefined })}
         />
+      </div>
+    </div>
+  );
+}
+
+const ALIGN_ACTIONS: { mode: AlignMode; label: string; icon: LucideIcon }[] = [
+  { mode: 'left', label: 'По левому краю', icon: AlignStartVertical },
+  { mode: 'centerX', label: 'По центру слева направо', icon: AlignCenterVertical },
+  { mode: 'right', label: 'По правому краю', icon: AlignEndVertical },
+  { mode: 'top', label: 'По верхнему краю', icon: AlignStartHorizontal },
+  { mode: 'centerY', label: 'По центру сверху вниз', icon: AlignCenterHorizontal },
+  { mode: 'bottom', label: 'По нижнему краю', icon: AlignEndHorizontal },
+];
+
+const SPREAD_ACTIONS: { mode: AlignMode; label: string; icon: LucideIcon }[] = [
+  { mode: 'spreadX', label: 'Равные промежутки слева направо', icon: AlignHorizontalSpaceBetween },
+  { mode: 'spreadY', label: 'Равные промежутки сверху вниз', icon: AlignVerticalSpaceBetween },
+];
+
+/**
+ * Несколько объектов сразу: выровнять по краю или центру, расставить с равными промежутками,
+ * удалить. Правка — одна на всю группу, отменяется одним Ctrl+Z.
+ */
+function GroupProperties({ ids, book, types }: { ids: string[]; book: AddressBook; types: Map<string, EquipmentTypeInfo> }) {
+  const doc = useWorkspace((s) => s.doc);
+  const commit = useWorkspace((s) => s.commit);
+  const select = useWorkspace((s) => s.select);
+  const removeSelection = useWorkspace((s) => s.removeSelection);
+  const [problem, setProblem] = useState<string | null>(null);
+  if (!doc) return null;
+  const members = ids
+    .map((id) => doc.equipment?.find((e) => e.id === id))
+    .filter((member): member is Equipment => Boolean(member));
+  const name = (member: Equipment) => member.label || types.get(member.type)?.label || member.type;
+  const count = `${members.length} ${plural(members.length, 'объект', 'объекта', 'объектов')}`;
+
+  const align = (mode: AlignMode) => {
+    const moves = alignGroup(members, mode);
+    if (moves.size === 0) {
+      setProblem(mode === 'spreadX' || mode === 'spreadY' ? 'Раздвигать некуда: объекты стоят вплотную или уже ровно' : 'Объекты уже стоят так');
+      return;
+    }
+    const stuck = members.find((member) => {
+      const position = moves.get(member.id);
+      return position && (types.get(member.type)?.floor_object ?? true) && !fitsRoom(doc, { ...member, position });
+    });
+    if (stuck) {
+      setProblem(`Не выровнять: «${name(stuck)}» упрётся в стену`);
+      return;
+    }
+    setProblem(null);
+    commit((draft) => {
+      for (const [id, position] of moves) {
+        const target = draft.equipment?.find((e) => e.id === id);
+        if (!target) continue;
+        transformInPlace(target, { position });
+        const zone = zoneAt(draft, target.position);
+        if (zone) target.zone = zone.id;
+        else delete target.zone;
+      }
+    });
+  };
+
+  return (
+    <div className="props">
+      <header className="props__head">
+        <div>
+          <h2>Выбрано {count}</h2>
+          <p className="props__id">Shift + щелчок добавляет объект или убирает его из выделения</p>
+        </div>
+      </header>
+
+      <section className="props-group" aria-label="Выравнивание">
+        <h3 className="props-findings__title">Выровнять</h3>
+        <div className="props-group__row">
+          {ALIGN_ACTIONS.map(({ mode, label, icon: Icon }) => (
+            <button key={mode} type="button" className="props-group__tool" onClick={() => align(mode)} title={label} aria-label={label}>
+              <Icon size={17} aria-hidden="true" />
+            </button>
+          ))}
+          <span className="props-group__gap" aria-hidden="true" />
+          {SPREAD_ACTIONS.map(({ mode, label, icon: Icon }) => (
+            <button
+              key={mode}
+              type="button"
+              className="props-group__tool"
+              onClick={() => align(mode)}
+              disabled={members.length < 3}
+              title={members.length < 3 ? `${label}: нужно три объекта и больше` : label}
+              aria-label={label}
+            >
+              <Icon size={17} aria-hidden="true" />
+            </button>
+          ))}
+        </div>
+        {problem && (
+          <p className="props-group__problem" role="status">
+            {problem}
+          </p>
+        )}
+      </section>
+
+      <ul className="props-group__list" aria-label="Выбранные объекты">
+        {members.map((member) => (
+          <li key={member.id}>
+            <button type="button" className="props-group__member" onClick={() => select({ kind: 'equipment', id: member.id })} title="Выбрать только этот объект">
+              <Plate surface="label" size="sm">
+                {book.byId.get(key('equipment', member.id)) ?? ''}
+              </Plate>
+              <span>{name(member)}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+
+      <div className="props__actions">
+        <button type="button" className="action action--danger" onClick={removeSelection}>
+          <Trash2 size={15} aria-hidden="true" />
+          Удалить {count}
+          <kbd>Del</kbd>
+        </button>
       </div>
     </div>
   );

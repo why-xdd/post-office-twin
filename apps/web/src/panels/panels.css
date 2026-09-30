@@ -330,6 +330,93 @@
   line-height: 1.45;
 }
 
+/* Группа объектов: выравнивание и список выделенного */
+.props-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.props-group__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.props-group__gap {
+  width: var(--s-2);
+}
+
+.props-group__tool {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: var(--radius-plate);
+  color: var(--ink);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--label-edge);
+  transition: background-color var(--dur-fast) ease-out;
+}
+
+.props-group__tool:hover:not(:disabled) {
+  background: var(--label-strong);
+}
+
+.props-group__tool:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.props-group__tool:disabled {
+  color: var(--ink-3);
+  opacity: 0.55;
+}
+
+.props-group__problem {
+  color: var(--signal);
+  font-size: var(--text-12);
+  line-height: 1.4;
+}
+
+.props-group__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.props-group__member {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  width: 100%;
+  min-height: 32px;
+  padding: 0 var(--s-2);
+  border: 0;
+  border-radius: var(--radius-plate);
+  color: var(--ink);
+  background: transparent;
+  font: inherit;
+  font-size: var(--text-13);
+  text-align: left;
+}
+
+.props-group__member:hover {
+  background: var(--label-strong);
+}
+
+@media (pointer: coarse) {
+  .props-group__tool {
+    width: 44px;
+    height: 44px;
+  }
+}
+
 /* Нарушения с участием выбранного: те же этикетки, что в «Проверке», только короче */
 .props-findings {
   display: flex;

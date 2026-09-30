@@ -127,3 +127,39 @@ describe('закреплённое нарушение', () => {
     expect(useWorkspace.getState().activeFinding).toBe(1);
   });
 });
+
+describe('групповое выделение', () => {
+  beforeEach(() => {
+    useWorkspace.getState().open('p1', 'Тест', 1, plan());
+    useWorkspace.getState().select({ kind: 'equipment', id: 'eq_bench' });
+  });
+
+  it('Shift + щелчок собирает группу из выбранного и нового объекта', () => {
+    useWorkspace.getState().toggleGroup('eq_atm');
+    const state = useWorkspace.getState();
+    expect(state.group).toEqual(['eq_bench', 'eq_atm']);
+    expect(state.selection).toEqual({ kind: 'equipment', id: 'eq_atm' });
+  });
+
+  it('если в группе остался один объект, это снова обычный выбор', () => {
+    useWorkspace.getState().toggleGroup('eq_atm');
+    useWorkspace.getState().toggleGroup('eq_bench');
+    const state = useWorkspace.getState();
+    expect(state.group).toEqual([]);
+    expect(state.selection).toEqual({ kind: 'equipment', id: 'eq_atm' });
+  });
+
+  it('удаляет группу одной правкой: одна отмена возвращает всё', () => {
+    useWorkspace.getState().setGroup(['eq_bench', 'eq_atm']);
+    useWorkspace.getState().removeSelection();
+    expect(useWorkspace.getState().doc!.equipment).toEqual([]);
+    useWorkspace.getState().undo();
+    expect(useWorkspace.getState().doc!.equipment!.map((e) => e.id)).toEqual(['eq_bench', 'eq_atm']);
+  });
+
+  it('обычный выбор сбрасывает группу', () => {
+    useWorkspace.getState().setGroup(['eq_bench', 'eq_atm']);
+    useWorkspace.getState().select({ kind: 'zone', id: 'z_wait' });
+    expect(useWorkspace.getState().group).toEqual([]);
+  });
+});

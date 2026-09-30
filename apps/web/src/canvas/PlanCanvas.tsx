@@ -86,6 +86,10 @@ type Gesture =
   // Щипок двумя пальцами: масштаб от расстояния между ними, сдвиг — от их середины.
   | { kind: 'pinch'; startGap: number; startCenter: Point; origin: View }
   | { kind: 'drag'; id: string; startWorld: Point; startPosition: Point; moved: boolean }
+  // Группа двигается целиком: у каждого объекта своё начальное место, сдвиг общий.
+  | { kind: 'group'; ids: string[]; startWorld: Point; start: Map<string, Point>; moved: boolean }
+  // Рамка выделения: Shift + перетаскивание по пустому месту.
+  | { kind: 'marquee'; start: Point }
   | { kind: 'rotate'; id: string }
   | { kind: 'wall'; id: string; axis: 'x' | 'y'; startWorld: Point; base: Plan; delta: number };
 
@@ -129,6 +133,9 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
   const doc = useWorkspace((s) => s.doc);
   const heatmap = useWorkspace((s) => s.heatmap);
   const selection = useWorkspace((s) => s.selection);
+  const group = useWorkspace((s) => s.group);
+  const toggleGroup = useWorkspace((s) => s.toggleGroup);
+  const setGroup = useWorkspace((s) => s.setGroup);
   const highlighted = useWorkspace((s) => s.highlighted);
   const tool = useWorkspace((s) => s.tool);
   const placingType = useWorkspace((s) => s.placingType);
@@ -194,6 +201,7 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
   const touches = useRef<Map<number, Point>>(new Map());
   // Линии выравнивания: показываются, пока объект тянут, и гаснут, когда отпустили.
   const [guides, setGuides] = useState<Guide[]>([]);
+  const [marquee, setMarquee] = useState<[Point, Point] | null>(null);
   const fitted = useRef(false);
 
   useLayoutEffect(() => {
@@ -458,8 +466,8 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
       }
     }
 
-    // Выбор и перетаскивание
-    if (selection?.kind === 'equipment' && mode === 'design') {
+    // Выбор и перетаскивание. У группы ручки поворота нет: поворачивают по одному.
+    if (selection?.kind === 'equipment' && mode === 'design' && group.length < 2) {
       const item = doc.equipment?.find((e) => e.id === selection.id);
       if (item) {
         const handle = rotationHandle(view, item);
@@ -473,6 +481,26 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
 
     // Касание пальцем ловит и мелкий объект рядом: на телефоне шкаф бывает меньше пальца.
     const item = equipmentAt(doc, world, event.pointerType === 'touch' ? TOUCH_SLOP_PX / view.scale : 0);
+    const picking = mode === 'design' && tool === 'select';
+    if (item && picking && event.shiftKey) {
+      toggleGroup(item.id);
+      return;
+    }
+    if (item && picking && group.length > 1 && group.includes(item.id)) {
+      beginTransient();
+      const start = new Map<string, Point>();
+      for (const id of group) {
+        const member = doc.equipment?.find((e) => e.id === id);
+        if (member) start.set(id, member.position);
+      }
+      gesture.current = { kind: 'group', ids: [...start.keys()], startWorld: world, start, moved: false };
+      return;
+    }
+    if (!item && picking && event.shiftKey) {
+      gesture.current = { kind: 'marquee', start: world };
+      setMarquee([world, world]);
+      return;
+    }
     if (item) {
       select({ kind: 'equipment', id: item.id });
       if (mode === 'design') {
@@ -541,6 +569,41 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
         scale: current.origin.scale,
         originX: current.origin.originX + (sx - current.startX),
         originY: current.origin.originY + (sy - current.startY),
+      });
+      return;
+    }
+
+    if (current.kind === 'marquee') {
+      setMarquee([current.start, world]);
+      return;
+    }
+
+    if (current.kind === 'group') {
+      const dx = world[0] - current.startWorld[0];
+      const dy = world[1] - current.startWorld[1];
+      if (!current.moved && Math.hypot(dx, dy) * view.scale < 3) return;
+      current.moved = true;
+      const step = event.shiftKey ? DRAFT_STEP : POSITION_STEP;
+      const shift: Point = [round3(snap(dx, step)), round3(snap(dy, step))];
+      transient((draft) => {
+        const members = current.ids
+          .map((id) => draft.equipment?.find((e) => e.id === id))
+          .filter((member): member is Equipment => Boolean(member));
+        const target = (member: Equipment): Point => {
+          const [x, y] = current.start.get(member.id)!;
+          return [round3(x + shift[0]), round3(y + shift[1])];
+        };
+        // Группа сдвигается целиком или не сдвигается: один объект в стене — и стоят все.
+        const fits = members.every(
+          (member) => !(types.get(member.type)?.floor_object ?? true) || fitsRoom(draft, { ...member, position: target(member) }),
+        );
+        if (!fits) return;
+        for (const member of members) {
+          transformInPlace(member, { position: target(member) });
+          const zone = zoneAt(draft, member.position);
+          if (zone) member.zone = zone.id;
+          else delete member.zone;
+        }
       });
       return;
     }
@@ -629,7 +692,22 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
     touches.current.delete(event.pointerId);
     setGuides([]);
     const current = gesture.current;
-    if (current.kind === 'drag' || current.kind === 'rotate' || current.kind === 'wall') endTransient();
+    if (current.kind === 'drag' || current.kind === 'rotate' || current.kind === 'wall' || current.kind === 'group') endTransient();
+    if (current.kind === 'marquee' && marquee && doc) {
+      const [a, b] = marquee;
+      const box = { x0: Math.min(a[0], b[0]), x1: Math.max(a[0], b[0]), y0: Math.min(a[1], b[1]), y1: Math.max(a[1], b[1]) };
+      // Щелчок с Shift по пустому месту — не рамка: выделение остаётся как было.
+      if ((box.x1 - box.x0) * view.scale > 3 || (box.y1 - box.y0) * view.scale > 3) {
+        const inside = (doc.equipment ?? []).filter((item) => {
+          const corners = equipmentCorners(item);
+          const xs = corners.map((c) => c[0]);
+          const ys = corners.map((c) => c[1]);
+          return Math.max(...xs) >= box.x0 && Math.min(...xs) <= box.x1 && Math.max(...ys) >= box.y0 && Math.min(...ys) <= box.y1;
+        });
+        setGroup(inside.map((item) => item.id));
+      }
+      setMarquee(null);
+    }
     if (current.kind === 'wall') setWallShift(null);
     // Пока на плане остаётся второй палец, жест ещё не кончился.
     if (current.kind === 'pinch' && touches.current.size > 0) return;
@@ -687,7 +765,7 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
           all: review || layers.findings,
           labelPoints: labelsVisible && layers.zones ? labelPoints : null,
           // Метка не должна закрывать адресные таблички, по которым объект ищут, и ручки выделения.
-          avoid: design ? pinObstacles(doc, view, selection, [...tags.values()]) : [],
+          avoid: design ? pinObstacles(doc, view, group.length > 1 ? null : selection, [...tags.values()]) : [],
         })
       : [];
 
@@ -1015,11 +1093,27 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
         {preview && <PreviewLayer view={view} doc={doc} changes={preview} types={types} />}
 
         {/* Выделение */}
-        {selection?.kind === 'equipment' &&
-          (() => {
-            const item = doc.equipment?.find((e) => e.id === selection.id);
-            return item ? <SelectionFrame view={view} item={item} editable={mode === 'design'} /> : null;
-          })()}
+        {group.length > 1
+          ? group.map((id) => {
+              const item = doc.equipment?.find((e) => e.id === id);
+              return item ? <SelectionFrame key={id} view={view} item={item} editable={false} sized={false} /> : null;
+            })
+          : selection?.kind === 'equipment' &&
+            (() => {
+              const item = doc.equipment?.find((e) => e.id === selection.id);
+              return item ? <SelectionFrame view={view} item={item} editable={mode === 'design'} /> : null;
+            })()}
+
+        {/* Рамка выделения */}
+        {marquee && (
+          <rect
+            className="plan-marquee"
+            x={Math.min(toScreen(view, marquee[0])[0], toScreen(view, marquee[1])[0])}
+            y={Math.min(toScreen(view, marquee[0])[1], toScreen(view, marquee[1])[1])}
+            width={Math.abs(toScreen(view, marquee[0])[0] - toScreen(view, marquee[1])[0])}
+            height={Math.abs(toScreen(view, marquee[0])[1] - toScreen(view, marquee[1])[1])}
+          />
+        )}
 
         {/* Черновики инструментов */}
         {tool === 'zone' && zoneDraft.length > 0 && (
@@ -1251,13 +1345,13 @@ function DoorGlyph({
   );
 }
 
-function SelectionFrame({ view, item, editable }: { view: View; item: Equipment; editable: boolean }) {
+function SelectionFrame({ view, item, editable, sized = true }: { view: View; item: Equipment; editable: boolean; sized?: boolean }) {
   const corners = equipmentCorners(item).map((p) => toScreen(view, p));
   const handle = rotationHandle(view, item);
   const [cx] = toScreen(view, item.position);
   const ys = corners.map((p) => p[1]);
   return (
-    <g className="plan-selection" pointerEvents="none">
+    <g className={`plan-selection${sized ? '' : ' plan-selection--group'}`} pointerEvents="none">
       <path d={`M${corners.map((p) => p.join(' ')).join('L')}Z`} className="plan-selection__outline" />
       {editable && (
         <>
@@ -1268,10 +1362,12 @@ function SelectionFrame({ view, item, editable }: { view: View; item: Equipment;
           <circle cx={handle.knob[0]} cy={handle.knob[1]} r={5.5} className="plan-selection__knob" />
         </>
       )}
-      <text x={cx} y={Math.max(...ys) + 18} textAnchor="middle" className="plan-selection__size">
-        {formatNumber(item.size_m[0])} × {formatNumber(item.size_m[1])} м
-        {item.rotation_deg ? ` · ${Math.round(item.rotation_deg)}°` : ''}
-      </text>
+      {sized && (
+        <text x={cx} y={Math.max(...ys) + 18} textAnchor="middle" className="plan-selection__size">
+          {formatNumber(item.size_m[0])} × {formatNumber(item.size_m[1])} м
+          {item.rotation_deg ? ` · ${Math.round(item.rotation_deg)}°` : ''}
+        </text>
+      )}
     </g>
   );
 }

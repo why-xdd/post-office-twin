@@ -448,6 +448,23 @@
   }
 }
 
+/* Объект в группе: сплошной контур с лёгкой заливкой, чтобы группу было видно целиком */
+.plan-selection--group .plan-selection__outline {
+  fill: rgba(44, 90, 116, 0.1);
+  stroke: var(--notice);
+  stroke-width: 2;
+  stroke-dasharray: none;
+}
+
+/* Рамка выделения группы */
+.plan-marquee {
+  fill: rgba(44, 90, 116, 0.08);
+  stroke: var(--notice);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+  pointer-events: none;
+}
+
 /* Ручка сдвига стены */
 .plan-wall-handle {
   cursor: grab;

@@ -138,7 +138,9 @@ class Model:
         return [float(features.get(name, 0.0)) for name in self.features]
 
     def probability(self, features: dict[str, float]) -> float:
-        raw = self.init + self.learning_rate * sum(tree.predict(self.row(features)) for tree in self.trees)
+        # Строка признаков собирается один раз на позицию: в ансамбле сто с лишним деревьев.
+        row = self.row(features)
+        raw = self.init + self.learning_rate * sum(tree.predict(row) for tree in self.trees)
         return 1.0 / (1.0 + math.exp(-max(-30.0, min(30.0, raw))))
 
     def expected_score(self, features: dict[str, float]) -> float:

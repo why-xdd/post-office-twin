@@ -235,6 +235,53 @@ class _FeatureContext:
     routes: list[LineString] = field(default_factory=list)
     access_points: list[Point] = field(default_factory=list)
     zones_by_kind: dict[str, list[Polygon]] = field(default_factory=dict)
+    # Дерево габаритов оборудования: по нему свободная площадь вокруг кандидата считается
+    # вычитанием только соседних объектов, а не всей занятой площади плана.
+    tree: STRtree | None = None
+    # Признаки, одинаковые для всех кандидатов поиска, и признаки зон: считаются один раз.
+    constants: dict[str, float] = field(default_factory=dict)
+    zone_features: dict[str | None, dict[str, float]] = field(default_factory=dict)
+    # Корень площади помещения: им нормируется расстояние до входа, чтобы признак не зависел
+    # от размеров отделения.
+    scale: float = 1.0
+
+    def prepare(self) -> None:
+        plan_area = self.shape.area if self.shape is not None else 0.0
+        width, depth = self.size
+        self.constants = {
+            "width": width,
+            "depth": depth,
+            "aspect": width / depth if depth else 1.0,
+            "plan_area": plan_area,
+            "plan_objects": float(len(self.plan.equipment)),
+            "plan_density": (sum(o.area for o in self.obstacles) / plan_area) if plan_area else 0.0,
+            "region_area": self.region.area,
+            "floor_object": 1.0 if self.type_def.floor_object else 0.0,
+            "operator_workplace": 1.0 if getattr(self.type_def, "operator_workplace", False) else 0.0,
+        }
+        for flag in TYPE_FLAGS:
+            self.constants[f"type_{flag}"] = 1.0 if self.type_code == flag else 0.0
+        self.scale = math.sqrt(plan_area) if plan_area > 0 else 1.0
+
+    def zone(self, zone_id: str | None) -> dict[str, float]:
+        """Признаки зоны, в которой стоит кандидат: площадь, публичность, доля свободного места."""
+        known = self.zone_features.get(zone_id)
+        if known is not None:
+            return known
+        zone_object = next((z for z in self.plan.zones if z.id == zone_id), None) if zone_id else None
+        shape = core.zone_polygon(zone_object) if zone_object else None
+        public = zone_types(self.plan).get(zone_object.type) if zone_object else None
+        features = {
+            "zone_public": 1.0 if public is not None and public.public else 0.0,
+            "zone_area": shape.area if shape is not None else 0.0,
+            "zone_free_ratio": (
+                max(0.0, shape.difference(self.occupied).area / shape.area)
+                if shape is not None and shape.area > 0 and self.occupied is not None
+                else 1.0
+            ),
+        }
+        self.zone_features[zone_id] = features
+        return features
 
 
 # Виды оборудования, которые модель различает отдельно: у каждого своя логика размещения.
@@ -281,15 +328,14 @@ def _features(poly: Polygon, rotation: float, score: float, ctx: _FeatureContext
     """
     centre = poly.centroid
     zone = core.zone_of_point(ctx.plan, (centre.x, centre.y))
-    zone_object = next((z for z in ctx.plan.zones if z.id == zone), None) if zone else None
-    zone_poly = core.zone_polygon(zone_object) if zone_object else None
-    zone_types_map = zone_types(ctx.plan)
     free_circle = centre.buffer(FREE_SPACE_RADIUS_M)
     if ctx.shape is not None:
         free_circle = free_circle.intersection(ctx.shape)
     free_area = free_circle.area
-    if ctx.occupied is not None and free_area > 0:
-        free_area = free_circle.difference(ctx.occupied).area
+    if free_area > 0 and ctx.tree is not None:
+        near = ctx.tree.query(free_circle, predicate="intersects")
+        if len(near):
+            free_area = free_circle.difference(unary_union([ctx.obstacles[h] for h in near])).area
     entrance_point = Point(ctx.entrance) if ctx.entrance else None
     window_axis = 10.0
     if entrance_point is not None and ctx.windows:
@@ -298,6 +344,8 @@ def _features(poly: Polygon, rotation: float, score: float, ctx: _FeatureContext
             LineString([entrance_point, w.centroid]).distance(poly) for w in ctx.windows
         )
     features: dict[str, float] = {
+        **ctx.constants,
+        **ctx.zone(zone),
         "fitness": score,
         "wall_distance": min((w.distance(poly) for w in ctx.walls), default=0.0),
         "entrance_distance": poly.distance(entrance_point) if entrance_point else 0.0,
@@ -306,31 +354,11 @@ def _features(poly: Polygon, rotation: float, score: float, ctx: _FeatureContext
         "area": poly.area,
         "boundary_distance": ctx.shape.exterior.distance(poly) if ctx.shape is not None else 0.0,
         "door_distance": min((sq.distance(poly) for sq in ctx.door_squares), default=10.0),
-        "width": ctx.size[0],
-        "depth": ctx.size[1],
-        "aspect": ctx.size[0] / ctx.size[1] if ctx.size[1] else 1.0,
         "partition_distance": min((p.distance(poly) for p in ctx.partitions), default=10.0),
         "window_distance": min((w.distance(poly) for w in ctx.windows), default=10.0),
         "entrance_axis_distance": window_axis,
         "free_around": free_area / (math.pi * FREE_SPACE_RADIUS_M**2),
-        "zone_public": 1.0 if zone_object and zone_types_map.get(zone_object.type, None) and zone_types_map[zone_object.type].public else 0.0,
-        "zone_area": zone_poly.area if zone_poly is not None else 0.0,
-        "zone_free_ratio": (
-            max(0.0, zone_poly.difference(ctx.occupied).area / zone_poly.area)
-            if zone_poly is not None and zone_poly.area > 0 and ctx.occupied is not None
-            else 1.0
-        ),
-        "plan_area": ctx.shape.area if ctx.shape is not None else 0.0,
-        "plan_objects": float(len(ctx.plan.equipment)),
-        "plan_density": (
-            sum(o.area for o in ctx.obstacles) / ctx.shape.area if ctx.shape is not None and ctx.shape.area else 0.0
-        ),
-        "region_area": ctx.region.area,
-        "floor_object": 1.0 if ctx.type_def.floor_object else 0.0,
-        "operator_workplace": 1.0 if getattr(ctx.type_def, "operator_workplace", False) else 0.0,
     }
-    for flag in TYPE_FLAGS:
-        features[f"type_{flag}"] = 1.0 if ctx.type_code == flag else 0.0
 
     # Признаки потока посетителей.
     route_distances = [line.distance(poly) for line in ctx.routes]
@@ -340,8 +368,7 @@ def _features(poly: Polygon, rotation: float, score: float, ctx: _FeatureContext
     features["route_pinch"] = (
         min(features["nearest_obstacle"], 3.0) if features["route_distance"] < ROUTE_BAND_M else 3.0
     )
-    scale = math.sqrt(ctx.shape.area) if ctx.shape is not None and ctx.shape.area > 0 else 1.0
-    features["entrance_relative"] = features["entrance_distance"] / scale
+    features["entrance_relative"] = features["entrance_distance"] / ctx.scale
     for kind in ZONE_KINDS:
         features[f"in_{kind}"] = 1.0 if any(z.contains(centre) for z in ctx.zones_by_kind.get(kind, [])) else 0.0
     return features
@@ -461,7 +488,9 @@ def generate(
         region=region,
         occupied=unary_union(obstacles) if obstacles else None,
         size=size,
+        tree=tree,
     )
+    context.prepare()
     context.routes, context.access_points = _flow_context(plan, entrance, exclude)
     context.zones_by_kind = {
         kind: [core.zone_polygon(z) for z in plan.zones if z.type == kind] for kind in ZONE_KINDS

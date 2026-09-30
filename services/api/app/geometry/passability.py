@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 from shapely.geometry import LineString, MultiPolygon, Point, Polygon
 from shapely.ops import nearest_points, unary_union
+from shapely.strtree import STRtree
 
 from app.geometry import core
 from app.models import Equipment, Plan
@@ -32,12 +33,81 @@ class RouteWidth:
     reachable: bool
 
 
+def _floor_fingerprint(plan: Plan, exclude: frozenset[str]) -> tuple:
+    """Отпечаток того, от чего зависит свободная площадь: стены и напольные объекты.
+
+    По нему свободная площадь берётся из кэша. Ассистент перебирает сотни расстановок, в каждой
+    двигается один объект, а площадь считалась заново по десять раз на вариант.
+    """
+    walls = _wall_fingerprint(plan)
+    items = tuple(
+        (item.id, item.type, item.position, item.size_m, item.rotation_deg)
+        for item in core.floor_equipment(plan)
+        if item.id not in exclude
+    )
+    return walls, items
+
+
+def _wall_fingerprint(plan: Plan) -> tuple:
+    """Отпечаток оболочки: стены и проёмы. От оборудования не зависит."""
+    walls = tuple((w.id, w.type, w.from_, w.to) for w in plan.walls)
+    doors = tuple((d.id, d.type, tuple(d.wall)) for d in plan.doors)
+    return walls, doors
+
+
+_FREE_SPACE_CACHE: dict[tuple, Polygon | MultiPolygon | None] = {}
+_EROSION_CACHE: dict[tuple, "ErosionCache"] = {}
+_ENTRANCE_CACHE: dict[tuple, tuple[float, float] | None] = {}
+_CIRCLE_CACHE: dict[tuple, tuple[float, tuple[float, float] | None]] = {}
+_CACHE_LIMIT = 256
+
+
+def _remember(cache: dict, key: tuple, value: object) -> None:
+    """Запомнить результат, не давая кэшу расти без предела.
+
+    Ассистент перебирает сотни расстановок за один запрос, и каждая даёт свой ключ. Считать
+    заново дороже, чем хранить, но держать всё до конца работы сервиса ни к чему.
+    """
+    if len(cache) >= _CACHE_LIMIT:
+        cache.clear()
+    cache[key] = value
+
+
 def free_space(plan: Plan, exclude: set[str] | None = None) -> Polygon | MultiPolygon | None:
     """Площадь пола, свободная от оборудования. Внутренние перегородки считаются препятствием."""
+    excluded = frozenset(exclude or ())
+    key = _floor_fingerprint(plan, excluded)
+    if key in _FREE_SPACE_CACHE:
+        return _FREE_SPACE_CACHE[key]
+    result = _free_space(plan, excluded)
+    _remember(_FREE_SPACE_CACHE, key, result)
+    return result
+
+
+def erosion(plan: Plan, exclude: set[str] | None = None) -> "ErosionCache | None":
+    """Сужения свободной области для одной расстановки, общие для всех её маршрутов.
+
+    Одну и ту же расстановку спрашивают многократно: правила считают маршруты, метрики —
+    пропускную ширину, ассистент — оценку варианта. Сужение области самая дорогая операция во
+    всей геометрии, поэтому его результат живёт дольше одного расчёта.
+    """
+    excluded = frozenset(exclude or ())
+    key = _floor_fingerprint(plan, excluded)
+    cached = _EROSION_CACHE.get(key)
+    if cached is not None:
+        return cached
+    space = free_space(plan, excluded)
+    if space is None or space.is_empty:
+        return None
+    cache = ErosionCache(space)
+    _remember(_EROSION_CACHE, key, cache)
+    return cache
+
+
+def _free_space(plan: Plan, exclude: frozenset[str]) -> Polygon | MultiPolygon | None:
     shape = core.outline(plan)
     if shape is None:
         return None
-    exclude = exclude or set()
     obstacles = [
         core.equipment_polygon(item)
         for item in core.floor_equipment(plan)
@@ -68,41 +138,58 @@ def _wall_obstacle(plan: Plan, wall_id: str) -> Polygon | None:
     return band
 
 
-def _component_index(space: Polygon | MultiPolygon, probe: Point) -> int | None:
-    """Номер связной части свободной области, в которой лежит точка.
+class Region:
+    """Свободная область, разобранная на связные части один раз.
 
-    Сравнивать части по номеру, а не по геометрии: равенство многоугольников на плане в сотни
-    объектов стоит дороже всего остального расчёта маршрута.
+    Связность двух точек — самый частый вопрос во всей геометрии: его задают на каждом шаге
+    бинарного поиска ширины для каждого маршрута. Поэтому части области, дерево их габаритов и
+    подготовленная геометрия считаются один раз на область, а не на каждый вопрос.
     """
-    parts = list(space.geoms) if isinstance(space, MultiPolygon) else [space]
-    for index, part in enumerate(parts):
-        if part.distance(probe) < 1e-6:
-            return index
-    return None
 
+    def __init__(self, geometry: Polygon | MultiPolygon) -> None:
+        self.geometry = geometry
+        self.parts = [] if geometry.is_empty else (
+            list(geometry.geoms) if isinstance(geometry, MultiPolygon) else [geometry]
+        )
+        self.tree = STRtree(self.parts) if self.parts else None
 
-def _reach(space: Polygon | MultiPolygon, point: Point, radius: float) -> Point | None:
-    """Позиция центра человека, чьё тело радиуса radius накрывает точку.
+    @property
+    def is_empty(self) -> bool:
+        return not self.parts
 
-    Если допустимая область дальше radius, человек этой ширины до точки не доходит. Без этого
-    ограничения узкое место у самой цели маскировалось бы притяжением к свободной области.
-    """
-    if space.contains(point):
-        return point
-    nearest = nearest_points(space, point)[0]
-    if nearest.distance(point) > radius + 1e-6:
-        return None
-    return nearest
+    def component(self, probe: Point) -> int | None:
+        """Номер связной части, в которой лежит точка.
 
+        Сравнивать части по номеру, а не по геометрии: равенство многоугольников на плане в
+        сотни объектов стоит дороже всего остального расчёта маршрута.
+        """
+        if self.tree is None:
+            return None
+        index = int(self.tree.nearest(probe))
+        return index if self.parts[index].distance(probe) < 1e-6 else None
 
-def _connected(space: Polygon | MultiPolygon, a: Point, b: Point, radius: float) -> bool:
-    if space.is_empty:
-        return False
-    first_pos, second_pos = _reach(space, a, radius), _reach(space, b, radius)
-    if first_pos is None or second_pos is None:
-        return False
-    first = _component_index(space, first_pos)
-    return first is not None and first == _component_index(space, second_pos)
+    def reach(self, point: Point, radius: float) -> Point | None:
+        """Позиция центра человека, чьё тело радиуса radius накрывает точку.
+
+        Если допустимая область дальше radius, человек этой ширины до точки не доходит. Без
+        этого ограничения узкое место у самой цели маскировалось бы притяжением к свободной
+        области.
+        """
+        if self.tree is None:
+            return None
+        if self.geometry.contains(point):
+            return point
+        nearest = nearest_points(self.geometry, point)[0]
+        if nearest.distance(point) > radius + 1e-6:
+            return None
+        return nearest
+
+    def connects(self, a: Point, b: Point, radius: float) -> bool:
+        first_pos, second_pos = self.reach(a, radius), self.reach(b, radius)
+        if first_pos is None or second_pos is None:
+            return False
+        first = self.component(first_pos)
+        return first is not None and first == self.component(second_pos)
 
 
 def _eroded(space: Polygon | MultiPolygon, width: float) -> Polygon | MultiPolygon:
@@ -114,24 +201,39 @@ class ErosionCache:
 
     def __init__(self, space: Polygon | MultiPolygon) -> None:
         self.space = space
-        self._cache: dict[int, Polygon | MultiPolygon] = {}
+        self._cache: dict[int, Region] = {}
+        self._widths: dict[tuple[float, float, float, float], tuple[float, bool]] = {}
 
-    def at(self, width_cm: int) -> Polygon | MultiPolygon:
-        if width_cm not in self._cache:
-            self._cache[width_cm] = _eroded(self.space, width_cm / 100.0)
-        return self._cache[width_cm]
+    def at(self, width_cm: int) -> Region:
+        region = self._cache.get(width_cm)
+        if region is None:
+            region = Region(_eroded(self.space, width_cm / 100.0))
+            self._cache[width_cm] = region
+        return region
+
+    def width(self, start: Point, goal: Point) -> tuple[float, bool]:
+        """Ширина узкого места между двумя точками. Один и тот же вопрос считается однажды.
+
+        Маршрут от входа к окну спрашивают и правила, и метрики, и ассистент при переборе.
+        """
+        key = (round(start.x, 3), round(start.y, 3), round(goal.x, 3), round(goal.y, 3))
+        known = self._widths.get(key)
+        if known is None:
+            known = _width_between(self, start, goal)
+            self._widths[key] = known
+        return known
 
 
 def _width_between(cache: ErosionCache, start: Point, goal: Point) -> tuple[float, bool]:
-    if not _connected(cache.at(2), start, goal, 0.01):
+    if not cache.at(2).connects(start, goal, 0.01):
         return 0.0, False
-    if _connected(cache.at(ROUTE_WIDTH_CAP_CM), start, goal, ROUTE_WIDTH_CAP_CM / 200.0):
+    if cache.at(ROUTE_WIDTH_CAP_CM).connects(start, goal, ROUTE_WIDTH_CAP_CM / 200.0):
         return ROUTE_WIDTH_CAP_CM / 100.0, True
     low, high = 2, ROUTE_WIDTH_CAP_CM
     while high - low > 1:
         mid = (low + high) // 2
         eroded = cache.at(mid)
-        if not eroded.is_empty and _connected(eroded, start, goal, mid / 200.0):
+        if not eroded.is_empty and eroded.connects(start, goal, mid / 200.0):
             low = mid
         else:
             high = mid
@@ -145,13 +247,23 @@ def route_width(
 
     Возвращает (ширина, достижима ли цель вообще).
     """
-    space = free_space(plan, exclude)
-    if space is None or space.is_empty:
+    cache = erosion(plan, exclude)
+    if cache is None:
         return 0.0, False
-    return _width_between(ErosionCache(space), Point(start), Point(goal))
+    return cache.width(Point(start), Point(goal))
 
 
 def entrance_point(plan: Plan) -> tuple[float, float] | None:
+    """Точка, с которой посетитель начинает путь: главный вход, сдвинутый внутрь помещения."""
+    key = (_wall_fingerprint(plan), plan.flow_hints.main_entrance if plan.flow_hints else None)
+    if key in _ENTRANCE_CACHE:
+        return _ENTRANCE_CACHE[key]
+    point = _entrance_point(plan)
+    _remember(_ENTRANCE_CACHE, key, point)
+    return point
+
+
+def _entrance_point(plan: Plan) -> tuple[float, float] | None:
     preferred = plan.flow_hints.main_entrance if plan.flow_hints else None
     door = next((d for d in plan.doors if preferred and d.id == preferred), None)
     door = door or next((d for d in plan.doors if d.type == "entrance"), None)
@@ -200,15 +312,14 @@ def client_route_widths(plan: Plan, target_types: tuple[str, ...]) -> list[Route
     targets = core.equipment_by_type(plan, *target_types)
     if start is None or not targets:
         return []
-    space = free_space(plan)
-    if space is None or space.is_empty:
+    cache = erosion(plan)
+    if cache is None:
         return [RouteWidth(target_id=t.id, width_m=0.0, reachable=False) for t in targets]
     start_pt = Point(start)
-    cache = ErosionCache(space)
     results: list[RouteWidth] = []
     for item in targets:
         goal = Point(client_access_point(plan, item))
-        width, reachable = _width_between(cache, start_pt, goal)
+        width, reachable = cache.width(start_pt, goal)
         results.append(RouteWidth(target_id=item.id, width_m=width, reachable=reachable))
     return results
 
@@ -269,10 +380,10 @@ def bottleneck_blockers(
     floor = core.floor_equipment(plan)
 
     def widened(exclude: set[str], goal: Point) -> float:
-        space = free_space(plan, exclude=exclude)
-        if space is None or space.is_empty:
+        cache = erosion(plan, exclude=exclude)
+        if cache is None:
             return 0.0
-        width, reachable = _width_between(ErosionCache(space), start_pt, goal)
+        width, reachable = cache.width(start_pt, goal)
         return width if reachable else 0.0
 
     base_space = free_space(plan)
@@ -326,6 +437,19 @@ def largest_clear_circle(plan: Plan, zone_types: tuple[str, ...]) -> tuple[float
 
     Нужен для проверки зоны разворота кресла-коляски.
     """
+    key = (
+        _floor_fingerprint(plan, frozenset()),
+        tuple((z.id, z.type, tuple(map(tuple, z.polygon))) for z in plan.zones),
+        zone_types,
+    )
+    if key in _CIRCLE_CACHE:
+        return _CIRCLE_CACHE[key]
+    result = _largest_clear_circle(plan, zone_types)
+    _remember(_CIRCLE_CACHE, key, result)
+    return result
+
+
+def _largest_clear_circle(plan: Plan, zone_types: tuple[str, ...]) -> tuple[float, tuple[float, float] | None]:
     space = free_space(plan)
     zones = core.zone_by_type(plan, *zone_types)
     if space is None or not zones:

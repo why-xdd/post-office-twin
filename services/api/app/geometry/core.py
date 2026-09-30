@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from functools import lru_cache
 
 from shapely.geometry import LineString, Point, Polygon
 from shapely.ops import unary_union
@@ -45,24 +46,44 @@ class Clearance:
     distance_m: float
 
 
-def equipment_polygon(item: Equipment) -> Polygon:
-    """Габаритный прямоугольник объекта с учётом поворота вокруг центра."""
-    cx, cy = item.position
-    width, height = item.size_m
+@lru_cache(maxsize=16384)
+def _rectangle(cx: float, cy: float, width: float, height: float, rotation_deg: float) -> Polygon:
+    """Прямоугольник по центру, габаритам и повороту.
+
+    Кэш здесь потому, что ассистент проверяет сотни расстановок, и в каждой почти все объекты
+    стоят на прежних местах: один и тот же прямоугольник иначе строился бы заново тысячи раз.
+    Фигуры shapely не меняются после создания, поэтому общий экземпляр безопасен.
+    """
     half_w, half_h = width / 2.0, height / 2.0
     corners = [(-half_w, -half_h), (half_w, -half_h), (half_w, half_h), (-half_w, half_h)]
     # rotation_deg задан по часовой стрелке, поэтому угол берётся со знаком минус.
-    angle = math.radians(-item.rotation_deg)
+    angle = math.radians(-rotation_deg)
     cos_a, sin_a = math.cos(angle), math.sin(angle)
-    rotated = [
-        (cx + x * cos_a - y * sin_a, cy + x * sin_a + y * cos_a) for x, y in corners
-    ]
-    return Polygon(rotated)
+    return Polygon([(cx + x * cos_a - y * sin_a, cy + x * sin_a + y * cos_a) for x, y in corners])
+
+
+def equipment_polygon(item: Equipment) -> Polygon:
+    """Габаритный прямоугольник объекта с учётом поворота вокруг центра."""
+    return _rectangle(item.position[0], item.position[1], item.size_m[0], item.size_m[1], item.rotation_deg)
 
 
 def floor_equipment(plan: Plan) -> list[Equipment]:
     """Оборудование, занимающее площадь пола. Настенные и настольные объекты исключены."""
     return [item for item in plan.equipment if is_floor_object(plan, item.type)]
+
+
+@lru_cache(maxsize=4096)
+def _zone_shape(points: tuple[tuple[float, float], ...]) -> Polygon:
+    """Многоугольник зоны по её точкам; чинится, если сам себя пересекает."""
+    shape = Polygon(points)
+    if shape.is_valid:
+        return shape
+    fixed = make_valid(shape)
+    if isinstance(fixed, Polygon):
+        return fixed
+    # Восьмёрка распадается на несколько кусков: берём наибольший, он и есть зона.
+    parts = [part for part in getattr(fixed, "geoms", []) if isinstance(part, Polygon)]
+    return max(parts, key=lambda part: part.area) if parts else shape.buffer(0)
 
 
 def zone_polygon(zone: Zone) -> Polygon:
@@ -72,15 +93,7 @@ def zone_polygon(zone: Zone) -> Polygon:
     порядок точек. Shapely на таком считать не умеет, поэтому фигура приводится к правильной, а о
     самом факте сообщает отдельное правило проверки.
     """
-    shape = Polygon(zone.polygon)
-    if shape.is_valid:
-        return shape
-    fixed = make_valid(shape)
-    if isinstance(fixed, Polygon):
-        return fixed
-    # Восьмёрка распадается на несколько кусков: берём наибольший, он и есть зона.
-    parts = [part for part in getattr(fixed, "geoms", []) if isinstance(part, Polygon)]
-    return max(parts, key=lambda part: part.area) if parts else shape.buffer(0)
+    return _zone_shape(tuple((float(x), float(y)) for x, y in zone.polygon))
 
 
 def outline(plan: Plan) -> Polygon | None:

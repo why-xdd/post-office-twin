@@ -287,8 +287,15 @@ for _type in DEFAULT_EQUIPMENT_TYPES:
     _type.height_m, _type.mount_height_m = _height, _mount
 
 
+_BASE_ZONE_TYPES: dict[str, ZoneType] = {z.code: z for z in DEFAULT_ZONE_TYPES}
+_BASE_EQUIPMENT_TYPES: dict[str, EquipmentType] = {t.code: t for t in DEFAULT_EQUIPMENT_TYPES}
+_BASE_FLOOR_OBJECT: dict[str, bool] = {t.code: t.floor_object for t in DEFAULT_EQUIPMENT_TYPES}
+
+
 def zone_types(plan: Plan | None = None) -> dict[str, ZoneType]:
-    result = {z.code: z for z in DEFAULT_ZONE_TYPES}
+    if plan is None or plan.dictionaries is None or not plan.dictionaries.zone_types:
+        return dict(_BASE_ZONE_TYPES)
+    result = dict(_BASE_ZONE_TYPES)
     if plan is not None and plan.dictionaries is not None:
         for custom in plan.dictionaries.zone_types:
             base = result.get(custom.code)
@@ -297,8 +304,14 @@ def zone_types(plan: Plan | None = None) -> dict[str, ZoneType]:
     return result
 
 
+def _has_custom_equipment(plan: Plan | None) -> bool:
+    return plan is not None and plan.dictionaries is not None and bool(plan.dictionaries.equipment_types)
+
+
 def equipment_types(plan: Plan | None = None) -> dict[str, EquipmentType]:
-    result = {t.code: t for t in DEFAULT_EQUIPMENT_TYPES}
+    if not _has_custom_equipment(plan):
+        return dict(_BASE_EQUIPMENT_TYPES)
+    result = dict(_BASE_EQUIPMENT_TYPES)
     if plan is not None and plan.dictionaries is not None:
         for custom in plan.dictionaries.equipment_types:
             base = result.get(custom.code)
@@ -314,5 +327,8 @@ def equipment_types(plan: Plan | None = None) -> dict[str, EquipmentType]:
 
 def is_floor_object(plan: Plan, type_code: str) -> bool:
     """Неизвестный тип считается напольным: лучше лишняя проверка, чем пропущенное пересечение."""
+    if not _has_custom_equipment(plan):
+        # Спрашивают на каждый объект плана при каждом расчёте: справочник здесь не пересобирается.
+        return _BASE_FLOOR_OBJECT.get(type_code, True)
     known = equipment_types(plan).get(type_code)
     return True if known is None else known.floor_object

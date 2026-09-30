@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { withTransform } from './equipmentOps';
 import type { Equipment, Plan } from './plan';
-import { fitsRoom, hostWall, placeInRoom } from './room';
+import { alignToNeighbours, fitsRoom, hostWall, placeInRoom } from './room';
 
 function room(): Plan {
   return {
@@ -85,5 +85,65 @@ describe('место оператора', () => {
     const [ox, oy] = withTransform(cashier, { rotation_deg: 90 }).operator_position!;
     expect(ox).toBeCloseTo(3);
     expect(oy).toBeCloseTo(2);
+  });
+});
+
+/**
+ * Выравнивание по соседям: объект встаёт с ними на одну линию, а линия это показывает.
+ *
+ * В отделении вещи стоят рядами, и разница в пять сантиметров видна на распечатке, но не на
+ * экране. Проверяется, что выравнивание срабатывает по середине и по краю, не срабатывает
+ * издалека и не двигает повёрнутый объект, для которого «край» уже не по осям.
+ */
+const bare = (items: Equipment[]): Plan =>
+  ({
+    ops: { id: 'ops', name: 'Тест', bbox: { width_m: 20, height_m: 12 } },
+    walls: [],
+    zones: [],
+    equipment: items,
+  }) as unknown as Plan;
+
+const bench = (id: string, position: [number, number], rotation = 0): Equipment =>
+  ({ id, type: 'waiting_seat', label: id, position, size_m: [2, 0.5], rotation_deg: rotation }) as Equipment;
+
+describe('выравнивание по соседям', () => {
+  it('ставит объект на одну линию по середине', () => {
+    const moved = bench('b2', [5, 4.04]);
+    const result = alignToNeighbours(bare([bench('b1', [2, 4]), moved]), moved, 0.1);
+    expect(result.position[1]).toBe(4);
+    expect(result.guides.some((g) => g.axis === 'y' && g.at === 4)).toBe(true);
+    expect(result.guides.every((g) => g.axis !== 'x')).toBe(true);
+  });
+
+  it('ставит объект на одну линию по краю', () => {
+    // Стеллаж 4 м стоит от 1 до 5 по x. Скамья 2 м левым краем на 1,04 — дотягивается до 1.
+    const rack = { ...bench('r1', [3, 8]), size_m: [4, 0.5] } as Equipment;
+    const moved = bench('b2', [2.04, 4]);
+    const result = alignToNeighbours(bare([rack, moved]), moved, 0.1);
+    expect(result.position[0]).toBe(2);
+    expect(result.guides.some((g) => g.axis === 'x' && g.at === 1)).toBe(true);
+  });
+
+  it('не тянет издалека', () => {
+    const moved = bench('b2', [5, 5]);
+    const result = alignToNeighbours(bare([bench('b1', [2, 4]), moved]), moved, 0.1);
+    expect(result.position).toEqual([5, 5]);
+    expect(result.guides).toEqual([]);
+  });
+
+  it('не трогает объект, повёрнутый не по осям', () => {
+    const moved = bench('b2', [5, 4.04], 30);
+    const result = alignToNeighbours(bare([bench('b1', [2, 4]), moved]), moved, 0.1);
+    expect(result.position).toEqual([5, 4.04]);
+    expect(result.guides).toEqual([]);
+  });
+
+  it('линия тянется от соседа до объекта', () => {
+    const moved = bench('b2', [8, 4.03]);
+    const result = alignToNeighbours(bare([bench('b1', [2, 4]), moved]), moved, 0.1);
+    const guide = result.guides.find((g) => g.axis === 'y');
+    expect(guide).toBeDefined();
+    expect(guide!.from).toBeLessThanOrEqual(1);
+    expect(guide!.to).toBeGreaterThanOrEqual(9);
   });
 });

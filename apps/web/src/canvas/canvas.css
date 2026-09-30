@@ -458,3 +458,12 @@
     transform: translate(-50%, calc(-100% - 6px));
   }
 }
+
+/* Линия выравнивания: видно, по чему объект встал в ряд с соседом. Цвет сообщения, а не
+   нарушения: красный на плане занят проверкой норм. */
+.plan-guide {
+  stroke: var(--notice);
+  stroke-width: 1.25;
+  stroke-dasharray: 6 4;
+  pointer-events: none;
+}

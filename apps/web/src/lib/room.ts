@@ -20,7 +20,7 @@ export const WALL_MAGNET_M = 0.2;
 const ITEM_MAGNET_M = 0.12;
 const EPS = 1e-3;
 
-type Axis = 'x' | 'y';
+export type Axis = 'x' | 'y';
 
 /** Грань, к которой прижимается объект: линия на оси и сторона, где должен стоять объект. */
 interface Face {
@@ -104,6 +104,72 @@ function bounds(item: Equipment) {
   const xs = corners.map((p) => p[0]);
   const ys = corners.map((p) => p[1]);
   return { minX: Math.min(...xs), maxX: Math.max(...xs), minY: Math.min(...ys), maxY: Math.max(...ys) };
+}
+
+/** Направляющая: линия, по которой объект выровнялся с соседом. */
+export interface Guide {
+  axis: Axis;
+  /** Координата линии по своей оси. */
+  at: number;
+  /** Отрезок по другой оси: линия рисуется от одного объекта до другого. */
+  from: number;
+  to: number;
+}
+
+/**
+ * Выравнивание объекта по соседям: одна линия середин или краёв.
+ *
+ * В отделении вещи стоят рядами: три окна обслуживания в линию, скамьи одна за другой,
+ * стеллажи вдоль стены. Прижать объект к грани соседа умеет магнит, но встать с соседом на
+ * одну линию — нет, а глазом полсантиметра разницы не поймать. Здесь ищется ближайшее
+ * совпадение середины или края с серединой или краем соседа; найденное показывается линией,
+ * чтобы было видно, по чему объект выровнялся.
+ */
+export function alignToNeighbours(
+  plan: Plan,
+  item: Equipment,
+  tolerance: number,
+): { position: Point; guides: Guide[] } {
+  if (!isAxisAligned(item) || tolerance <= 0) return { position: item.position, guides: [] };
+  const box = bounds(item);
+  // Середина идёт первой: при равном расстоянии ряд выравнивается по осевой, а не по краю.
+  const self = {
+    x: [(box.minX + box.maxX) / 2, box.minX, box.maxX],
+    y: [(box.minY + box.maxY) / 2, box.minY, box.maxY],
+  };
+  const best: Record<Axis, { shift: number; at: number; distance: number; from: number; to: number } | null> = {
+    x: null,
+    y: null,
+  };
+  for (const other of plan.equipment ?? []) {
+    if (other.id === item.id || !isAxisAligned(other)) continue;
+    const box2 = bounds(other);
+    const lines = {
+      x: [(box2.minX + box2.maxX) / 2, box2.minX, box2.maxX],
+      y: [(box2.minY + box2.maxY) / 2, box2.minY, box2.maxY],
+    };
+    for (const axis of ['x', 'y'] as Axis[]) {
+      for (const mine of self[axis]) {
+        for (const theirs of lines[axis]) {
+          const distance = Math.abs(theirs - mine);
+          if (distance > tolerance) continue;
+          const current = best[axis];
+          if (current && current.distance <= distance) continue;
+          // Линия тянется от дальнего края соседа до дальнего края объекта — видно, с чем выровнялись.
+          const cross = axis === 'x' ? ['minY', 'maxY'] : ['minX', 'maxX'];
+          const from = Math.min(box[cross[0] as 'minY'], box2[cross[0] as 'minY']);
+          const to = Math.max(box[cross[1] as 'maxY'], box2[cross[1] as 'maxY']);
+          best[axis] = { shift: theirs - mine, at: theirs, distance, from, to };
+        }
+      }
+    }
+  }
+  const dx = best.x?.shift ?? 0;
+  const dy = best.y?.shift ?? 0;
+  const guides: Guide[] = [];
+  if (best.x) guides.push({ axis: 'x', at: best.x.at, from: best.x.from + dy, to: best.x.to + dy });
+  if (best.y) guides.push({ axis: 'y', at: best.y.at, from: best.y.from + dx, to: best.y.to + dx });
+  return { position: [round3(item.position[0] + dx), round3(item.position[1] + dy)], guides };
 }
 
 /**

@@ -31,7 +31,18 @@ import { formatNumber } from '../lib/planFacts';
 import { outlinePoints } from '../lib/planFacts';
 import { defaultOperatorPosition, transformInPlace } from '../lib/equipmentOps';
 import { MIN_WALL_M, addOpening, moveWall, replaceOutline, wallAxis, wallLength } from '../lib/wallEdit';
-import { OUTER_WALL_M, PARTITION_M, fitsRoom, hostWall, isOuter, offsetOutline, outwardNormal, placeInRoom } from '../lib/room';
+import {
+  OUTER_WALL_M,
+  PARTITION_M,
+  alignToNeighbours,
+  fitsRoom,
+  hostWall,
+  isOuter,
+  offsetOutline,
+  outwardNormal,
+  placeInRoom,
+  type Guide,
+} from '../lib/room';
 import { zoneLabelPoints } from '../lib/zoneLabels';
 import { useWorkspace } from '../state/store';
 import { glyphFor } from './glyphs';
@@ -58,6 +69,9 @@ interface PlanCanvasProps {
 }
 
 const POSITION_STEP = 0.05;
+// Насколько близко к линии соседа объект должен подойти, чтобы встать на неё, — в пикселях
+// экрана: на любом масштабе это одно и то же расстояние под курсором.
+const ALIGN_TOLERANCE_PX = 7;
 const DRAFT_STEP = 0.25;
 const ROTATE_STEP = 15;
 
@@ -121,6 +135,8 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
   const gesture = useRef<Gesture>({ kind: 'none' });
   // Касания на плане: по двум из них считается щипок. Мышь сюда попадает тоже, но одна.
   const touches = useRef<Map<number, Point>>(new Map());
+  // Линии выравнивания: показываются, пока объект тянут, и гаснут, когда отпустили.
+  const [guides, setGuides] = useState<Guide[]>([]);
   const fitted = useRef(false);
 
   useLayoutEffect(() => {
@@ -487,11 +503,21 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
         };
         // Ctrl отключает привязку к стенам и соседям, но не пускает сквозь стены.
         const floor = types.get(target.type)?.floor_object ?? true;
-        const next = event.ctrlKey
+        let next = event.ctrlKey
           ? fitsRoom(draft, probe) || !floor
             ? probe.position
             : previous
           : placeInRoom(draft, probe, previous, floor);
+        // Выравнивание по соседям — поверх прижатия к стенам и только если объект там помещается.
+        let lines: Guide[] = [];
+        if (!event.ctrlKey) {
+          const aligned = alignToNeighbours(draft, { ...target, position: next }, ALIGN_TOLERANCE_PX / view.scale);
+          if (aligned.guides.length && (!floor || fitsRoom(draft, { ...target, position: aligned.position }))) {
+            next = aligned.position;
+            lines = aligned.guides;
+          }
+        }
+        setGuides(lines);
         transformInPlace(target, { position: next });
         const zone = zoneAt(draft, target.position);
         if (zone) target.zone = zone.id;
@@ -543,6 +569,7 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
   const onPointerUp = (event: React.PointerEvent<SVGSVGElement>) => {
     svg.current?.releasePointerCapture(event.pointerId);
     touches.current.delete(event.pointerId);
+    setGuides([]);
     const current = gesture.current;
     if (current.kind === 'drag' || current.kind === 'rotate' || current.kind === 'wall') endTransient();
     if (current.kind === 'wall') setWallShift(null);
@@ -941,6 +968,12 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
         {tool === 'equipment' && placingType && cursor && (
           <PlacingGhost view={view} doc={doc} type={placingType} info={types.get(placingType)} cursor={cursor} />
         )}
+
+        {guides.map((guide) => {
+          const [ax, ay] = toScreen(view, guide.axis === 'x' ? [guide.at, guide.from] : [guide.from, guide.at]);
+          const [bx, by] = toScreen(view, guide.axis === 'x' ? [guide.at, guide.to] : [guide.to, guide.at]);
+          return <line key={`${guide.axis}${guide.at}`} className="plan-guide" x1={ax} y1={ay} x2={bx} y2={by} />;
+        })}
 
         <ScaleBar view={view} height={size.height} />
       </svg>

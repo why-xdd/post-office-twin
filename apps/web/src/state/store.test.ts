@@ -4,7 +4,7 @@
  */
 
 import { beforeEach, describe, expect, it } from 'vitest';
-import type { Plan, RecommendationChange } from '../lib/plan';
+import type { Finding, Plan, RecommendationChange, ValidationReport } from '../lib/plan';
 import { useWorkspace } from './store';
 
 const plan = (): Plan => ({
@@ -63,5 +63,67 @@ describe('применение рекомендаций', () => {
     ]);
     const added = useWorkspace.getState().doc!.equipment!.find((item) => item.id === 'eq_new');
     expect(added?.position).toEqual([6, 2]);
+  });
+});
+
+const finding = (rule_id: string, objects: string[], severity: Finding['severity'] = 'error'): Finding => ({
+  rule_id,
+  title: rule_id,
+  severity,
+  category: 'accessibility',
+  source: 'СП 59.13330.2020',
+  clause: 'п. 6.2.1',
+  message: '',
+  objects,
+  unit: 'м',
+});
+
+const report = (...findings: Finding[]): ValidationReport => ({
+  findings,
+  errors: findings.filter((f) => f.severity === 'error').length,
+  warnings: findings.filter((f) => f.severity === 'warning').length,
+  infos: 0,
+  checked_rules: [],
+  skipped_rules: [],
+});
+
+describe('закреплённое нарушение', () => {
+  const narrow = finding('movement_path_width', ['eq_atm', 'eq_bench']);
+  const overlap = finding('no_overlaps', ['eq_bench', 'eq_atm']);
+  const height = finding('counter_height', ['eq_atm'], 'warning');
+
+  beforeEach(() => {
+    const state = useWorkspace.getState();
+    state.open('p1', 'Тест', 1, plan());
+    state.setReport(report(narrow, overlap, height), 'ready');
+    state.setActiveFinding(1);
+    state.highlight(overlap.objects);
+  });
+
+  it('остаётся закреплённым, когда после перепроверки у него другой номер', () => {
+    // Узкий проход исправили: пересечение стало первым в списке.
+    useWorkspace.getState().setReport(report(finding('no_overlaps', ['eq_atm', 'eq_bench']), height), 'ready');
+    const state = useWorkspace.getState();
+    expect(state.activeFinding).toBe(0);
+    expect(state.highlighted).toEqual(overlap.objects);
+  });
+
+  it('снимается вместе с подсветкой, когда его исправили', () => {
+    useWorkspace.getState().setReport(report(narrow, height), 'ready');
+    const state = useWorkspace.getState();
+    expect(state.activeFinding).toBeNull();
+    expect(state.highlighted).toEqual([]);
+  });
+
+  it('не трогает чужую подсветку, когда исправлено', () => {
+    useWorkspace.getState().highlight(['eq_bench']);
+    useWorkspace.getState().setReport(report(narrow, height), 'ready');
+    expect(useWorkspace.getState().highlighted).toEqual(['eq_bench']);
+  });
+
+  it('не сбивается, пока идёт перепроверка того же отчёта', () => {
+    const state = useWorkspace.getState();
+    state.setReport(state.report, 'checking');
+    expect(useWorkspace.getState().activeFinding).toBe(1);
   });
 });

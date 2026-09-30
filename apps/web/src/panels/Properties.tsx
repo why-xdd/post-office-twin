@@ -2,15 +2,16 @@
  * Свойства выделенного: объекта, зоны, стены, проёма — или всего плана, если ничего не выбрано.
  */
 
-import { Copy, RotateCw, Trash2 } from 'lucide-react';
+import { CircleCheck, Copy, OctagonAlert, RotateCw, Trash2, TriangleAlert } from 'lucide-react';
 import { useState } from 'react';
 import { NumberField, ReadonlyField, SelectField, TextField } from '../components/fields';
 import { Plate } from '../components/Plate';
 import type { AddressBook } from '../lib/addresses';
-import { key } from '../lib/addresses';
+import { formatAddress, key } from '../lib/addresses';
 import { transformInPlace, withTransform } from '../lib/equipmentOps';
 import { round3, uniqueId, zoneAt } from '../lib/geometry';
 import type { Door, Equipment, EquipmentTypeInfo, Plan, WindowOpening, ZoneTypeInfo } from '../lib/plan';
+import { isNormFinding, plainFinding } from '../lib/plainFindings';
 import { hostWall } from '../lib/room';
 import { MIN_WALL_M, openingPlacement, resizeOpening, wallAxis, wallLength } from '../lib/wallEdit';
 import { formatNumber, planArea, polygonArea } from '../lib/planFacts';
@@ -60,6 +61,8 @@ export function Properties({ book, types, zoneTypes }: PropertiesProps) {
             <p className="props__id">{item.id}</p>
           </div>
         </header>
+
+        <ObjectFindings id={item.id} />
 
         <div className="fields">
           <TextField label="Подпись" wide value={item.label} placeholder={info?.label} onCommit={(label) => updateEquipment(item.id, { label: label || undefined })} />
@@ -148,6 +151,7 @@ export function Properties({ book, types, zoneTypes }: PropertiesProps) {
             <p className="props__id">{zone.id}</p>
           </div>
         </header>
+        <ObjectFindings id={zone.id} />
         <div className="fields">
           <TextField label="Название" wide value={zone.label} onCommit={(label) => updateZone(zone.id, { label })} />
           <SelectField
@@ -197,6 +201,7 @@ export function Properties({ book, types, zoneTypes }: PropertiesProps) {
             <p className="props__id">{wall.id}</p>
           </div>
         </header>
+        <ObjectFindings id={wall.id} />
         <div className="fields">
           <SelectField
             label="Тип"
@@ -388,6 +393,94 @@ function PlanProperties({ doc }: { doc: Plan }) {
   );
 }
 
+/**
+ * Нарушения и замечания, в которых участвует выбранное: чтобы узнать, всё ли с объектом в
+ * порядке, не нужно искать его в списке «Проверки». Щелчок закрепляет нарушение на плане.
+ */
+function ObjectFindings({ id }: { id: string }) {
+  const report = useWorkspace((s) => s.report);
+  const state = useWorkspace((s) => s.reportState);
+  const doc = useWorkspace((s) => s.doc);
+  const active = useWorkspace((s) => s.activeFinding);
+  const setActive = useWorkspace((s) => s.setActiveFinding);
+  const highlight = useWorkspace((s) => s.highlight);
+  // До первого ответа проверки сказать нечего: пустое место лучше, чем «нарушений нет».
+  if (!report) return null;
+  const stale = state === 'checking' ? ' props-findings--stale' : '';
+  const related = report.findings
+    .map((finding, index) => ({ finding, index }))
+    .filter(({ finding }) => finding.severity !== 'info' && finding.objects.includes(id));
+
+  if (related.length === 0) {
+    return (
+      <p className={`props-findings__clean${stale}`}>
+        <CircleCheck size={15} aria-hidden="true" />
+        Нарушений с участием объекта нет
+      </p>
+    );
+  }
+
+  const errors = related.filter(({ finding }) => finding.severity === 'error').length;
+  const title =
+    errors === related.length
+      ? 'Нарушения с участием объекта'
+      : errors === 0
+        ? 'Замечания с участием объекта'
+        : 'Нарушения и замечания с участием объекта';
+
+  return (
+    <section className={`props-findings${stale}`} aria-label={title}>
+      <h3 className="props-findings__title">
+        {title}
+        <b>{related.length}</b>
+      </h3>
+      <ul className="props-findings__list">
+        {related.map(({ finding, index }) => {
+          const plain = plainFinding(finding, doc);
+          const Icon = finding.severity === 'error' ? OctagonAlert : TriangleAlert;
+          const pinned = active === index;
+          const kind = finding.severity === 'error' ? (isNormFinding(finding) ? 'Нарушение' : 'Ошибка в данных') : 'Замечание';
+          return (
+            <li key={index}>
+              <button
+                type="button"
+                className={`props-finding props-finding--${finding.severity}`}
+                aria-pressed={pinned}
+                title={pinned ? 'Снять подсветку с плана' : 'Подсветить на плане'}
+                onClick={() => {
+                  if (pinned) {
+                    setActive(null);
+                    highlight([]);
+                    return;
+                  }
+                  setActive(index);
+                  highlight(finding.objects);
+                }}
+              >
+                <Icon size={15} aria-hidden="true" className="props-finding__icon" />
+                <span className="props-finding__text">
+                  <span className="props-finding__title">
+                    <span className="visually-hidden">{kind}: </span>
+                    {plain.title}
+                  </span>
+                  {plain.measure && <span className="props-finding__measure">{plain.measure}</span>}
+                  <cite className="props-finding__source">
+                    {finding.source}
+                    {finding.clause ? `, ${finding.clause}` : ''}
+                  </cite>
+                </span>
+                <Plate surface="label" size="sm">
+                  {formatAddress('finding', index)}
+                </Plate>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
 const DOOR_TYPES = [
   { value: 'entrance', label: 'Главный вход для посетителей' },
   { value: 'service', label: 'Служебный вход' },
@@ -431,6 +524,7 @@ function OpeningProperties({ kind, id, book }: { kind: 'door' | 'window'; id: st
           <p className="props__id">{id}</p>
         </div>
       </header>
+      <ObjectFindings id={id} />
       <div className="fields">
         {door && (
           <>

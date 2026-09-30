@@ -27,7 +27,9 @@ const TOOLS: { tool: Tool; label: string; hotkey: string; icon: typeof MousePoin
   { tool: 'zone', label: 'Зона', hotkey: 'Z', icon: SquareDashed },
 ];
 
-const LAYER_LABELS: { key: keyof Layers; label: string; onlyWithHeatmap?: boolean }[] = [
+const LAYER_LABELS: { key: keyof Layers; label: string; onlyWithHeatmap?: boolean; onlyInDesign?: boolean }[] = [
+  // Метки нарушений нужны там, где план правят; в эксплуатации план — паспорт, а не чертёж.
+  { key: 'findings', label: 'Метки нарушений', onlyInDesign: true },
   { key: 'zones', label: 'Зоны' },
   { key: 'labels', label: 'Адреса и подписи' },
   { key: 'routes', label: 'Маршруты посетителей' },
@@ -189,7 +191,9 @@ export function Library({ types, zoneTypes, layers, onLayers, onNotice }: Librar
 
       <fieldset className="library__layers">
         <legend>Слои</legend>
-        {LAYER_LABELS.filter((layer) => !layer.onlyWithHeatmap || heatmap).map(({ key: k, label }) => (
+        {LAYER_LABELS.filter(
+          (layer) => (!layer.onlyWithHeatmap || heatmap) && (!layer.onlyInDesign || mode === 'design'),
+        ).map(({ key: k, label }) => (
           <label key={k} className="layer">
             <input type="checkbox" checked={layers[k]} onChange={(event) => onLayers({ ...layers, [k]: event.target.checked })} />
             <span className="layer__box" aria-hidden="true" />

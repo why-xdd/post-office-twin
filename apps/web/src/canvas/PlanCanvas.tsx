@@ -9,7 +9,7 @@
 import { AppWindow, DoorOpen } from 'lucide-react';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { AddressBook } from '../lib/addresses';
-import { key } from '../lib/addresses';
+import { formatAddress, key } from '../lib/addresses';
 import {
   distanceToSegment,
   equipmentAt,
@@ -44,7 +44,7 @@ import {
   type Guide,
 } from '../lib/room';
 import { zoneLabelPoints } from '../lib/zoneLabels';
-import { useWorkspace } from '../state/store';
+import { useWorkspace, type Selection } from '../state/store';
 import { glyphFor } from './glyphs';
 import './canvas.css';
 
@@ -55,6 +55,8 @@ export interface Layers {
   grid: boolean;
   /** Тепловая карта по записи с камеры; появляется в списке слоёв только когда расчёт сделан. */
   heat: boolean;
+  /** Метки нарушений в редакторе. В обзоре они есть всегда: там это главный рассказ экрана. */
+  findings: boolean;
 }
 
 interface PlanCanvasProps {
@@ -131,6 +133,8 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
   const latched = useWorkspace((s) => s.latched);
   const mode = useWorkspace((s) => s.mode);
   const report = useWorkspace((s) => s.report);
+  const reportState = useWorkspace((s) => s.reportState);
+  const setPanel = useWorkspace((s) => s.setPanel);
   const activeFinding = useWorkspace((s) => s.activeFinding);
   const setActiveFinding = useWorkspace((s) => s.setActiveFinding);
   const highlight = useWorkspace((s) => s.highlight);
@@ -456,7 +460,7 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
       const item = doc.equipment?.find((e) => e.id === selection.id);
       if (item) {
         const handle = rotationHandle(view, item);
-        if (Math.hypot(handle.knob[0] - sx, handle.knob[1] - sy) < 10) {
+        if (Math.hypot(handle.knob[0] - sx, handle.knob[1] - sy) < KNOB_GRAB_PX) {
           beginTransient();
           gesture.current = { kind: 'rotate', id: item.id };
           return;
@@ -663,7 +667,19 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
   // В обзоре коды-адреса не нужны: объекты узнаются по значкам, нарушения — по номерам меток.
   const review = mode === 'review';
   const addressesVisible = labelsVisible && !review;
-  const pins = review && report && !preview ? placePins(doc, report, activeFinding, view) : [];
+  // В обзоре метки крупные и есть всегда. В редакторе это тихий слой: маленький номер у места
+  // нарушения — тот же, что в адресе Н-03 в «Проверке», — который не мешает двигать объекты.
+  const design = mode === 'design';
+  const pins =
+    report && !preview && (review || design)
+      ? placePins(doc, report, activeFinding, view, {
+          style: review ? 'review' : 'design',
+          all: review || layers.findings,
+          labelPoints: labelsVisible && layers.zones ? labelPoints : null,
+          // Метка не должна закрывать адресные таблички, по которым объект ищут, и ручки выделения.
+          avoid: design ? pinObstacles(doc, view, selection, addressesVisible ? book : null) : [],
+        })
+      : [];
 
   return (
     <div
@@ -936,33 +952,47 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
             );
           })}
 
-        {/* Метки нарушений в обзоре: номер совпадает с пунктом списка */}
-        {pins.map((pin) => (
-          <g
-            key={pin.index}
-            className={`plan-pin${pin.active ? ' plan-pin--active' : ''}${pin.number === null ? ' plan-pin--note' : ''}`}
-            transform={`translate(${pin.x} ${pin.y})`}
-            role="button"
-            aria-label={pin.number === null ? 'Замечание' : `Нарушение ${pin.number}`}
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={() => {
-              if (pin.active) {
-                setActiveFinding(null);
-                highlight([]);
-              } else {
-                setActiveFinding(pin.index);
-                highlight(pin.objects);
-              }
-            }}
-          >
-            <g className="plan-pin__body">
-              <circle r={pin.active ? 15 : 12} className="plan-pin__disc" />
-              <text textAnchor="middle" dominantBaseline="central" className="plan-pin__number">
-                {pin.number ?? '!'}
-              </text>
-            </g>
+        {/* Метки нарушений: номер совпадает с пунктом списка в обзоре и с адресом в «Проверке» */}
+        {pins.length > 0 && (
+          <g className={`plan-pins${reportState === 'checking' ? ' plan-pins--stale' : ''}`}>
+            {pins.map((pin) => (
+              <g
+                key={pin.index}
+                className={`plan-pin${pin.active ? ' plan-pin--active' : ''}${pin.note ? ' plan-pin--note' : ''}${design && !pin.active ? ' plan-pin--quiet' : ''}`}
+                transform={`translate(${pin.x} ${pin.y})`}
+                role="button"
+                aria-pressed={pin.active}
+                aria-label={
+                  design
+                    ? `${pin.note ? 'Замечание' : 'Нарушение'} ${formatAddress('finding', pin.index)}`
+                    : pin.number === null
+                      ? 'Замечание'
+                      : `Нарушение ${pin.number}`
+                }
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={() => {
+                  if (pin.active) {
+                    setActiveFinding(null);
+                    highlight([]);
+                    return;
+                  }
+                  setActiveFinding(pin.index);
+                  highlight(pin.objects);
+                  // В редакторе подробности нарушения — в «Проверке»: там же закреплённая строка.
+                  if (design) setPanel('checks');
+                }}
+              >
+                <circle r={design && !pin.active ? 12 : 16} className="plan-pin__hit" />
+                <g className="plan-pin__body">
+                  <circle r={pin.active ? 15 : design ? 9 : 12} className="plan-pin__disc" />
+                  <text textAnchor="middle" dominantBaseline="central" className="plan-pin__number">
+                    {pin.number ?? '!'}
+                  </text>
+                </g>
+              </g>
+            ))}
           </g>
-        ))}
+        )}
 
         {/* Предпросмотр рекомендации: объект выдвигается, как ящик ячейки */}
         {preview && <PreviewLayer view={view} doc={doc} changes={preview} types={types} />}
@@ -1065,12 +1095,23 @@ function rotationHandle(view: View, item: Equipment) {
   };
 }
 
+const TAG_HEIGHT = 15;
+const tagWidth = (text: string) => 7 * text.length + 8;
+
+/** Где на экране лежит адресная табличка объекта: над его левым верхним углом. */
+function tagBox(view: View, item: Equipment, text: string): Box {
+  const screen = equipmentCorners(item).map((corner) => toScreen(view, corner));
+  const x = Math.min(...screen.map((c) => c[0]));
+  const bottom = Math.min(...screen.map((c) => c[1])) - 4;
+  return { x0: x, y0: bottom - TAG_HEIGHT, x1: x + (text ? tagWidth(text) : 0), y1: bottom };
+}
+
 function AddressTag({ x, y, text, tone }: { x: number; y: number; text: string; tone: 'ink' | 'signal' | 'steel' }) {
   if (!text) return null;
-  const width = 7 * text.length + 8;
+  const width = tagWidth(text);
   return (
-    <g className={`plan-address plan-address--${tone}`} transform={`translate(${x} ${y - 15})`}>
-      <rect width={width} height={15} rx={1.5} />
+    <g className={`plan-address plan-address--${tone}`} transform={`translate(${x} ${y - TAG_HEIGHT})`}>
+      <rect width={width} height={TAG_HEIGHT} rx={1.5} />
       <text x={width / 2} y={11} textAnchor="middle">
         {text}
       </text>
@@ -1223,47 +1264,154 @@ function PreviewLayer({
 
 interface Pin {
   index: number;
+  /** Номер на метке; null — замечание в обзоре, где нумеруются только нарушения. */
   number: number | null;
+  /** Замечание, а не нарушение: метка другого цвета. */
+  note: boolean;
   objects: string[];
   active: boolean;
   x: number;
   y: number;
 }
 
+interface PinOptions {
+  /** Обзор: метка в середине объектов. Редактор: у одиночного объекта — на его углу. */
+  style: 'review' | 'design';
+  /** Показывать все нарушения; иначе только закреплённое. */
+  all: boolean;
+  /** Точки подписей зон, если подписи видны: метку зоны нельзя ставить на её название. */
+  labelPoints: Map<string, Point> | null;
+  /** Что метка обходит, если есть куда: адресные таблички и ручки выделенного объекта. */
+  avoid: Box[];
+}
+
+interface Box {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
 const PIN_GAP_PX = 26;
+/** На каком расстоянии от ручки поворота щелчок её берёт. */
+const KNOB_GRAB_PX = 10;
+/** Радиус, который метка держит свободным. Один для тихой и выбранной: при щелчке метка не прыгает. */
+const PIN_CLEAR_PX = 11;
+/** Метка зоны встаёт под её название: подпись занимает около двух строк над точкой. */
+const ZONE_PIN_DROP_PX = 34;
 
 /**
- * Метка ставится в середину объектов, из-за которых возникло нарушение: для пары объектов
- * это как раз место конфликта. Метки, упавшие друг на друга, раздвигаются по горизонтали.
+ * Метка ставится туда, где возникло нарушение: для пары объектов — в середину между ними, это
+ * и есть место конфликта. В редакторе метка одиночного объекта садится на его нижний правый
+ * угол, как бейдж: объект остаётся под рукой, его можно взять и передвинуть. Метки, упавшие
+ * друг на друга, раздвигаются по горизонтали.
  */
-function placePins(doc: Plan, report: ValidationReport, active: number | null, view: View): Pin[] {
+function placePins(doc: Plan, report: ValidationReport, active: number | null, view: View, options: PinOptions): Pin[] {
   const pins: Pin[] = [];
-  let number = 0;
+  let errorNumber = 0;
   report.findings.forEach((finding, index) => {
     const isError = finding.severity === 'error';
-    if (isError) number += 1;
-    if (!isError && index !== active) return;
-    const points: Point[] = [];
-    for (const id of finding.objects) {
-      const item = doc.equipment?.find((e) => e.id === id);
-      if (item) {
-        points.push(item.position);
-        continue;
-      }
-      const zone = doc.zones?.find((z) => z.id === id);
-      if (zone) points.push(polygonCentroid(zone.polygon));
-    }
-    if (points.length === 0) return;
-    const world: Point = [
-      points.reduce((sum, p) => sum + p[0], 0) / points.length,
-      points.reduce((sum, p) => sum + p[1], 0) / points.length,
-    ];
-    let [x, y] = toScreen(view, world);
+    if (isError) errorNumber += 1;
+    if (!(isError && options.all) && index !== active) return;
+    const candidates = pinAnchors(doc, finding.objects, view, options);
+    if (candidates.length === 0) return;
+    const free = (point: Point) =>
+      !pins.some((pin) => Math.hypot(pin.x - point[0], pin.y - point[1]) < PIN_GAP_PX) &&
+      !options.avoid.some((box) => discHitsBox(point, PIN_CLEAR_PX, box));
+    let [x, y] = candidates.find(free) ?? candidates[0];
     while (pins.some((pin) => Math.hypot(pin.x - x, pin.y - y) < PIN_GAP_PX)) x += PIN_GAP_PX;
-    pins.push({ index, number: isError ? number : null, objects: finding.objects, active: index === active, x, y });
+    // В редакторе номер — тот же, что в адресе нарушения; в обзоре нумеруются только нарушения,
+    // и так как они идут первыми, номера совпадают.
+    const number = options.style === 'design' ? index + 1 : isError ? errorNumber : null;
+    pins.push({ index, number, note: !isError, objects: finding.objects, active: index === active, x, y });
   });
   // Выбранная метка рисуется последней, чтобы её не перекрывали соседние.
   return pins.sort((a, b) => Number(a.active) - Number(b.active));
+}
+
+/** Таблички всех объектов (если адреса видны) и ручка поворота с размером у выделенного. */
+function pinObstacles(doc: Plan, view: View, selection: Selection | null, book: AddressBook | null): Box[] {
+  const boxes: Box[] = book
+    ? (doc.equipment ?? []).map((item) => tagBox(view, item, book.byId.get(key('equipment', item.id)) ?? ''))
+    : [];
+  const selected = selection?.kind === 'equipment' ? doc.equipment?.find((e) => e.id === selection.id) : undefined;
+  if (selected) {
+    const { base, knob } = rotationHandle(view, selected);
+    const reach = KNOB_GRAB_PX;
+    boxes.push({ x0: knob[0] - reach, y0: knob[1] - reach, x1: knob[0] + reach, y1: knob[1] + reach });
+    boxes.push({
+      x0: Math.min(base[0], knob[0]) - 2,
+      y0: Math.min(base[1], knob[1]) - 2,
+      x1: Math.max(base[0], knob[0]) + 2,
+      y1: Math.max(base[1], knob[1]) + 2,
+    });
+    // Подпись размера под выделенным объектом.
+    const corners = equipmentCorners(selected).map((corner) => toScreen(view, corner));
+    const [cx] = toScreen(view, selected.position);
+    const bottom = Math.max(...corners.map((c) => c[1]));
+    boxes.push({ x0: cx - 48, y0: bottom + 7, x1: cx + 48, y1: bottom + 22 });
+  }
+  return boxes;
+}
+
+function discHitsBox([x, y]: Point, radius: number, box: Box): boolean {
+  const nearestX = Math.max(box.x0, Math.min(x, box.x1));
+  const nearestY = Math.max(box.y0, Math.min(y, box.y1));
+  return Math.hypot(x - nearestX, y - nearestY) < radius;
+}
+
+/**
+ * Места для метки в порядке предпочтения. Для одиночного объекта в редакторе — его углы и
+ * бока, начиная с нижнего правого; для остальных — место конфликта и небольшие сдвиги от него.
+ */
+function pinAnchors(doc: Plan, objects: string[], view: View, options: PinOptions): Point[] {
+  const anchor = pinAnchor(doc, objects, view, options);
+  if (!anchor) return [];
+  const items = objects.filter((id) => doc.equipment?.some((e) => e.id === id));
+  if (options.style === 'design' && items.length === 1) {
+    const item = doc.equipment!.find((e) => e.id === items[0])!;
+    const corners = equipmentCorners(item).map((corner) => toScreen(view, corner));
+    const left = Math.min(...corners.map((c) => c[0]));
+    const right = Math.max(...corners.map((c) => c[0]));
+    const top = Math.min(...corners.map((c) => c[1]));
+    const bottom = Math.max(...corners.map((c) => c[1]));
+    const middle = (top + bottom) / 2;
+    // На боку метка стоит снаружи и только касается объекта: узкий объект она иначе закрыла бы.
+    const beside = PIN_CLEAR_PX - 2;
+    return [anchor, [left, bottom], [right + beside, middle], [left - beside, middle], [right, top]];
+  }
+  const step = PIN_CLEAR_PX * 1.6;
+  const [x, y] = anchor;
+  return [anchor, [x, y + step], [x, y - step], [x + step, y], [x - step, y]];
+}
+
+function pinAnchor(doc: Plan, objects: string[], view: View, options: PinOptions): Point | null {
+  const items = objects
+    .map((id) => doc.equipment?.find((e) => e.id === id))
+    .filter((item): item is Equipment => Boolean(item));
+  if (options.style === 'design' && items.length === 1) {
+    const corners = equipmentCorners(items[0]).map((corner) => toScreen(view, corner));
+    return [Math.max(...corners.map((c) => c[0])), Math.max(...corners.map((c) => c[1]))];
+  }
+  const points: Point[] = items.map((item) => item.position);
+  let zoneOnly: Point | null = null;
+  for (const id of objects) {
+    const zone = doc.zones?.find((z) => z.id === id);
+    if (!zone) continue;
+    const centre = polygonCentroid(zone.polygon);
+    points.push(centre);
+    zoneOnly = options.labelPoints?.get(zone.id) ?? centre;
+  }
+  if (points.length === 0) return null;
+  if (items.length === 0 && points.length === 1 && zoneOnly) {
+    const [x, y] = toScreen(view, zoneOnly);
+    return [x, options.labelPoints ? y + ZONE_PIN_DROP_PX : y];
+  }
+  const world: Point = [
+    points.reduce((sum, p) => sum + p[0], 0) / points.length,
+    points.reduce((sum, p) => sum + p[1], 0) / points.length,
+  ];
+  return toScreen(view, world);
 }
 
 function OutlineDraft({ view, points, cursor }: { view: View; points: Point[]; cursor: Point | null }) {

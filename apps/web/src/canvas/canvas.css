@@ -74,6 +74,26 @@
   cursor: pointer;
 }
 
+/* Невидимая зона щелчка: сама метка в редакторе мелкая, а попасть по ней должно быть легко */
+.plan-pin__hit {
+  fill: transparent;
+}
+
+@media (pointer: coarse) {
+  .plan-pin__hit {
+    r: 20px;
+  }
+}
+
+/* Пока план перепроверяется, метки могли устареть: они притушены до ответа */
+.plan-pins {
+  transition: opacity var(--dur-base) ease-out;
+}
+
+.plan-pins--stale {
+  opacity: 0.45;
+}
+
 .plan-pin__body {
   animation: pin-drop var(--dur-drawer) var(--ease-latch) both;
 }
@@ -106,6 +126,44 @@
 .plan-pin:hover .plan-pin__disc,
 .plan-pin--active .plan-pin__disc {
   stroke: var(--ink);
+}
+
+/*
+ * Тихая метка редактора: светлая табличка с красной каймой и номером. Не спорит с планом,
+ * но читается на любой заливке; под курсором просыпается до обычной метки.
+ */
+.plan-pin--quiet .plan-pin__disc {
+  fill: var(--label);
+  stroke: var(--signal);
+  stroke-width: 2;
+  filter: drop-shadow(0 1px 1.5px rgba(60, 20, 10, 0.3));
+}
+
+.plan-pin--quiet .plan-pin__number {
+  fill: var(--signal);
+  font-size: 11px;
+}
+
+.plan-pin--quiet.plan-pin--note .plan-pin__disc {
+  fill: var(--label);
+  stroke: var(--caution);
+}
+
+.plan-pin--quiet.plan-pin--note .plan-pin__number {
+  fill: var(--caution);
+}
+
+.plan-pin--quiet:hover .plan-pin__disc {
+  fill: var(--signal);
+  stroke: #fff;
+}
+
+.plan-pin--quiet.plan-pin--note:hover .plan-pin__disc {
+  fill: var(--caution);
+}
+
+.plan-pin--quiet:hover .plan-pin__number {
+  fill: #fff;
 }
 
 @keyframes pin-drop {

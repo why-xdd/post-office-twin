@@ -10,7 +10,7 @@ import { create } from 'zustand';
 import { transformInPlace } from '../lib/equipmentOps';
 import { zoneAt } from '../lib/geometry';
 import { removeWall } from '../lib/wallEdit';
-import type { Equipment, Plan, ValidationReport, VisionHeatmap, Zone } from '../lib/plan';
+import type { Equipment, Finding, Plan, ValidationReport, VisionHeatmap, Zone } from '../lib/plan';
 
 export type SelectionKind = 'equipment' | 'zone' | 'wall' | 'door' | 'window';
 
@@ -41,6 +41,15 @@ export interface Change {
 
 const HISTORY_LIMIT = 120;
 
+function sameIds(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((id) => b.includes(id));
+}
+
+/** Одно и то же нарушение в двух отчётах: то же правило о тех же объектах. */
+export function sameFinding(a: Finding, b: Finding): boolean {
+  return a.rule_id === b.rule_id && sameIds(a.objects, b.objects);
+}
+
 const clone = <T,>(value: T): T => structuredClone(value);
 
 interface WorkspaceState {
@@ -66,7 +75,10 @@ interface WorkspaceState {
   preview: Change[] | null;
   /** Объекты, только что вставшие на место по рекомендации: для движения «защёлкивания». */
   latched: string[];
-  /** Номер нарушения, открытого в обзоре: по нему на плане выделяется метка. */
+  /**
+   * Закреплённое нарушение — индекс в отчёте. Метка на плане крупнее, объекты подсвечены, пока
+   * нарушение не снимут щелчком или Esc или пока его не исправят.
+   */
   activeFinding: number | null;
   /** Тепловая карта посещаемости по записи с камеры: рисуется слоем поверх плана. */
   heatmap: VisionHeatmap | null;
@@ -241,7 +253,21 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   setView: (view) => set({ view }),
   setPanel: (panel) => set({ panel }),
   setHeatmap: (heatmap) => set({ heatmap }),
-  setReport: (report, reportState) => set({ report, reportState }),
+  setReport: (report, reportState) =>
+    set((state) => {
+      const pinned = state.activeFinding === null ? undefined : state.report?.findings[state.activeFinding];
+      if (!pinned || !report || report === state.report) return { report, reportState };
+      // После перепроверки порядок нарушений другой: закреплённое ищется заново по правилу и объектам.
+      const index = report.findings.findIndex((finding) => sameFinding(finding, pinned));
+      if (index >= 0) return { report, reportState, activeFinding: index };
+      // Нарушение исправлено — метка и подсветка уходят вместе с ним.
+      return {
+        report,
+        reportState,
+        activeFinding: null,
+        highlighted: sameIds(state.highlighted, pinned.objects) ? [] : state.highlighted,
+      };
+    }),
   setPreview: (preview) => set({ preview }),
   setActiveFinding: (activeFinding) => set({ activeFinding }),
   latch: (ids) => {

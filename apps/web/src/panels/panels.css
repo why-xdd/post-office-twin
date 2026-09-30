@@ -94,6 +94,7 @@
     0 0 0 1px var(--label-edge),
     0 1px 2px rgba(0, 0, 0, 0.12);
   transition: box-shadow var(--dur-fast) ease-out, transform var(--dur-fast) ease-out;
+  cursor: pointer;
 }
 
 .finding:hover,
@@ -103,10 +104,61 @@
     0 4px 12px rgba(0, 0, 0, 0.18);
 }
 
+/* Закреплённое нарушение: кайма цвета серьёзности, её видно и когда курсор ушёл на план */
+.finding--pinned,
+.finding--pinned:hover,
+.finding--pinned:focus-within {
+  --pin-tone: var(--signal);
+  box-shadow:
+    0 0 0 2px var(--pin-tone),
+    0 4px 12px rgba(0, 0, 0, 0.18);
+}
+
+.finding--warning.finding--pinned {
+  --pin-tone: var(--caution);
+}
+
+.finding--info.finding--pinned {
+  --pin-tone: var(--notice);
+}
+
 .finding__head {
   display: flex;
   align-items: center;
   gap: var(--s-2);
+}
+
+.finding__toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.finding__toggle:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 3px;
+}
+
+.finding__pinned {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ink-2);
+  font-size: var(--text-12);
+  line-height: 1.35;
+}
+
+.finding__pinned svg {
+  flex: none;
+  color: var(--pin-tone, var(--signal));
 }
 
 .finding__severity {
@@ -276,6 +328,135 @@
   color: var(--ink-3);
   font-size: var(--text-12);
   line-height: 1.45;
+}
+
+/* Нарушения с участием выбранного: те же этикетки, что в «Проверке», только короче */
+.props-findings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  transition: opacity var(--dur-base) ease-out;
+}
+
+.props-findings--stale {
+  opacity: 0.6;
+}
+
+.props-findings__title {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--ink-2);
+  font-size: var(--text-12);
+  font-weight: 640;
+  line-height: 1.3;
+}
+
+.props-findings__title b {
+  color: var(--signal);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.props-findings__list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.props-finding {
+  --pin-tone: var(--signal);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--s-2);
+  align-items: start;
+  width: 100%;
+  padding: var(--s-2) var(--s-3);
+  border: 0;
+  border-radius: 1px;
+  color: var(--ink);
+  background: var(--label);
+  box-shadow:
+    0 0 0 1px var(--label-edge),
+    0 1px 2px rgba(0, 0, 0, 0.12);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: box-shadow var(--dur-fast) ease-out;
+}
+
+.props-finding--warning {
+  --pin-tone: var(--caution);
+}
+
+.props-finding:hover {
+  box-shadow:
+    0 0 0 2px var(--ink),
+    0 4px 12px rgba(0, 0, 0, 0.18);
+}
+
+.props-finding[aria-pressed='true'] {
+  box-shadow:
+    0 0 0 2px var(--pin-tone),
+    0 4px 12px rgba(0, 0, 0, 0.18);
+}
+
+.props-finding:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+.props-finding__icon {
+  margin-top: 1px;
+  color: var(--pin-tone);
+}
+
+.props-finding__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.props-finding__title {
+  font-size: var(--text-13);
+  font-weight: 620;
+  line-height: 1.3;
+}
+
+.props-finding__measure {
+  color: var(--ink-2);
+  font-size: var(--text-12);
+  line-height: 1.4;
+}
+
+.props-finding__source {
+  color: var(--ink-3);
+  font-size: var(--text-11);
+  font-style: normal;
+  line-height: 1.35;
+}
+
+.props-finding--error .plate--label {
+  color: var(--signal);
+  border-color: var(--signal);
+}
+
+.props-findings__clean {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-2);
+  font-size: var(--text-12);
+  line-height: 1.35;
+  transition: opacity var(--dur-base) ease-out;
+}
+
+.props-findings__clean svg {
+  flex: none;
+  color: var(--ok);
 }
 
 .props__actions {

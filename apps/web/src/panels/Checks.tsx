@@ -1,12 +1,15 @@
 /**
  * Проверка плана. Каждое нарушение — этикетка с адресом, замером против нормы и пунктом
- * документа; наведение подсвечивает на плане объекты, из-за которых оно возникло.
+ * документа. Наведение показывает на плане объекты, из-за которых оно возникло; щелчок
+ * закрепляет подсветку, пока её не снимут повторным щелчком или Esc.
  */
 
-import { CircleCheck, Info, LoaderCircle, OctagonAlert, TriangleAlert } from 'lucide-react';
+import { CircleCheck, Info, LoaderCircle, OctagonAlert, Pin, TriangleAlert } from 'lucide-react';
+import { useEffect, useRef } from 'react';
 import type { AddressBook } from '../lib/addresses';
 import { formatAddress, key } from '../lib/addresses';
 import type { Finding, Severity } from '../lib/plan';
+import { isNormFinding } from '../lib/plainFindings';
 import { formatNumber, plural } from '../lib/planFacts';
 import { humanize } from '../lib/humanize';
 import { useWorkspace } from '../state/store';
@@ -24,16 +27,28 @@ const SEVERITY_ICON: Record<Severity, typeof OctagonAlert> = {
   info: Info,
 };
 
-const SEVERITY_LABEL: Record<Severity, string> = {
-  error: 'Ошибка',
-  warning: 'Предупреждение',
-  info: 'Сведения',
-};
+/** Слова те же, что в обзоре и у ассистента: нарушение нормы, ошибка в данных, замечание. */
+function severityLabel(finding: Finding): string {
+  if (finding.severity === 'error') return isNormFinding(finding) ? 'Нарушение' : 'Ошибка в данных';
+  return finding.severity === 'warning' ? 'Замечание' : 'Сведения';
+}
 
 export function Checks({ book, onFocusObject }: ChecksProps) {
   const report = useWorkspace((s) => s.report);
   const state = useWorkspace((s) => s.reportState);
+  const doc = useWorkspace((s) => s.doc);
   const highlight = useWorkspace((s) => s.highlight);
+  const active = useWorkspace((s) => s.activeFinding);
+  const setActive = useWorkspace((s) => s.setActiveFinding);
+  const list = useRef<HTMLOListElement>(null);
+
+  // Нарушение закрепили меткой на плане или в «Свойствах» — его строка должна быть на виду.
+  useEffect(() => {
+    if (active === null) return;
+    const row = list.current?.querySelector<HTMLElement>(`[data-finding="${active}"]`);
+    const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    row?.scrollIntoView({ block: 'nearest', behavior: still ? 'auto' : 'smooth' });
+  }, [active]);
 
   if (!report) {
     return (
@@ -51,12 +66,32 @@ export function Checks({ book, onFocusObject }: ChecksProps) {
   }
 
   const findings = report.findings.map((finding, index) => ({ finding, index }));
+  const normErrors = report.findings.filter((f) => f.severity === 'error' && isNormFinding(f)).length;
+  const dataErrors = report.findings.filter((f) => f.severity === 'error').length - normErrors;
+  const pinned = active === null ? undefined : report.findings[active];
+  // Ушли со строки — на плане снова закреплённое нарушение, а не пустота.
+  const restore = () => highlight(pinned ? pinned.objects : []);
+  const onPlan = (id: string) => Boolean(doc?.equipment?.some((e) => e.id === id) || doc?.zones?.some((z) => z.id === id));
+  const touch = window.matchMedia('(pointer: coarse)').matches;
+
+  const toggle = (index: number, finding: Finding) => {
+    if (active === index) {
+      setActive(null);
+      highlight([]);
+      return;
+    }
+    setActive(index);
+    highlight(finding.objects);
+  };
 
   return (
     <div className={`checks${state === 'checking' ? ' checks--stale' : ''}`}>
       <div className="checks__summary" aria-live="polite">
-        <SummaryCount severity="error" count={report.errors} words={['ошибка', 'ошибки', 'ошибок']} />
-        <SummaryCount severity="warning" count={report.warnings} words={['предупреждение', 'предупреждения', 'предупреждений']} />
+        <SummaryCount severity="error" count={normErrors} words={['нарушение норм', 'нарушения норм', 'нарушений норм']} />
+        {dataErrors > 0 && (
+          <SummaryCount severity="error" count={dataErrors} words={['ошибка в данных', 'ошибки в данных', 'ошибок в данных']} />
+        )}
+        <SummaryCount severity="warning" count={report.warnings} words={['замечание', 'замечания', 'замечаний']} />
         <SummaryCount severity="info" count={report.infos} words={['сведение', 'сведения', 'сведений']} />
         {state === 'checking' && (
           <span className="checks__rechecking">
@@ -78,19 +113,25 @@ export function Checks({ book, onFocusObject }: ChecksProps) {
           </div>
         </div>
       ) : (
-        <ol className="checks__list">
+        <ol className="checks__list" ref={list}>
           {findings.map(({ finding, index }) => (
             <FindingRow
               key={index}
+              index={index}
               address={formatAddress('finding', index)}
               finding={finding}
               book={book}
+              pinned={active === index}
+              touch={touch}
               onEnter={() => highlight(finding.objects)}
-              onLeave={() => highlight([])}
+              onLeave={restore}
+              onToggle={() => toggle(index, finding)}
               onObject={(id) => {
-                // Из списка проверки объект только подсвечивается: список остаётся на месте.
-                highlight([id]);
-                onFocusObject(id);
+                // Объект из списка показывается на плане, а нарушение закрепляется: список
+                // остаётся на месте, выделение объекта не меняется.
+                setActive(index);
+                highlight(finding.objects);
+                if (onPlan(id)) onFocusObject(id);
               }}
             />
           ))}
@@ -124,39 +165,58 @@ function SummaryCount({ severity, count, words }: { severity: Severity; count: n
 }
 
 function FindingRow({
+  index,
   address,
   finding,
   book,
+  pinned,
+  touch,
   onEnter,
   onLeave,
+  onToggle,
   onObject,
 }: {
+  index: number;
   address: string;
   finding: Finding;
   book: AddressBook;
+  pinned: boolean;
+  touch: boolean;
   onEnter: () => void;
   onLeave: () => void;
+  onToggle: () => void;
   onObject: (id: string) => void;
 }) {
   const Icon = SEVERITY_ICON[finding.severity];
   const hasMeasure = finding.measured !== null && finding.measured !== undefined && finding.required !== null && finding.required !== undefined;
   return (
     <li
-      className={`finding finding--${finding.severity}`}
+      data-finding={index}
+      className={`finding finding--${finding.severity}${pinned ? ' finding--pinned' : ''}`}
       onMouseEnter={onEnter}
       onMouseLeave={onLeave}
       onFocus={onEnter}
-      onBlur={onLeave}
+      onBlur={(event) => {
+        // Фокус перешёл между кнопками той же карточки — подсветка остаётся.
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onLeave();
+      }}
+      onClick={(event) => {
+        // Щелчок по карточке — то же, что по заголовку; у кнопок объектов своё действие.
+        if ((event.target as HTMLElement).closest('button, a')) return;
+        onToggle();
+      }}
     >
       <div className="finding__head">
-        <Plate surface="label" size="sm">
-          {address}
-        </Plate>
-        <span className="finding__severity">
-          <Icon size={14} aria-hidden="true" />
-          <span className="visually-hidden">{SEVERITY_LABEL[finding.severity]}: </span>
-          {finding.title}
-        </span>
+        <button type="button" className="finding__toggle" aria-pressed={pinned} onClick={onToggle}>
+          <Plate surface="label" size="sm">
+            {address}
+          </Plate>
+          <span className="finding__severity">
+            <Icon size={14} aria-hidden="true" />
+            <span className="visually-hidden">{severityLabel(finding)}: </span>
+            {finding.title}
+          </span>
+        </button>
       </div>
       <p className="finding__message">{humanize(finding.message, useWorkspace.getState().doc, book)}</p>
       {hasMeasure && (
@@ -186,7 +246,7 @@ function FindingRow({
                 book.byId.get(key('window', id)) ??
                 id;
               return (
-                <button key={id} type="button" className="chip" onClick={() => onObject(id)} title={`Показать ${id} на плане`}>
+                <button key={id} type="button" className="chip" onClick={() => onObject(id)} title={`Показать ${objectAddress} на плане`}>
                   {objectAddress}
                 </button>
               );
@@ -194,6 +254,12 @@ function FindingRow({
           </span>
         )}
       </div>
+      {pinned && (
+        <p className="finding__pinned">
+          <Pin size={13} aria-hidden="true" />
+          {touch ? 'Закреплено на плане. Снять: нажмите на карточку ещё раз' : 'Закреплено на плане. Снять: Esc или щелчок по карточке'}
+        </p>
+      )}
     </li>
   );
 }

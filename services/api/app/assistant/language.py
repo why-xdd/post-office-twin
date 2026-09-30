@@ -36,7 +36,7 @@ SYNONYMS: dict[str, tuple[str, ...]] = {
     "payment_terminal_stand": ("терминал оплат", "оплат"),
     "package_drop_box": ("почтовый ящик", "ящик для", "корреспонденц", "абонентский ящик"),
     "info_display": ("табло", "информационное табло"),
-    "media_panel": ("медиапанел", "экран"),
+    "media_panel": ("медиапанел", "экран", "телевизор", "монитор"),
     "waiting_seat": ("скам", "лавк", "кресл", "сиден", "стул", "место для ожидан"),
     "atm": ("банкомат",),
     "parcel_locker": ("почтомат", "постамат"),
@@ -74,9 +74,12 @@ ROTATE_WORDS = ("разверни", "поверни", "разворот", "по�
 NOT_SUPPORTED = ("поменяй местами", "местами", "обменяй")
 # Всё, что означает «разберись сам»: устранение нарушений и расширение проходов.
 FIX_WORDS = (
-    "исправь", "почини", "расставь", "оптимизируй", "в порядок", "по нормам",
+    "исправь", "почини", "оптимизируй", "в порядок", "по нормам",
     "расширь", "шире", "разберись", "исправить", "освободи", "разгрузи",
 )
+# «Расставь телевизор и шкаф» — это поставить два предмета, «расставь по нормам» — исправить
+# расстановку. Одно и то же слово, и различает их только то, названы ли предметы.
+LAYOUT_WORDS = ("расставь", "расставить", "размести", "разместить", "расположи")
 CHECK_WORDS = ("проверь", "что не так", "какие нарушения", "проверка", "всё ли в порядке")
 
 # Вопросительные слова: с них начинается не команда, а вопрос о плане.
@@ -221,12 +224,19 @@ def _stems(plan: Plan) -> dict[str, list[str]]:
 
 
 def _find_type(fragment: str, plan: Plan) -> _Match | None:
-    """Тип оборудования по куску фразы и место фразы, которым он опознан.
+    """Тип оборудования по куску фразы: самый ранний из названных."""
+    found = _find_types(fragment, plan)
+    return found[0] if found else None
 
-    Берётся самое раннее совпадение: предмет называют сразу после глагола, а зона идёт дальше,
-    после предлога. Поэтому «скамью в накопитель очереди» — это скамья, а не терминал очереди.
-    Если ничего не нашлось, слова фразы сравниваются с приметами по близости: «термнал очереди»
-    должен пониматься так же, как «терминал очереди».
+
+def _find_types(fragment: str, plan: Plan) -> list[_Match]:
+    """Все названные во фразе типы оборудования, по порядку упоминания.
+
+    Порядок важен: предмет называют сразу после глагола, а зона идёт дальше, после предлога.
+    Поэтому «скамью в накопитель очереди» — это скамья, а не терминал очереди. Перечисление
+    через запятую даёт несколько типов: «расставь телевизор, окно выдачи, шкаф» — три предмета,
+    и каждому ассистент подбирает своё место. Если не нашлось ничего, слова сравниваются с
+    приметами по близости: «термнал очереди» должен пониматься так же, как «терминал очереди».
     """
     stems = _stems(plan)
     matches: list[tuple[int, int, str]] = []  # позиция, длина, код
@@ -235,11 +245,35 @@ def _find_type(fragment: str, plan: Plan) -> _Match | None:
             position = fragment.find(stem)
             if position >= 0:
                 matches.append((position, len(stem), code))
-    if matches:
-        matches.sort(key=lambda m: (m[0], -m[1]))
-        position, length, code = matches[0]
-        return _Match(code=code, start=position, end=position + length)
-    return _fuzzy_type(fragment, plan)
+    if not matches:
+        single = _fuzzy_type(fragment, plan)
+        return [single] if single else []
+    matches.sort(key=lambda m: (m[0], -m[1]))
+    result: list[_Match] = []
+    for position, length, code in matches:
+        # Один и тот же предмет мог совпасть по нескольким приметам, а перекрывающиеся куски
+        # фразы — это одно название, а не два предмета.
+        if any(item.code == code or position < item.end for item in result):
+            continue
+        if result and _same_name(fragment, result[-1].end, position):
+            # «Окно выдачи» — одно название, опознанное дважды: и по «окну», и по «выдаче».
+            # Побеждает более длинная примета: она точнее.
+            if length > result[-1].end - result[-1].start:
+                result[-1] = _Match(code=code, start=position, end=position + length)
+            continue
+        result.append(_Match(code=code, start=position, end=position + length))
+    return result
+
+
+def _same_name(fragment: str, end: int, start: int) -> bool:
+    """Два совпадения подряд — это одно название предмета, а не перечисление.
+
+    Разделяют перечисление запятая, союз и точка с запятой; пробел между словами — нет.
+    """
+    gap = fragment[end:start]
+    if len(gap) > 12:
+        return False
+    return not re.search(r"[,;]|\bи\b|\bа также\b|\bплюс\b", gap)
 
 
 def _fuzzy_type(fragment: str, plan: Plan) -> _Match | None:
@@ -263,11 +297,17 @@ def _fuzzy_type(fragment: str, plan: Plan) -> _Match | None:
     return None
 
 
-def _without(fragment: str, match: _Match | None) -> str:
-    """Фраза без того куска, которым опознан тип: по остатку ищется зона."""
-    if match is None:
-        return fragment
-    return fragment[: match.start] + " " + fragment[match.end :]
+def _without(fragment: str, matches: list[_Match]) -> str:
+    """Фраза без тех кусков, которыми опознаны типы: по остатку ищется зона."""
+    result = fragment
+    for match in sorted(matches, key=lambda m: -m.start):
+        result = result[: match.start] + " " + result[match.end :]
+    return result
+
+
+def _count_near(fragment: str, match: _Match) -> int:
+    """Сколько предметов просят именно этого вида: число стоит перед его названием."""
+    return _count(fragment[max(0, match.start - 14) : match.start])
 
 
 def _find_zone(fragment: str, plan: Plan) -> str | None:
@@ -369,80 +409,93 @@ def understand(text: str, plan: Plan) -> Understanding:
         if p.strip(" ?!")
     ]
     for part in parts:
-        action = _understand_part(part, plan)
-        if action is None:
+        actions = _understand_part(part, plan)
+        if not actions:
             result.unknown.append(part)
         else:
-            result.actions.append(action)
+            result.actions.extend(actions)
     return result
 
 
-def _understand_part(part: str, plan: Plan) -> Action | None:
+def _understand_part(part: str, plan: Plan) -> list[Action]:
     near_entrance = any(hint in part for hint in NEAR_ENTRANCE_WORDS)
     near_partition = any(hint in part for hint in NEAR_PARTITION_WORDS)
     near_wall = any(hint in part for hint in NEAR_WALL_WORDS)
-    found = _find_type(part, plan)
+    named = _find_types(part, plan)
+    found = named[0] if named else None
     type_code = found.code if found else None
-    # Зона ищется во фразе без той части, которой опознан тип оборудования: иначе «скамью в
+    # Зона ищется во фразе без тех частей, которыми опознаны типы оборудования: иначе «скамью в
     # зону ожидания» теряет зону, потому что «ожидание» есть и в названии скамьи.
-    zone_id = _find_zone(_without(part, found), plan)
+    zone_id = _find_zone(_without(part, named), plan)
     object_id = _find_object(part, plan)
 
     # Вопрос разбирается раньше команд: «сколько у нас окон» — это не «поставить окно».
     asked = _question(part)
     if asked is not None and not any(
-        word in part for word in ADD_WORDS + REMOVE_WORDS + MOVE_WORDS + ROTATE_WORDS
+        word in part for word in ADD_WORDS + REMOVE_WORDS + MOVE_WORDS + ROTATE_WORDS + LAYOUT_WORDS
     ):
-        return Action(
-            kind="question",
-            question=asked,
-            equipment_type=type_code,
-            object_id=object_id,
-            zone_id=zone_id,
-            text=part,
-        )
-    if any(word in part for word in FIX_WORDS):
-        return Action(kind="fix", text=part)
-    if any(word in part for word in CHECK_WORDS):
-        return Action(kind="check", text=part)
-    if any(word in part for word in REMOVE_WORDS):
-        if object_id or type_code:
-            return Action(kind="remove", object_id=object_id, equipment_type=type_code, text=part)
-        return None
-    if any(word in part for word in ROTATE_WORDS):
-        if object_id or type_code:
-            return Action(
-                kind="rotate",
-                object_id=object_id,
+        return [
+            Action(
+                kind="question",
+                question=asked,
                 equipment_type=type_code,
-                angle=_angle(part),
+                object_id=object_id,
+                zone_id=zone_id,
                 text=part,
             )
-        return None
+        ]
+    # «Расставь» без названий предметов — это «приведи расстановку в порядок».
+    if any(word in part for word in LAYOUT_WORDS) and not named:
+        return [Action(kind="fix", text=part)]
+    if any(word in part for word in FIX_WORDS):
+        return [Action(kind="fix", text=part)]
+    if any(word in part for word in CHECK_WORDS):
+        return [Action(kind="check", text=part)]
+    if any(word in part for word in REMOVE_WORDS):
+        if object_id or type_code:
+            return [Action(kind="remove", object_id=object_id, equipment_type=type_code, text=part)]
+        return []
+    if any(word in part for word in ROTATE_WORDS):
+        if object_id or type_code:
+            return [
+                Action(
+                    kind="rotate",
+                    object_id=object_id,
+                    equipment_type=type_code,
+                    angle=_angle(part),
+                    text=part,
+                )
+            ]
+        return []
     if any(word in part for word in MOVE_WORDS):
         if object_id or type_code:
-            return Action(
-                kind="move",
-                object_id=object_id,
-                equipment_type=type_code,
+            return [
+                Action(
+                    kind="move",
+                    object_id=object_id,
+                    equipment_type=type_code,
+                    zone_id=zone_id,
+                    near_entrance=near_entrance,
+                    near_partition=near_partition,
+                    near_wall=near_wall,
+                    text=part,
+                )
+            ]
+        return []
+    if any(word in part for word in ADD_WORDS + LAYOUT_WORDS) or named:
+        # Перечисление предметов даёт по действию на каждый: «расставь телевизор, окно выдачи
+        # и шкаф» — три поиска места, а не один.
+        return [
+            Action(
+                kind="add",
+                equipment_type=match.code,
                 zone_id=zone_id,
+                count=_count_near(part, match) if len(named) > 1 else _count(part),
                 near_entrance=near_entrance,
                 near_partition=near_partition,
                 near_wall=near_wall,
                 text=part,
             )
-        return None
-    if any(word in part for word in ADD_WORDS) or type_code:
-        if not type_code:
-            return None
-        return Action(
-            kind="add",
-            equipment_type=type_code,
-            zone_id=zone_id,
-            count=_count(part),
-            near_entrance=near_entrance,
-            near_partition=near_partition,
-            near_wall=near_wall,
-            text=part,
-        )
-    return None
+            for match in named
+        ]
+    return []

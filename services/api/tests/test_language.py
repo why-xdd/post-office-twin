@@ -68,6 +68,9 @@ COMMANDS = [
     ("перенеси окно к стене", "move", "cashier_window", {"near_wall": True}),
     ("сколько окон", "question", "cashier_window", {"asked": "count"}),
     ("поставь стол сортировки", "add", "sorting_table", {}),
+    ("поставь окно выдачи", "add", "pvz_counter", {}),
+    ("расставь по нормам", "fix", None, {}),
+    ("поставь телевизор у входа", "add", "media_panel", {"near_entrance": True}),
 ]
 
 # Фразы, которые командой не являются: сервис должен переспросить, а не угадывать.
@@ -135,6 +138,35 @@ def test_where_answer_names_zone_and_place(plan: Plan) -> None:
 def test_check_answers_with_the_current_state(plan: Plan) -> None:
     result = recommend.run_command(plan, "проверь план")
     assert result.answers and "арушен" in result.answers[0]
+
+
+def test_list_of_objects_becomes_a_place_for_each(plan: Plan) -> None:
+    """«Расставь телевизор, окно выдачи, шкаф» — три поиска места, а не одна команда.
+
+    Раньше вся фраза понималась как «исправить нарушения»: слово «расставь» перебивало
+    перечисление, а названия предметов пропадали.
+    """
+    result = language.understand("расставь по офису телевизор, окно выдачи, шкаф в лучших местах", plan)
+    assert [action.kind for action in result.actions] == ["add", "add", "add"]
+    assert [action.equipment_type for action in result.actions] == [
+        "media_panel",
+        "pvz_counter",
+        "storage_rack",
+    ]
+    assert all(action.count == 1 for action in result.actions)
+
+
+def test_count_belongs_to_its_own_object(plan: Plan) -> None:
+    """«Две кассы и три скамьи» — два по два и три по три, а не пять чего-то одного."""
+    result = language.understand("поставь две кассы, три скамьи", plan)
+    counts = {action.equipment_type: action.count for action in result.actions}
+    assert counts == {"cashier_window": 2, "waiting_seat": 3}
+
+
+def test_place_word_without_objects_still_means_fix(plan: Plan) -> None:
+    """«Расставь по нормам» — это привести расстановку в порядок, предметы не названы."""
+    result = language.understand("расставь по нормам", plan)
+    assert [action.kind for action in result.actions] == ["fix"]
 
 
 def test_rotation_keeps_the_place_and_turns_the_object(plan: Plan) -> None:

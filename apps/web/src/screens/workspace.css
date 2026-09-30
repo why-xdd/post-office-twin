@@ -61,11 +61,13 @@
   background: var(--steel-800);
 }
 
+/* Название забирает свободное место рейки и обрезается, только когда его нет */
 .ws-rail__title {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   min-width: 0;
-  max-width: 280px;
+  max-width: 420px;
 }
 
 .ws-rail__name {
@@ -133,7 +135,7 @@
 }
 
 .address input::placeholder {
-  color: var(--steel-500);
+  color: var(--on-steel-3);
 }
 
 .address kbd {
@@ -171,6 +173,66 @@
   color: #f2c1b1;
   font-size: var(--text-12);
   white-space: nowrap;
+}
+
+/* Схема адресов под полем: буква таблички и что она значит */
+.address__legend {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 7;
+  width: 288px;
+  padding: var(--s-3);
+  border-radius: var(--radius-plate);
+  color: var(--ink);
+  background: var(--label);
+  box-shadow: var(--lift-shadow);
+  font-size: var(--text-12);
+  line-height: 1.35;
+  animation: notice-in var(--dur-base) var(--ease-drawer) both;
+}
+
+.address__legend-title {
+  margin-bottom: 6px;
+  font-size: var(--text-13);
+  font-weight: 640;
+}
+
+.address__legend dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px var(--s-3);
+  margin: 0;
+}
+
+.address__legend dl > div {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.address__legend dt {
+  flex: none;
+  min-width: 22px;
+  padding: 0 4px;
+  border: 1px solid var(--ink-3);
+  border-radius: 2px;
+  font-family: var(--font-plate);
+  font-stretch: 70%;
+  font-weight: 680;
+  text-align: center;
+}
+
+.address__legend dd {
+  margin: 0;
+  color: var(--ink-2);
+}
+
+.address__legend-foot {
+  margin-top: var(--s-2);
+  padding-top: 6px;
+  border-top: 1px dashed var(--label-edge);
+  color: var(--ink-2);
 }
 
 /* Переключатель режимов */
@@ -230,10 +292,29 @@
   opacity: 0.35;
 }
 
+/* Ширина одна во всех состояниях: рейка не прыгает после первой правки */
 .ws-rail__save {
   margin-left: var(--s-2);
-  min-width: 172px;
+  min-width: 128px;
   justify-content: center;
+}
+
+.ws-rail .ws-rail__save--saved,
+.ws-rail .ws-rail__save--saved:disabled {
+  color: var(--on-steel-2);
+  background: transparent;
+  box-shadow: none;
+  opacity: 1;
+  font-weight: 500;
+}
+
+.ws-rail__save--saved svg {
+  color: var(--on-steel-3);
+}
+
+.ws-more {
+  position: relative;
+  display: inline-flex;
 }
 
 /* Лист плана */
@@ -381,7 +462,6 @@
   font-weight: 600;
 }
 
-.ws-rail__save-short,
 .ws-rail__library,
 .ws-rail__break {
   display: none;
@@ -453,15 +533,8 @@
 
   .ws-rail__save {
     height: 36px;
+    min-width: 112px;
     font-size: var(--text-12);
-  }
-
-  .ws-rail__save-long {
-    display: none;
-  }
-
-  .ws-rail__save-short {
-    display: inline;
   }
 
   /* Ячеек больше, чем ширины колонки: они прокручиваются, а не сминаются. */
@@ -667,8 +740,17 @@
     padding: 0 6px;
   }
 
-  .ws-rail__title {
-    max-width: 180px;
+  /* Рейка поджимается, чтобы название плана помещалось целиком */
+  .ws-rail {
+    gap: var(--s-3);
+  }
+
+  .address input {
+    width: 64px;
+  }
+
+  .ws-rail .segmented button {
+    padding: 0 10px;
   }
 
   .workspace--review {
@@ -677,6 +759,28 @@
 
   .ws-status__hint {
     display: none;
+  }
+}
+
+/* Узкий настольный экран: вспомогательное уходит, чтобы название плана не схлопывалось */
+@media (min-width: 1024px) and (max-width: 1180px) {
+  .ws-rail__title {
+    min-width: 120px;
+  }
+
+  .ws-rail__back > svg + svg,
+  .address kbd,
+  .address__go {
+    display: none;
+  }
+
+  .ws-rail .segmented button {
+    padding: 0 8px;
+  }
+
+  .ws-rail__save {
+    min-width: 112px;
+    font-size: var(--text-12);
   }
 }
 

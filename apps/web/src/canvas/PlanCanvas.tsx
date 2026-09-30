@@ -667,6 +667,12 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
   // В обзоре коды-адреса не нужны: объекты узнаются по значкам, нарушения — по номерам меток.
   const review = mode === 'review';
   const addressesVisible = labelsVisible && !review;
+  // Таблички адресов раскладываются так, чтобы не налезать друг на друга и на названия зон.
+  const tags = placeTags(doc, view, book, {
+    visible: (item) => addressesVisible || (highlightSet.has(item.id) && !review),
+    zones: layers.zones && labelsVisible ? labelPoints : null,
+    zoneTags: addressesVisible,
+  });
   // В обзоре метки крупные и есть всегда. В редакторе это тихий слой: маленький номер у места
   // нарушения — тот же, что в адресе Н-03 в «Проверке», — который не мешает двигать объекты.
   const design = mode === 'design';
@@ -677,7 +683,7 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
           all: review || layers.findings,
           labelPoints: labelsVisible && layers.zones ? labelPoints : null,
           // Метка не должна закрывать адресные таблички, по которым объект ищут, и ручки выделения.
-          avoid: design ? pinObstacles(doc, view, selection, addressesVisible ? book : null) : [],
+          avoid: design ? pinObstacles(doc, view, selection, [...tags.values()]) : [],
         })
       : [];
 
@@ -923,10 +929,10 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
                   aria-hidden="true"
                 />
               )}
-              {(addressesVisible || (isHighlighted && !review)) && (
+              {tags.has(item.id) && (
                 <AddressTag
-                  x={Math.min(...xs)}
-                  y={Math.min(...ys) - 4}
+                  x={tags.get(item.id)!.x0}
+                  y={tags.get(item.id)!.y1}
                   text={book.byId.get(key('equipment', item.id)) ?? ''}
                   tone={isHighlighted ? 'signal' : 'ink'}
                 />
@@ -1098,12 +1104,71 @@ function rotationHandle(view: View, item: Equipment) {
 const TAG_HEIGHT = 15;
 const tagWidth = (text: string) => 7 * text.length + 8;
 
-/** Где на экране лежит адресная табличка объекта: над его левым верхним углом. */
-function tagBox(view: View, item: Equipment, text: string): Box {
-  const screen = equipmentCorners(item).map((corner) => toScreen(view, corner));
-  const x = Math.min(...screen.map((c) => c[0]));
-  const bottom = Math.min(...screen.map((c) => c[1])) - 4;
-  return { x0: x, y0: bottom - TAG_HEIGHT, x1: x + (text ? tagWidth(text) : 0), y1: bottom };
+interface TagLayout {
+  visible: (item: Equipment) => boolean;
+  /** Точки подписей зон, если подписи видны: таблички объектов их не закрывают. */
+  zones: Map<string, Point> | null;
+  /** Видны ли таблички зон над их названиями. */
+  zoneTags: boolean;
+}
+
+/** Ширина буквы подписи зоны в 12 px: для оценки, какое место название занимает на листе. */
+const ZONE_LABEL_CHAR_PX = 6.6;
+
+/**
+ * Таблички адресов не налезают друг на друга: если над объектом тесно, табличка встаёт над
+ * его правым краем, под ним или сбоку. Объекты обходятся в порядке плана, поэтому при каждой
+ * отрисовке раскладка одна и та же.
+ */
+function placeTags(doc: Plan, view: View, book: AddressBook, layout: TagLayout): Map<string, Box> {
+  const taken: Box[] = [];
+  if (layout.zones) {
+    for (const zone of doc.zones ?? []) {
+      const point = layout.zones.get(zone.id);
+      if (!point) continue;
+      const [lx, ly] = toScreen(view, point);
+      const name = zone.label ?? zone.type;
+      const half = (name.length * ZONE_LABEL_CHAR_PX) / 2;
+      if (layout.zoneTags) {
+        const text = book.byId.get(key('zone', zone.id)) ?? '';
+        taken.push({ x0: lx - 18, y0: ly - 10 - TAG_HEIGHT, x1: lx - 18 + tagWidth(text), y1: ly - 10 });
+        taken.push({ x0: lx - half, y0: ly + 6, x1: lx + half, y1: ly + 21 });
+      } else {
+        taken.push({ x0: lx - half, y0: ly - 8, x1: lx + half, y1: ly + 7 });
+      }
+    }
+  }
+  const placed = new Map<string, Box>();
+  for (const item of doc.equipment ?? []) {
+    if (!layout.visible(item)) continue;
+    const text = book.byId.get(key('equipment', item.id)) ?? '';
+    if (!text) continue;
+    const screen = equipmentCorners(item).map((corner) => toScreen(view, corner));
+    const left = Math.min(...screen.map((c) => c[0]));
+    const right = Math.max(...screen.map((c) => c[0]));
+    const top = Math.min(...screen.map((c) => c[1]));
+    const bottom = Math.max(...screen.map((c) => c[1]));
+    const width = tagWidth(text);
+    const at = (x: number, y: number): Box => ({ x0: x, y0: y, x1: x + width, y1: y + TAG_HEIGHT });
+    const candidates = [
+      at(left, top - 4 - TAG_HEIGHT),
+      at(right - width, top - 4 - TAG_HEIGHT),
+      at(left, bottom + 4),
+      at(right - width, bottom + 4),
+      at(right + 4, top),
+      at(left - width - 4, top),
+    ];
+    const box = candidates.find((candidate) => !taken.some((other) => boxesTouch(candidate, other))) ?? candidates[0];
+    placed.set(item.id, box);
+    taken.push(box);
+  }
+  return placed;
+}
+
+/** Прямоугольники ближе 2 px друг к другу: таблички читаются только с просветом. */
+function boxesTouch(a: Box, b: Box): boolean {
+  const gap = 2;
+  return a.x0 < b.x1 + gap && b.x0 < a.x1 + gap && a.y0 < b.y1 + gap && b.y0 < a.y1 + gap;
 }
 
 function AddressTag({ x, y, text, tone }: { x: number; y: number; text: string; tone: 'ink' | 'signal' | 'steel' }) {
@@ -1329,11 +1394,9 @@ function placePins(doc: Plan, report: ValidationReport, active: number | null, v
   return pins.sort((a, b) => Number(a.active) - Number(b.active));
 }
 
-/** Таблички всех объектов (если адреса видны) и ручка поворота с размером у выделенного. */
-function pinObstacles(doc: Plan, view: View, selection: Selection | null, book: AddressBook | null): Box[] {
-  const boxes: Box[] = book
-    ? (doc.equipment ?? []).map((item) => tagBox(view, item, book.byId.get(key('equipment', item.id)) ?? ''))
-    : [];
+/** Таблички адресов на листе и ручка поворота с подписью размера у выделенного объекта. */
+function pinObstacles(doc: Plan, view: View, selection: Selection | null, tags: Box[]): Box[] {
+  const boxes: Box[] = [...tags];
   const selected = selection?.kind === 'equipment' ? doc.equipment?.find((e) => e.id === selection.id) : undefined;
   if (selected) {
     const { base, knob } = rotationHandle(view, selected);

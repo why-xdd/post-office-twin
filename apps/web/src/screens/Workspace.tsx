@@ -12,12 +12,14 @@ import {
   ArrowLeft,
   Box,
   Boxes,
+  Check,
   ChevronDown,
   ClipboardList,
   CornerDownLeft,
-  Download,
+  Ellipsis,
+  FileJson,
   IdCard,
-  Image,
+  ImageDown,
   Keyboard,
   ListChecks,
   LoaderCircle,
@@ -44,7 +46,8 @@ import {
 } from 'react';
 import { PlanCanvas, type Layers } from '../canvas/PlanCanvas';
 import { Mark } from '../components/Mark';
-import { ADDRESS_KIND_LABEL, buildAddressBook, parseAddress } from '../lib/addresses';
+import { MoreMenu } from '../components/MoreMenu';
+import { ADDRESS_KIND_LABEL, ADDRESS_PREFIX, buildAddressBook, parseAddress, type AddressKind } from '../lib/addresses';
 import { ApiError, api, type PlanVersion } from '../lib/api';
 import type { View } from '../lib/geometry';
 import type { EquipmentTypeInfo, Point, Rule, ZoneTypeInfo } from '../lib/plan';
@@ -96,6 +99,18 @@ const HOTKEYS: [string, string][] = [
   ['F', 'вписать план в экран'],
   ['/', 'перейти по адресу'],
   ['Esc', 'отменить действие, снять выделение'],
+];
+
+/** Схема адресов: что значит буква на табличке. Показывается под полем «Адрес», пока оно в фокусе. */
+const ADDRESS_LEGEND: [AddressKind, string][] = [
+  ['equipment', 'объект'],
+  ['zone', 'зона'],
+  ['wall', 'стена'],
+  ['door', 'дверь'],
+  ['window', 'окно'],
+  ['finding', 'нарушение'],
+  ['recommendation', 'рекомендация'],
+  ['rule', 'пункт нормы'],
 ];
 
 // Значки нижней планки: на узком экране подпись коротка, и знак помогает найти нужное быстрее.
@@ -168,7 +183,10 @@ export function Workspace({ planId }: WorkspaceProps) {
   const [leaving, setLeaving] = useState(false);
   const [draft, setDraft] = useState<{ savedAt: number } | null>(null);
   const [hotkeys, setHotkeys] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [addressFocus, setAddressFocus] = useState(false);
   const addressInput = useRef<HTMLInputElement>(null);
+  const more = useRef<HTMLDivElement>(null);
 
   // Загрузка плана
   useEffect(() => {
@@ -360,6 +378,7 @@ export function Workspace({ planId }: WorkspaceProps) {
       }
       if (event.key === 'Escape') {
         setHotkeys(false);
+        setMoreOpen(false);
         setLeaving(false);
         state.setActiveFinding(null);
         state.highlight([]);
@@ -552,7 +571,9 @@ export function Workspace({ planId }: WorkspaceProps) {
         </button>
 
         <div className="ws-rail__title">
-          <span className="ws-rail__name">{doc.ops.name || title}</span>
+          <span className="ws-rail__name" title={doc.ops.name || title}>
+            {doc.ops.name || title}
+          </span>
           <button
             type="button"
             className="ws-rail__version"
@@ -606,7 +627,15 @@ export function Workspace({ planId }: WorkspaceProps) {
         </div>
 
         {!review && (
-          <form className={`address${addressError ? ' address--error' : ''}`} onSubmit={goToAddress} role="search">
+          <form
+            className={`address${addressError ? ' address--error' : ''}`}
+            onSubmit={goToAddress}
+            role="search"
+            onFocus={() => setAddressFocus(true)}
+            onBlur={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setAddressFocus(false);
+            }}
+          >
             <label htmlFor="address-input" className="address__label">
               Адрес
             </label>
@@ -617,7 +646,7 @@ export function Workspace({ planId }: WorkspaceProps) {
               placeholder="О-07"
               autoComplete="off"
               spellCheck={false}
-              aria-describedby="address-hint"
+              aria-describedby={addressFocus && !addressError ? 'address-hint address-legend' : 'address-hint'}
               onChange={(event) => {
                 setAddressText(event.target.value);
                 setAddressError(null);
@@ -630,6 +659,20 @@ export function Workspace({ planId }: WorkspaceProps) {
             <span id="address-hint" className="address__hint" role="status">
               {addressError ?? ''}
             </span>
+            {addressFocus && !addressError && (
+              <div id="address-legend" className="address__legend">
+                <p className="address__legend-title">Буква на табличке — что это</p>
+                <dl>
+                  {ADDRESS_LEGEND.map(([kind, what]) => (
+                    <div key={kind}>
+                      <dt>{ADDRESS_PREFIX[kind]}</dt>
+                      <dd>{what}</dd>
+                    </div>
+                  ))}
+                </dl>
+                <p className="address__legend-foot">Например, О-07 — седьмой объект. Enter — показать на плане.</p>
+              </div>
+            )}
           </form>
         )}
 
@@ -692,41 +735,79 @@ export function Workspace({ planId }: WorkspaceProps) {
                 <Maximize size={17} aria-hidden="true" />
                 <span className="visually-hidden">Вписать план</span>
               </button>
-              <button
-                type="button"
-                className="icon-btn"
-                onClick={() => {
-                  downloadJson(doc.ops.name || title, doc);
-                  setNotice('План сохранён файлом в загрузки');
-                }}
-                title="Скачать план файлом JSON"
-              >
-                <Download size={17} aria-hidden="true" />
-                <span className="visually-hidden">Скачать план</span>
-              </button>
-              <button
-                type="button"
-                className="icon-btn"
-                onClick={() => {
-                  downloadPlanSvg(doc);
-                  setNotice('Чертёж сохранён файлом SVG в загрузки');
-                }}
-                title="Скачать чертёж картинкой SVG"
-              >
-                <Image size={17} aria-hidden="true" />
-                <span className="visually-hidden">Скачать чертёж</span>
-              </button>
-              <button type="button" className="icon-btn" onClick={() => setHotkeys((open) => !open)} title="Клавиши — ?">
-                <Keyboard size={17} aria-hidden="true" />
-                <span className="visually-hidden">Горячие клавиши</span>
-              </button>
+              <div className="ws-more" ref={more}>
+                <button
+                  type="button"
+                  className="icon-btn"
+                  aria-haspopup="menu"
+                  aria-expanded={moreOpen}
+                  aria-controls="ws-more-menu"
+                  onClick={() => setMoreOpen((open) => !open)}
+                  title="Ещё: скачать план, клавиши"
+                >
+                  <Ellipsis size={17} aria-hidden="true" />
+                  <span className="visually-hidden">Ещё</span>
+                </button>
+                {moreOpen && (
+                  <MoreMenu
+                    id="ws-more-menu"
+                    onClose={(refocus) => {
+                      setMoreOpen(false);
+                      if (refocus) more.current?.querySelector<HTMLButtonElement>('.icon-btn')?.focus();
+                    }}
+                    container={more}
+                    items={[
+                      {
+                        icon: <FileJson size={16} aria-hidden="true" />,
+                        label: 'Скачать план',
+                        note: 'JSON',
+                        run: () => {
+                          downloadJson(doc.ops.name || title, doc);
+                          setNotice('План сохранён файлом в загрузки');
+                        },
+                      },
+                      {
+                        icon: <ImageDown size={16} aria-hidden="true" />,
+                        label: 'Скачать чертёж',
+                        note: 'SVG',
+                        run: () => {
+                          downloadPlanSvg(doc);
+                          setNotice('Чертёж сохранён файлом SVG в загрузки');
+                        },
+                      },
+                      // Клавиши нужны там, где есть клавиатура: на телефоне пункт только мешает.
+                      ...(touch
+                        ? []
+                        : [
+                            {
+                              icon: <Keyboard size={16} aria-hidden="true" />,
+                              label: 'Горячие клавиши',
+                              note: '?',
+                              run: () => setHotkeys(true),
+                            },
+                          ]),
+                    ]}
+                  />
+                )}
+              </div>
             </>
           )}
-          <button type="button" className="btn btn--label ws-rail__save" onClick={() => void save()} disabled={saving || !dirty}>
-            {saving ? <LoaderCircle size={16} className="spin" aria-hidden="true" /> : <Save size={16} aria-hidden="true" />}
-            {/* На узком экране подпись короче: место в первой строке нужно названию плана. */}
-            <span className="ws-rail__save-long">{dirty ? 'Сохранить версию' : 'Сохранено'}</span>
-            <span className="ws-rail__save-short">{dirty ? 'Сохранить' : 'Сохранено'}</span>
+          {/* Сохранённое состояние — тихая строка, а не кнопка: действие появляется, когда есть что сохранять. */}
+          <button
+            type="button"
+            className={`btn ws-rail__save${dirty || saving ? ' btn--label' : ' ws-rail__save--saved'}`}
+            onClick={() => void save()}
+            disabled={saving || !dirty}
+            title={dirty ? 'Сохранить версию — Ctrl+S' : 'Все изменения сохранены'}
+          >
+            {saving ? (
+              <LoaderCircle size={16} className="spin" aria-hidden="true" />
+            ) : dirty ? (
+              <Save size={16} aria-hidden="true" />
+            ) : (
+              <Check size={16} aria-hidden="true" />
+            )}
+            {saving ? 'Сохраняем' : dirty ? 'Сохранить' : 'Сохранено'}
           </button>
         </div>
       </header>

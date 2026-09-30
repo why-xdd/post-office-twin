@@ -140,6 +140,11 @@
   background: var(--steel-700);
 }
 
+/* На подсвеченной строке третичный цвет теряет контраст: размер берёт вторичный */
+.item:hover .item__size {
+  color: var(--on-steel-2);
+}
+
 .item--active,
 .item--active:hover {
   color: var(--ink);

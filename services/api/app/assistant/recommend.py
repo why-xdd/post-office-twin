@@ -21,6 +21,7 @@ from shapely.geometry import Point as ShapelyPoint
 
 from app.assistant import capacity as capacity_model
 from app.assistant import language
+from app.assistant import llm
 from app.assistant import objective
 from app.assistant import completeness as completeness_model
 from app.assistant import search
@@ -1312,9 +1313,14 @@ def _move_recommendation(plan: Plan, action: language.Action) -> Recommendation 
 
 
 def run_command(plan: Plan, text: str) -> CommandResult:
-    """Выполняет команду словами: разбирает фразу и готовит рекомендации с предпросмотром."""
+    """Выполняет команду словами: разбирает фразу и готовит рекомендации с предпросмотром.
+
+    Фразу разбирает языковая модель, если она подключена (см. `llm.py`), иначе — словарный
+    разбор. Что бы ни разобрало фразу, места и последствия считает один и тот же расчёт, а
+    ответ говорит, чем именно она разобрана.
+    """
     started = time.perf_counter()
-    understanding = language.understand(text, plan)
+    understanding = llm.understand(text, plan) or language.understand(text, plan)
 
     result = CommandResult(understood=[], unknown=list(understanding.unknown), source=understanding.source)
     current = plan

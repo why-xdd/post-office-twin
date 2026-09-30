@@ -32,6 +32,15 @@ from app.rules.catalog import rules_by_id
 from app.assistant import accelerator, objective
 from app.rules.engine import SERVICE_WINDOW_TYPES, VISITOR_TARGET_TYPES, validate
 
+@dataclass(frozen=True)
+class Near:
+    """Где должен стоять объект по просьбе человека: у какой геометрии и не дальше скольки метров."""
+
+    shape: object
+    distance_m: float
+    words: str
+
+
 GRID_STEP = 0.25
 DEFAULT_TOP_K = 24
 WALL_MOUNT_TOLERANCE = 0.15
@@ -532,6 +541,7 @@ def generate(
     exclude: set[str] | None = None,
     step: float = GRID_STEP,
     prefer_near: tuple[float, float] | None = None,
+    near: "Near | None" = None,
 ) -> tuple[list[Candidate], int]:
     """Кандидаты, прошедшие быстрый фильтр, и общее число сгенерированных позиций."""
     types = equipment_types(plan)
@@ -608,6 +618,9 @@ def generate(
         probe = Equipment(id="__candidate__", type=type_code, position=(x, y), size_m=size, rotation_deg=rotation)
         poly = core.equipment_polygon(probe)
         if not prepared_region.contains(poly):
+            return None
+        # «У перегородки», «у входа», «у стены» — не пожелание, а условие места.
+        if near is not None and poly.distance(near.shape) > near.distance_m:
             return None
         if type_def.floor_object:
             if tree is not None:
@@ -755,6 +768,7 @@ def place(
     keep: int = 3,
     ranker: Ranker | None = None,
     prefer_near: tuple[float, float] | None = None,
+    near: "Near | None" = None,
 ) -> SearchResult:
     """Лучшие позиции для нового объекта или для перемещения существующего (template)."""
     started = time.perf_counter()
@@ -767,7 +781,13 @@ def place(
     baseline_errors = validate(plan, explain=False).errors
 
     candidates, generated = generate(
-        base_plan, type_code, size or (template.size_m if template else None), zone_id, exclude, prefer_near=prefer_near
+        base_plan,
+        type_code,
+        size or (template.size_m if template else None),
+        zone_id,
+        exclude,
+        prefer_near=prefer_near,
+        near=near,
     )
     passed = len(candidates)
     ordered = ranker(candidates) if ranker is not None else _prioritise(candidates, with_quality=template is None)

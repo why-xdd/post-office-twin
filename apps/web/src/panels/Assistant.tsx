@@ -71,6 +71,8 @@ export function Assistant({ book, types, onFocusObject, onNotice }: AssistantPro
   const [job, setJob] = useState<Job>(null);
   const [error, setError] = useState<string | null>(null);
   const [recommendations, setRecommendations] = useState<Recommendation[] | null>(null);
+  // Откуда список: ответ на команду показывается прямо под полем ввода, подбор — ниже кнопок.
+  const [recsFrom, setRecsFrom] = useState<'command' | 'advise'>('advise');
   const [capacity, setCapacity] = useState<CapacityReport | null>(null);
   const [improvement, setImprovement] = useState<ImprovementReport | null>(null);
   // Подбор остановлен по времени: об этом нужно сказать, иначе список выглядит полным.
@@ -122,6 +124,7 @@ export function Assistant({ book, types, onFocusObject, onNotice }: AssistantPro
   const advise = () =>
     run('advise', () => api.assistant(doc!), (result) => {
       setRecommendations(result.recommendations);
+      setRecsFrom('advise');
       setCapacity(result.capacity);
       setImprovement(null);
       setPartial(Boolean(result.partial));
@@ -139,6 +142,7 @@ export function Assistant({ book, types, onFocusObject, onNotice }: AssistantPro
       setCommandResult(result);
       // Рекомендации команды показываются тем же списком: у них та же карточка и то же «Принять».
       setRecommendations(result.recommendations);
+      setRecsFrom('command');
       setImprovement(null);
       setPartial(false);
     });
@@ -178,6 +182,44 @@ export function Assistant({ book, types, onFocusObject, onNotice }: AssistantPro
 
   const typeOptions = types.filter((t) => t.floor_object).map((t) => ({ value: t.code, label: t.label }));
 
+  const recommendationList = recommendations && (
+    <section className="assistant__section">
+          <header className="assistant__section-head">
+            <h3>Рекомендации</h3>
+            <span>
+              {recommendations.length} {plural(recommendations.length, 'рекомендация', 'рекомендации', 'рекомендаций')}
+            </span>
+          </header>
+          {partial && recommendations.length > 0 && (
+            <p className="assistant__stale">
+              Подбор остановлен по отведённому времени: показано то, что сервис успел найти. Это
+              бывает на очень больших залах — важные рекомендации считаются первыми.
+            </p>
+          )}
+          {recommendations.length === 0 ? (
+            <p className="assistant__empty">Рекомендаций нет: ошибок проверки нет, комплектность и пропускная способность в норме.</p>
+          ) : (
+            <ol className="recs">
+              {recommendations.map((rec, index) => {
+                const address = formatAddress('recommendation', index);
+                return (
+                  <RecommendationCard
+                    key={rec.id}
+                    address={address}
+                    rec={rec}
+                    book={book}
+                    previewing={previewId === rec.id}
+                    onPreview={() => togglePreview(rec.id, rec.changes)}
+                    onAccept={() => accept(address, rec.changes)}
+                    onObjects={(ids) => highlight(ids)}
+                  />
+                );
+              })}
+            </ol>
+          )}
+        </section>
+  );
+
   return (
     <div className="assistant">
       <section className="assistant__intro">
@@ -198,7 +240,7 @@ export function Assistant({ book, types, onFocusObject, onNotice }: AssistantPro
             <input
               id="assistant-command"
               value={command}
-              placeholder="поставь две кассы у перегородки"
+              placeholder="поставь почтовый ящик у входа"
               onChange={(event) => setCommand(event.target.value)}
               disabled={job !== null}
             />
@@ -212,17 +254,6 @@ export function Assistant({ book, types, onFocusObject, onNotice }: AssistantPro
             свободная площадь». План меняется только после «Принять».
           </p>
         </form>
-
-        <div className="assistant__run">
-          <button type="button" className="btn btn--steel-light" onClick={advise} disabled={job !== null || !doc}>
-            {job === 'advise' ? <LoaderCircle size={16} className="spin" aria-hidden="true" /> : <Sparkles size={16} aria-hidden="true" />}
-            Подобрать рекомендации
-          </button>
-          <button type="button" className="btn btn--outline" onClick={improve} disabled={job !== null || !doc}>
-            {job === 'improve' ? <LoaderCircle size={16} className="spin" aria-hidden="true" /> : <ArrowRight size={16} aria-hidden="true" />}
-            Улучшить пошагово
-          </button>
-        </div>
         {commandResult && (
           <div className="assistant__understood">
             {commandResult.understood.length > 0 && (
@@ -241,6 +272,18 @@ export function Assistant({ book, types, onFocusObject, onNotice }: AssistantPro
             )}
           </div>
         )}
+        {recsFrom === 'command' && recommendationList}
+
+        <div className="assistant__run">
+          <button type="button" className="btn btn--steel-light" onClick={advise} disabled={job !== null || !doc}>
+            {job === 'advise' ? <LoaderCircle size={16} className="spin" aria-hidden="true" /> : <Sparkles size={16} aria-hidden="true" />}
+            Подобрать рекомендации
+          </button>
+          <button type="button" className="btn btn--outline" onClick={improve} disabled={job !== null || !doc}>
+            {job === 'improve' ? <LoaderCircle size={16} className="spin" aria-hidden="true" /> : <ArrowRight size={16} aria-hidden="true" />}
+            Улучшить пошагово
+          </button>
+        </div>
         {job && (
           <p className="assistant__working" role="status">
             {job === 'improve'
@@ -261,41 +304,6 @@ export function Assistant({ book, types, onFocusObject, onNotice }: AssistantPro
               Пересчитать
             </button>
           </p>
-        )}
-      </section>
-
-      <section className="assistant__section">
-        <div className="assistant__section-head">
-          <h3>
-            <FileText size={15} aria-hidden="true" /> Заключение по плану
-          </h3>
-        </div>
-        <p className="assistant__hint">
-          Связный текст для сдачи: что проверено, что нарушено, что предлагается и каким будет эффект. Все числа берутся
-          из отчёта проверки.
-        </p>
-        <button type="button" className="btn btn--outline" onClick={buildConclusion} disabled={job !== null || !doc}>
-          {job === 'conclusion' ? <LoaderCircle size={16} className="spin" aria-hidden="true" /> : <FileText size={16} aria-hidden="true" />}
-          Собрать заключение
-        </button>
-        {conclusion && (
-          <div className="conclusion">
-            <p className="conclusion__text">{conclusion.text}</p>
-            <div className="conclusion__foot">
-              <span>Собрано по расчётам плана</span>
-              <button
-                type="button"
-                className="btn btn--outline"
-                onClick={() => {
-                  void navigator.clipboard?.writeText(conclusion.text);
-                  onNotice('Заключение скопировано');
-                }}
-              >
-                <Copy size={14} aria-hidden="true" />
-                Скопировать
-              </button>
-            </div>
-          </div>
         )}
       </section>
 
@@ -348,79 +356,85 @@ export function Assistant({ book, types, onFocusObject, onNotice }: AssistantPro
         </section>
       )}
 
-      {recommendations && (
-        <section className="assistant__section">
-          <header className="assistant__section-head">
-            <h3>Рекомендации</h3>
-            <span>
-              {recommendations.length} {plural(recommendations.length, 'рекомендация', 'рекомендации', 'рекомендаций')}
-            </span>
-          </header>
-          {partial && recommendations.length > 0 && (
-            <p className="assistant__stale">
-              Подбор остановлен по отведённому времени: показано то, что сервис успел найти. Это
-              бывает на очень больших залах — важные рекомендации считаются первыми.
-            </p>
-          )}
-          {recommendations.length === 0 ? (
-            <p className="assistant__empty">Рекомендаций нет: ошибок проверки нет, комплектность и пропускная способность в норме.</p>
-          ) : (
-            <ol className="recs">
-              {recommendations.map((rec, index) => {
-                const address = formatAddress('recommendation', index);
-                return (
-                  <RecommendationCard
-                    key={rec.id}
-                    address={address}
-                    rec={rec}
-                    book={book}
-                    previewing={previewId === rec.id}
-                    onPreview={() => togglePreview(rec.id, rec.changes)}
-                    onAccept={() => accept(address, rec.changes)}
-                    onObjects={(ids) => highlight(ids)}
-                  />
-                );
-              })}
-            </ol>
-          )}
-        </section>
-      )}
+      {recsFrom === 'advise' && recommendationList}
 
       {capacity && <CapacityBlock capacity={capacity} />}
 
-      {doc && <QueueLog doc={doc} />}
-
-      <section className="assistant__section">
-        <header className="assistant__section-head">
-          <h3>Найти место для объекта</h3>
-        </header>
-        <p className="assistant__hint">
-          Ассистент переберёт позиции в допустимых для типа зонах и оставит те, где объект не нарушает ни одной нормы.
-        </p>
-        <div className="assistant__place">
-          <SelectField label="Что поставить" wide value={placeType} options={typeOptions} onCommit={setPlaceType} />
-          <button type="button" className="btn btn--steel-light" onClick={place} disabled={job !== null}>
-            {job === 'place' ? <LoaderCircle size={16} className="spin" aria-hidden="true" /> : <MapPinned size={16} aria-hidden="true" />}
-            Найти место
+      {/* Редкие инструменты свёрнуты: на экране одно решение за раз — команда и подбор. */}
+      <details className="assistant__more">
+        <summary>
+          Ещё: заключение для сдачи, место для объекта, журнал очереди
+          <ChevronDown size={15} aria-hidden="true" />
+        </summary>
+        <section className="assistant__section">
+          <div className="assistant__section-head">
+            <h3>
+              <FileText size={15} aria-hidden="true" /> Заключение по плану
+            </h3>
+          </div>
+          <p className="assistant__hint">
+            Связный текст для сдачи: что проверено, что нарушено, что предлагается и каким будет эффект. Все числа берутся
+            из отчёта проверки.
+          </p>
+          <button type="button" className="btn btn--outline" onClick={buildConclusion} disabled={job !== null || !doc}>
+            {job === 'conclusion' ? <LoaderCircle size={16} className="spin" aria-hidden="true" /> : <FileText size={16} aria-hidden="true" />}
+            Собрать заключение
           </button>
-        </div>
-        {placeResult && (
-          <ol className="recs">
-            <RecommendationCard
-              address="Р-М"
-              rec={placeResult}
-              book={book}
-              previewing={previewId === 'place'}
-              onPreview={() => togglePreview('place', placeResult.changes)}
-              onAccept={() => {
-                accept('по размещению', placeResult.changes);
-                setPlaceResult(null);
-              }}
-              onObjects={(ids) => highlight(ids)}
-            />
-          </ol>
-        )}
-      </section>
+          {conclusion && (
+            <div className="conclusion">
+              <p className="conclusion__text">{conclusion.text}</p>
+              <div className="conclusion__foot">
+                <span>Собрано по расчётам плана</span>
+                <button
+                  type="button"
+                  className="btn btn--outline"
+                  onClick={() => {
+                    void navigator.clipboard?.writeText(conclusion.text);
+                    onNotice('Заключение скопировано');
+                  }}
+                >
+                  <Copy size={14} aria-hidden="true" />
+                  Скопировать
+                </button>
+              </div>
+            </div>
+          )}
+        </section>
+
+        {doc && <QueueLog doc={doc} />}
+
+        <section className="assistant__section">
+          <header className="assistant__section-head">
+            <h3>Найти место для объекта</h3>
+          </header>
+          <p className="assistant__hint">
+            Ассистент переберёт позиции в допустимых для типа зонах и оставит те, где объект не нарушает ни одной нормы.
+          </p>
+          <div className="assistant__place">
+            <SelectField label="Что поставить" wide value={placeType} options={typeOptions} onCommit={setPlaceType} />
+            <button type="button" className="btn btn--steel-light" onClick={place} disabled={job !== null}>
+              {job === 'place' ? <LoaderCircle size={16} className="spin" aria-hidden="true" /> : <MapPinned size={16} aria-hidden="true" />}
+              Найти место
+            </button>
+          </div>
+          {placeResult && (
+            <ol className="recs">
+              <RecommendationCard
+                address="Р-М"
+                rec={placeResult}
+                book={book}
+                previewing={previewId === 'place'}
+                onPreview={() => togglePreview('place', placeResult.changes)}
+                onAccept={() => {
+                  accept('по размещению', placeResult.changes);
+                  setPlaceResult(null);
+                }}
+                onObjects={(ids) => highlight(ids)}
+              />
+            </ol>
+          )}
+        </section>
+      </details>
     </div>
   );
 }

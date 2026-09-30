@@ -14,6 +14,15 @@ export interface Shift {
   after: number;
 }
 
+/** Почему объект переезжает: какие нормы снимает перенос и насколько далеко он едет. */
+export interface ProposalRow {
+  objectId: string;
+  /** На сколько метров переезжает объект. */
+  distance: number | null;
+  /** Основания: документ и пункт нормы, которые перенос выполняет. */
+  bases: string[];
+}
+
 export interface FixProposal {
   changes: RecommendationChange[];
   errorsBefore: number;
@@ -21,6 +30,9 @@ export interface FixProposal {
   entrance: Shift | null;
   waiting: Shift | null;
   movedObjects: string[];
+  rows: ProposalRow[];
+  warnings: Shift | null;
+  assumptions: string[];
 }
 
 const CACHE_LIMIT = 6;
@@ -49,9 +61,36 @@ function shift(report: ImprovementReport, key: string): Shift | null {
   return { before, after };
 }
 
+function toRows(report: ImprovementReport, changes: RecommendationChange[]): ProposalRow[] {
+  const bases = new Map<string, Set<string>>();
+  for (const step of report.steps) {
+    const found = step.recommendation.reasons
+      .filter((reason) => reason.source)
+      .map((reason) => `${reason.source}${reason.clause ? `, ${reason.clause}` : ''}`);
+    for (const change of step.recommendation.changes) {
+      const known = bases.get(change.object_id) ?? new Set<string>();
+      found.forEach((basis) => known.add(basis));
+      bases.set(change.object_id, known);
+    }
+  }
+  return changes.map((change) => {
+    const from = change.previous_position;
+    const to = change.position;
+    return {
+      objectId: change.object_id,
+      distance: from && to ? Math.hypot(to[0] - from[0], to[1] - from[1]) : null,
+      bases: [...(bases.get(change.object_id) ?? [])],
+    };
+  });
+}
+
 function toProposal(report: ImprovementReport): FixProposal {
   const changes = mergeSteps(report);
+  const assumptions = new Set(report.steps.flatMap((step) => step.recommendation.assumptions));
   return {
+    rows: toRows(report, changes),
+    warnings: shift(report, 'warnings'),
+    assumptions: [...assumptions],
     changes,
     errorsBefore: Number(report.initial.errors ?? 0),
     errorsAfter: Number(report.final.errors ?? 0),

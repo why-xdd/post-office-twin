@@ -12,7 +12,7 @@ import { ApiError } from '../lib/api';
 import { precomputeFix, proposeFix, type FixProposal, type Shift } from '../lib/fixProposal';
 import { humanize } from '../lib/humanize';
 import type { Finding } from '../lib/plan';
-import { objectName, plainFinding } from '../lib/plainFindings';
+import { isNormFinding, objectName, plainFinding } from '../lib/plainFindings';
 import { formatNumber, plural } from '../lib/planFacts';
 import { useWorkspace } from '../state/store';
 import './review.css';
@@ -22,6 +22,8 @@ interface ReviewProps {
   saving: boolean;
   onSave: () => void;
   onFocusObject: (id: string) => void;
+  /** Вписать весь план в экран: предпросмотр исправления должен быть виден целиком. */
+  onFit: () => void;
   onNotice: (text: string) => void;
 }
 
@@ -35,7 +37,7 @@ type FixState =
  *  Пауза заметно длиннее одного перетаскивания: пока объект двигают, считать нечего. */
 const PRECOMPUTE_DELAY_MS = 1200;
 
-export function Review({ book, saving, onSave, onFocusObject, onNotice }: ReviewProps) {
+export function Review({ book, saving, onSave, onFocusObject, onFit, onNotice }: ReviewProps) {
   const doc = useWorkspace((s) => s.doc);
   const report = useWorkspace((s) => s.report);
   const reportState = useWorkspace((s) => s.reportState);
@@ -55,6 +57,9 @@ export function Review({ book, saving, onSave, onFocusObject, onNotice }: Review
   const listRef = useRef<HTMLOListElement>(null);
 
   const errors = useMemo(() => (report?.findings ?? []).filter((f) => f.severity === 'error'), [report]);
+  // Нормы и данные плана — разное: пересечение объектов не нарушает ВНТП, это ошибка расстановки.
+  const normErrors = errors.filter(isNormFinding).length;
+  const dataErrors = errors.length - normErrors;
   const notes = useMemo(() => (report?.findings ?? []).filter((f) => f.severity !== 'error'), [report]);
 
   // Расчёт исправления заранее, как только видно, что исправлять есть что.
@@ -102,6 +107,7 @@ export function Review({ book, saving, onSave, onFocusObject, onNotice }: Review
     setActive(null);
     highlight([]);
     setPreview(proposal.changes);
+    onFit();
     setFix({ kind: 'shown', proposal });
   };
 
@@ -184,18 +190,37 @@ export function Review({ book, saving, onSave, onFocusObject, onNotice }: Review
             <div>
               <h2>Нарушений нет</h2>
               <p>
+                {/* Замечания после исправления остаются — сказать «всё в порядке» над ними нечестно. */}
                 {fixed
-                  ? `Исправлено ${fixed.before} ${plural(fixed.before, 'нарушение', 'нарушения', 'нарушений')}. План соответствует нормам.`
-                  : `План проверен по ${report.checked_rules.length} ${plural(report.checked_rules.length, 'правилу', 'правилам', 'правилам')} — всё в порядке.`}
+                  ? `Исправлено ${fixed.before} ${plural(fixed.before, 'нарушение', 'нарушения', 'нарушений')}. `
+                  : `План проверен по ${report.checked_rules.length} ${plural(report.checked_rules.length, 'правилу', 'правилам', 'правилам')}. `}
+                {notes.length
+                  ? `Ошибок по нормам нет; ${notes.length} ${plural(notes.length, 'замечание', 'замечания', 'замечаний')} — допустимо, но стоит посмотреть.`
+                  : 'План соответствует нормам.'}
               </p>
             </div>
           </>
         ) : (
           <div>
             <h2>
-              <span className="review__count">{report.errors}</span>{' '}
-              {plural(report.errors, 'нарушение', 'нарушения', 'нарушений')} норм
+              {normErrors > 0 ? (
+                <>
+                  <span className="review__count">{normErrors}</span>{' '}
+                  {plural(normErrors, 'нарушение', 'нарушения', 'нарушений')} норм
+                </>
+              ) : (
+                <>
+                  <span className="review__count">{dataErrors}</span>{' '}
+                  {plural(dataErrors, 'ошибка', 'ошибки', 'ошибок')} в данных плана
+                </>
+              )}
             </h2>
+            {normErrors > 0 && dataErrors > 0 && (
+              <p className="review__data">
+                и {dataErrors} {plural(dataErrors, 'ошибка', 'ошибки', 'ошибок')} в данных плана: объекты
+                пересекаются или выходят за стены — это не норма, а неверная расстановка.
+              </p>
+            )}
             <p>Номера в списке совпадают с метками на плане. Нажмите на пункт, чтобы увидеть подробности.</p>
           </div>
         )}
@@ -370,8 +395,31 @@ function ProposalCard({ proposal, onApply, onCancel }: { proposal: FixProposal; 
         <ShiftRow label="Нарушений" shift={{ before: proposal.errorsBefore, after: proposal.errorsAfter }} better="down" />
         {proposal.entrance && <ShiftRow label="Проход от входа" shift={proposal.entrance} unit="м" better="up" />}
         {proposal.waiting && <ShiftRow label="Мест в зоне ожидания" shift={proposal.waiting} better="up" />}
+        {proposal.warnings && <ShiftRow label="Замечаний" shift={proposal.warnings} better="down" />}
       </dl>
-      <p className="proposal__objects">{names.join(', ')}</p>
+      {/* Почему переезжает каждый объект: цепочка решения видна до «Применить». */}
+      <ul className="proposal__rows">
+        {proposal.rows.map((row, index) => (
+          <li key={row.objectId}>
+            <b>{names[index]}</b>
+            {row.distance !== null && <span> — на {formatNumber(row.distance, 1)} м</span>}
+            {row.bases.length > 0 && <span className="proposal__basis">{row.bases.join(' · ')}</span>}
+          </li>
+        ))}
+      </ul>
+      {proposal.assumptions.length > 0 && (
+        <details className="rec__assumptions">
+          <summary>
+            Допущения: {proposal.assumptions.length}
+            <ChevronDown size={14} aria-hidden="true" />
+          </summary>
+          <ul>
+            {proposal.assumptions.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        </details>
+      )}
       <div className="proposal__actions">
         <button type="button" className="btn btn--brass" onClick={onApply}>
           <Check size={17} aria-hidden="true" />

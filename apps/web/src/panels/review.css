@@ -358,3 +358,20 @@
 .proposal__actions .btn--outline {
   min-height: 46px;
 }
+
+/* Основания переноса: документ и пункт нормы под каждым объектом */
+.proposal__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: var(--s-2) 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-13);
+}
+
+.proposal__basis {
+  display: block;
+  color: var(--ink-3);
+  font-size: var(--text-12);
+}

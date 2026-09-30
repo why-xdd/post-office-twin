@@ -17,7 +17,9 @@ import time
 from typing import Any
 
 from pydantic import BaseModel, Field
+from shapely.geometry import LineString
 from shapely.geometry import Point as ShapelyPoint
+from shapely.ops import unary_union
 
 from app.assistant import capacity as capacity_model
 from app.assistant import language
@@ -589,7 +591,7 @@ def recommend_completeness(
                     priority=2,
                     title=f"Убрать лишнее: {label}",
                     summary=f"Сверх нормы комплектования: {', '.join(issue.objects)}. "
-                    f"Освобождается {round((after['free_area'] or 0) - (before['free_area'] or 0), 2)} м².",
+                    f"Освобождается {_metres((after['free_area'] or 0) - (before['free_area'] or 0))} м².",
                     changes=[
                         Change(op="remove", object_id=oid, equipment_type=issue.equipment_type, label=label)
                         for oid in issue.objects
@@ -646,7 +648,7 @@ def recommend_completeness(
 
         after = summarize(candidate_plan)
         places = "; ".join(
-            f"({c.position[0]:.2f}, {c.position[1]:.2f}) в зоне «{_zone_label(candidate_plan, c.zone)}»"
+            f"{_place_words(c.position)} в зоне «{_zone_label(candidate_plan, c.zone)}»"
             for c in added_changes
             if c.position
         )
@@ -658,7 +660,7 @@ def recommend_completeness(
                 title=f"Добавить: {label}" + (f" × {len(added_changes)}" if len(added_changes) > 1 else ""),
                 summary=f"Предлагаемое место: {places}. Ошибок проверки не добавляется, "
                 f"свободная площадь уменьшится на "
-                f"{round((before['free_area'] or 0) - (after['free_area'] or 0), 2)} м².",
+                f"{_metres((before['free_area'] or 0) - (after['free_area'] or 0))} м².",
                 changes=added_changes,
                 reasons=[reason],
                 assumptions=assumptions,
@@ -715,7 +717,7 @@ def recommend_capacity(
         if not found.best:
             results.append(
                 Recommendation(
-                    id=f"capacity:{type_code}",
+                    id=f"capacity:{type_code}:{new_id}",
                     scenario="capacity",
                     priority=1,
                     title=f"Не хватает пропускной способности: {group.name.lower()}",
@@ -733,7 +735,7 @@ def recommend_capacity(
         after = summarize(best.plan)
         results.append(
             Recommendation(
-                id=f"capacity:{type_code}",
+                id=f"capacity:{type_code}:{new_id}",
                 scenario="capacity",
                 priority=1 if short else 3,
                 title=f"Добавить окно: {group.name.lower()}",
@@ -756,15 +758,55 @@ def recommend_capacity(
     return results
 
 
-def place_equipment(plan: Plan, type_code: str, zone_id: str | None = None) -> Recommendation:
+def _metres(value: float | None) -> str:
+    """Число для текста: два знака и запятая, как в таблицах интерфейса."""
+    if value is None:
+        return "—"
+    return f"{value:.2f}".replace(".", ",")
+
+
+def _place_words(position: tuple[float, float]) -> str:
+    """Место объекта словами: оси подписаны, дробная часть через запятую."""
+    return f"X {_metres(position[0])} · Y {_metres(position[1])} м"
+
+
+def _near(plan: Plan, action: "language.Action | None") -> "search.Near | None":
+    """Условие места из фразы: у перегородки, у входа, у стены. Без условия — None."""
+    if action is None:
+        return None
+    if action.near_partition:
+        lines = [LineString([w.from_, w.to]) for w in plan.walls if w.type != "outer"]
+        if lines:
+            # Окно у перегородки: между ним и стеной помещается рабочее место оператора.
+            return search.Near(unary_union(lines), 1.6, "у перегородки")
+    if action.near_entrance:
+        entrance = passability.entrance_point(plan)
+        if entrance is not None:
+            return search.Near(ShapelyPoint(entrance), 3.0, "у входа")
+    if action.near_wall:
+        outline = core.outline(plan)
+        if outline is not None:
+            return search.Near(outline.exterior, 0.6, "у стены")
+    return None
+
+
+def place_equipment(
+    plan: Plan, type_code: str, zone_id: str | None = None, action: "language.Action | None" = None
+) -> Recommendation:
     """Сценарий «найти место для дополнительного рабочего места, окна или стеллажа»."""
     before = summarize(plan)
     new_id = _unique_id(plan, type_code)
     label = _label(plan, type_code)
-    found = search.place(plan, type_code, new_id=new_id, zone_id=zone_id, keep=3)
+    near = _near(plan, action)
+    found = search.place(plan, type_code, new_id=new_id, zone_id=zone_id, keep=3, near=near)
+    missed = None
+    if near is not None and not found.best:
+        # Условие не выполнить: сказать об этом прямо и предложить лучшее место без него.
+        missed = near.words
+        found = search.place(plan, type_code, new_id=new_id, zone_id=zone_id, keep=3)
     if not found.best:
         return Recommendation(
-            id=f"placement:{type_code}",
+            id=f"placement:{type_code}:{new_id}",
             scenario="placement",
             priority=0,
             title=f"Места для «{label}» не найдено",
@@ -779,17 +821,22 @@ def place_equipment(plan: Plan, type_code: str, zone_id: str | None = None) -> R
     item = next(e for e in best.plan.equipment if e.id == new_id)
     reasons = [
         Reason(text=f"Объект размещён в зоне «{_zone_label(best.plan, item.zone)}», допустимой для этого типа по справочнику."),
+        *(
+            [Reason(text=f"Поставить {missed} нельзя: там нет места, где объект не нарушает норм. Показано лучшее место без этого условия.")]
+            if missed
+            else ([Reason(text=f"Место выбрано {near.words}, как просили.")] if near is not None else [])
+        ),
         Reason(text=f"Ошибок проверки после размещения: {after['errors']} (было {before['errors']}); самое узкое место пути посетителя: {after['min_route_width']} м."),
     ]
     if type_code in SERVICE_WINDOW_TYPES and item.operator_position:
         reasons.append(Reason(text="Рабочее место оператора обращено к служебной зоне; проход между окнами не меньше нормы.", source="ВНТП 311-98 «Объекты почтовой связи»", clause="табл. 13, п. 4.5"))
     return Recommendation(
-        id=f"placement:{type_code}",
+        id=f"placement:{type_code}:{new_id}",
         scenario="placement",
         priority=0,
-        title=f"Место для: {label}",
-        summary=f"Лучшее место — ({item.position[0]:.2f}, {item.position[1]:.2f}), поворот {item.rotation_deg:g}°. "
-        f"Свободная площадь {before['free_area']} → {after['free_area']} м².",
+        title=f"Место для: {label}" + (f" (не {missed}: там нет места)" if missed else ""),
+        summary=f"Лучшее место — {_place_words(item.position)}, поворот {item.rotation_deg:g}°. "
+        f"Свободная площадь {_metres(before['free_area'])} → {_metres(after['free_area'])} м².",
         changes=[_change_from(plan, best, "add", new_id, type_code)],
         reasons=reasons,
         assumptions=["Из мест, не добавляющих ошибок, выбрано наиболее уместное для типа: окно — у служебной зоны, стеллаж — у стены, терминал — у входа."],
@@ -1160,8 +1207,8 @@ def _answer(action: language.Action, plan: Plan) -> str:
     if action.question == "area":
         state = summarize(plan)
         return (
-            f"Площадь помещения {state['total_area']} м², занято оборудованием "
-            f"{state['occupied_area']} м², свободно {state['free_area']} м²."
+            f"Площадь помещения {_metres(state['total_area'])} м², занято оборудованием "
+            f"{_metres(state['occupied_area'])} м², свободно {_metres(state['free_area'])} м²."
         )
     if action.question == "state":
         state = summarize(plan)
@@ -1178,8 +1225,8 @@ def _answer(action: language.Action, plan: Plan) -> str:
                 x, y = item.position
                 return (
                     f"{item.label or _label(plan, item.type)} ({_address(plan, item.id)}) — зона "
-                    f"«{_zone_label(plan, item.zone)}», {round(x, 2)} × {round(y, 2)} м от левого "
-                    f"нижнего угла плана."
+                    f"«{_zone_label(plan, item.zone)}», {_place_words((x, y))} от левого нижнего "
+                    f"угла плана."
                 )
         if action.equipment_type:
             same = [e for e in plan.equipment if e.type == action.equipment_type]
@@ -1259,7 +1306,7 @@ def _remove_recommendation(plan: Plan, object_id: str) -> Recommendation | None:
         title=f"Убрать: {_object_name(plan, object_id)}",
         summary=(
             f"Объект убирается с плана. Ошибок станет {after['errors']} вместо {before['errors']}, "
-            f"свободная площадь {before['free_area']} → {after['free_area']} м²."
+            f"свободная площадь {_metres(before['free_area'])} → {_metres(after['free_area'])} м²."
         ),
         changes=[Change(op="remove", object_id=object_id, equipment_type=item.type, label=item.label)],
         reasons=[Reason(text="Действие запрошено командой; проверка показывает, как изменится план.")],
@@ -1405,7 +1452,7 @@ def run_command(plan: Plan, text: str) -> CommandResult:
             result.answers.append(_answer(language.Action(kind="question", question="state"), current))
         elif action.kind == "add" and action.equipment_type:
             for _ in range(min(action.count, 6)):
-                recommendation = place_equipment(current, action.equipment_type, action.zone_id)
+                recommendation = place_equipment(current, action.equipment_type, action.zone_id, action)
                 result.recommendations.append(recommendation)
                 if recommendation.changes:
                     current = apply_changes(current, recommendation.changes)

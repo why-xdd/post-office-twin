@@ -853,7 +853,14 @@ export function Workspace({ planId }: WorkspaceProps) {
         )}
         <div className="ws-panel" role={review ? 'region' : 'tabpanel'} aria-label={review ? 'Обзор плана' : undefined}>
           {panel === 'review' && (
-            <Review book={book} saving={saving} onSave={() => void save()} onFocusObject={focusObject} onNotice={setNotice} />
+            <Review
+              book={book}
+              saving={saving}
+              onSave={() => void save()}
+              onFocusObject={focusObject}
+              onFit={() => setFitSignal((n) => n + 1)}
+              onNotice={setNotice}
+            />
           )}
           {panel === 'checks' && <Checks book={book} onFocusObject={focusObject} />}
           {panel === 'properties' && <Properties book={book} types={typeMap} zoneTypes={zoneTypes} />}

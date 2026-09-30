@@ -591,3 +591,39 @@
   font-size: var(--text-12);
   line-height: 1.4;
 }
+
+/* Редкие инструменты: свёрнуты под одной строкой, чтобы на экране было одно решение за раз */
+.assistant__more {
+  border-top: 1px solid var(--label-edge);
+}
+
+.assistant__more > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+  min-height: 44px;
+  padding: var(--s-3) var(--s-4);
+  color: var(--ink-2);
+  font-size: var(--text-13);
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+}
+
+.assistant__more > summary::-webkit-details-marker {
+  display: none;
+}
+
+.assistant__more > summary:hover {
+  color: var(--ink);
+}
+
+.assistant__more > summary svg {
+  flex: 0 0 auto;
+  transition: transform var(--dur-base) var(--ease-drawer);
+}
+
+.assistant__more[open] > summary svg {
+  transform: rotate(180deg);
+}

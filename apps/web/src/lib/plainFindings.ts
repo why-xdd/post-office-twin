@@ -6,8 +6,14 @@
  * строками. Полный текст и ссылка на норму остаются под «Подробнее».
  */
 
-import type { Finding, Plan } from './plan';
+import type { Finding, Plan, Severity } from './plan';
 import { formatNumber } from './planFacts';
+
+/**
+ * Узкое место пути, при котором проход ещё допустим с карманами для разъезда (СП 59.13330.2020).
+ * То же число, что MIN_PATH_WITH_POCKETS_M на сервере: ниже него путь — ошибка, выше — замечание.
+ */
+const PATH_WITH_POCKETS_M = '1,2';
 
 export interface PlainFinding {
   title: string;
@@ -21,15 +27,24 @@ export interface PlainFinding {
 
 interface Wording {
   title: string;
-  impact: string;
-  measure?: (measured: string, required: string, unit: string) => string;
+  /** Чем это плохо. Для замечания часто мягче, чем для ошибки: нарушение и допущение — разное. */
+  impact: string | ((severity: Severity) => string);
+  measure?: (measured: string, required: string, unit: string, severity: Severity) => string;
 }
 
 const WORDING: Record<string, Wording> = {
   movement_path_width: {
     title: 'Узкий проход от входа',
-    impact: 'Посетитель на кресле-коляске не доберётся до окон.',
-    measure: (m) => `${m} м, а нужно не меньше 1,2 м`,
+    // Ошибка и замечание по этому правилу — разные вещи: уже 1,2 м коляска не проезжает,
+    // от 1,2 до нормы проезжает, но двоим не разойтись без карманов для разъезда.
+    impact: (severity) =>
+      severity === 'error'
+        ? 'Посетитель на кресле-коляске не доберётся до окон.'
+        : 'Коляска проедет, но двоим не разойтись без карманов для разъезда.',
+    measure: (m, r, _unit, severity) =>
+      severity === 'error'
+        ? `${m} м при норме ${r} м — даже с карманами для разъезда нужно ${PATH_WITH_POCKETS_M} м`
+        : `${m} м при норме ${r} м — допустимо только с карманами для разъезда`,
   },
   passage_between_workplaces: {
     title: 'Тесный проход между рабочими местами',
@@ -59,7 +74,7 @@ const WORDING: Record<string, Wording> = {
   clearance_from_wall: {
     title: 'Рабочее место прижато к стене',
     impact: 'Сотруднику не хватает места за рабочим местом.',
-    measure: (m, r) => `${m} м от стены, а нужно ${r} м`,
+    measure: (m, r) => `${m} м от стены при норме ${r} м`,
   },
   workplace_area: {
     title: 'Мало места на рабочем месте',
@@ -68,7 +83,7 @@ const WORDING: Record<string, Wording> = {
   client_area_per_workplace: {
     title: 'Тесный зал для посетителей',
     impact: 'В часы пик посетителям негде стоять.',
-    measure: (m, r) => `${m} м² на окно, а нужно ${r} м²`,
+    measure: (m, r) => `${m} м² на окно при норме ${r} м²`,
   },
   wheelchair_turning_circle: {
     title: 'Коляске негде развернуться',
@@ -95,7 +110,7 @@ const WORDING: Record<string, Wording> = {
   queue_terminal_near_entrance: {
     title: 'Терминал очереди далеко от входа',
     impact: 'Посетитель не сразу находит, где взять талон.',
-    measure: (m, r) => `${m} м от входа, а нужно не больше ${r} м`,
+    measure: (m, r) => `${m} м от входа при норме не дальше ${r} м`,
   },
   ramp_width: {
     title: 'Узкий пандус',
@@ -134,16 +149,22 @@ export function plainFinding(finding: Finding, plan: Plan | null): PlainFinding 
   const required = finding.required !== null && finding.required !== undefined ? formatNumber(finding.required) : '';
   let measure: string | null = null;
   if (wording?.measure) {
-    measure = wording.measure(measured, required, finding.unit);
+    measure = wording.measure(measured, required, finding.unit, finding.severity);
   } else if (hasNumbers && required) {
-    measure = `${measured} ${finding.unit}, а нужно ${required} ${finding.unit}`;
+    measure = `${measured} ${finding.unit} при норме ${required} ${finding.unit}`;
   }
+  const impact = typeof wording?.impact === 'function' ? wording.impact(finding.severity) : (wording?.impact ?? '');
   return {
     title: wording?.title ?? finding.title,
     measure,
-    impact: wording?.impact ?? '',
+    impact,
     culprits: joinNames(names),
   };
+}
+
+/** Нарушение нормы — не то же, что ошибка в данных плана: их считают и называют отдельно. */
+export function isNormFinding(finding: Finding): boolean {
+  return finding.category !== 'geometry';
 }
 
 /**

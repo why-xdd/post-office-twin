@@ -384,14 +384,16 @@ async def vision_analyze(
             [tuple(point) for point in marks["frame"]], [tuple(point) for point in marks["plan"]]
         )
         return vision.analyze(plan, images, moments, matrix, size, person_area_sqm)
+    except vision.VisionError as error:
+        # Разбор сам объясняет, что не так с записью или привязкой: его текст и показывается.
+        # Эта ветка обязана стоять раньше общей: VisionError — это ValueError.
+        raise HTTPException(status_code=422, detail=str(error)) from None
     except (KeyError, TypeError, ValueError):
         # Привязка приходит из браузера, но руками её присылают и кривой: четыре точки по два числа.
         raise HTTPException(
             status_code=422,
             detail="В привязке нужны поля frame и plan: по четыре точки, в каждой два числа.",
         ) from None
-    except vision.VisionError as error:
-        raise HTTPException(status_code=422, detail=str(error)) from None
 
 
 @app.post("/api/capacity/log", response_model=queue_log.QueueLogReport, summary="Очередь по журналу или счётчику")

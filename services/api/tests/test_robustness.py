@@ -102,6 +102,36 @@ def test_broken_camera_calibration_is_explained(client: TestClient) -> None:
         assert answer.status_code == 422, calibration
 
 
+def test_camera_error_keeps_its_own_words(client: TestClient) -> None:
+    """Разбор записи объясняет, что не так, своими словами, а не общей отговоркой про поля.
+
+    Ошибки разбора — подвид ValueError, и общая ветка обработчика их перехватывала: человек
+    видел «в привязке нужны поля frame и plan», отметив при этом четыре угла как положено.
+    """
+    import io
+
+    from PIL import Image
+
+    def jpeg(index: int) -> bytes:
+        buffer = io.BytesIO()
+        Image.new("L", (64, 48), color=40 + index).save(buffer, format="JPEG")
+        return buffer.getvalue()
+
+    frames = [("frames", (f"{i}.jpg", jpeg(i), "image/jpeg")) for i in range(8)]
+    document = json.dumps(DEMO, ensure_ascii=False)
+    # Четыре точки на одной линии: привязка не строится, и сказать об этом надо именно так.
+    calibration = json.dumps(
+        {"frame": [[0, 0], [10, 0], [20, 0], [30, 0]], "plan": [[0, 0], [1, 0], [2, 0], [3, 0]]}
+    )
+    answer = client.post(
+        "/api/vision/analyze",
+        data={"document": document, "calibration": calibration, "seconds": json.dumps(list(range(8)))},
+        files=frames,
+    )
+    assert answer.status_code == 422
+    assert "одной линии" in answer.json()["detail"], answer.json()["detail"]
+
+
 def test_missing_version_says_which_version(client: TestClient) -> None:
     """«План не найден» на существующем плане сбивает с толку: не найдена версия."""
     created = client.post("/api/plans", json={"title": "Демо", "document": DEMO}).json()

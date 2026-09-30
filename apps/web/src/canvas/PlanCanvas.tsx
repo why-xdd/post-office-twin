@@ -108,14 +108,16 @@ const HEAT_RAMP: [number, number, number][] = [
 ];
 
 function heatColour(value: number): [number, number, number, number] {
-  if (value < 0.08) return [0, 0, 0, 0];
-  const weight = Math.sqrt(Math.min(1, value));
+  if (value < 0.05) return [0, 0, 0, 0];
+  // Степень меньше единицы поднимает средние значения: следы прохода видны, а ядра скоплений
+  // остаются самыми насыщенными.
+  const weight = Math.min(1, value) ** 0.6;
   const position = weight * (HEAT_RAMP.length - 1);
   const low = Math.min(HEAT_RAMP.length - 2, Math.floor(position));
   const mix = position - low;
   const channel = (index: number) =>
     Math.round(HEAT_RAMP[low][index] + (HEAT_RAMP[low + 1][index] - HEAT_RAMP[low][index]) * mix);
-  return [channel(0), channel(1), channel(2), Math.round((0.32 + weight * 0.55) * 255)];
+  return [channel(0), channel(1), channel(2), Math.round((0.4 + weight * 0.55) * 255)];
 }
 
 function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, onCursor, onNotice }: PlanCanvasProps) {
@@ -152,7 +154,7 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
     // Шкала делится не по наибольшей ячейке, а по верхнему проценту: одна горячая точка иначе
     // прижимает весь остальной зал к нулю, и карта выглядит пустой.
     const filled = heatmap.values.filter((value) => value > 0.02).sort((a, b) => a - b);
-    const top = filled.length ? filled[Math.min(filled.length - 1, Math.floor(filled.length * 0.96))] : 1;
+    const top = filled.length ? filled[Math.min(filled.length - 1, Math.floor(filled.length * 0.92))] : 1;
     for (let index = 0; index < heatmap.values.length; index += 1) {
       const value = Math.max(0, Math.min(1, heatmap.values[index] / Math.max(top, 0.05)));
       const col = index % heatmap.cols;

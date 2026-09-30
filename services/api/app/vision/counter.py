@@ -52,8 +52,14 @@ MOTION_THRESHOLD = 18.0
 PERSON_AREA_SQM = 0.2
 # Пятно меньше этой доли человека — шум (блик, тень от двери, дрожание камеры).
 MIN_BLOB_SHARE = 0.4
-# Сторона ячейки тепловой карты.
-HEAT_CELL_M = 0.25
+# Сторона ячейки тепловой карты. Мелкая ячейка нужна ради резкости: пятно скопления должно
+# иметь узнаваемую форму, а не расплываться по полу.
+HEAT_CELL_M = 0.1
+# Радиус, которым человек «засвечивает» карту вокруг своей точки опоры: примерно место, которое
+# он занимает вместе с личным пространством. Подобран на демо-записи из четырёх вариантов:
+# меньше — карта рассыпается на отдельные точки, больше — ряд очереди сливается в кляксу. Каждое появление кладётся на карту
+# этим пятном, а не одной ячейкой, — поэтому карта получается плавной без размытия.
+HEAT_SPOT_M = 0.4
 
 
 class VisionError(ValueError):
@@ -303,9 +309,7 @@ def analyze(
             point = Point(x, y)
             zone_id = next((zone.id for zone, shape in zones if shape.contains(point)), None)
             counted[zone_id] = counted.get(zone_id, 0) + people
-            col = min(cols - 1, max(0, int((x - bounds[0]) / HEAT_CELL_M)))
-            row = min(rows - 1, max(0, int((y - bounds[1]) / HEAT_CELL_M)))
-            heat[row, col] += people
+            _splat(heat, bounds, x, y, people)
         timeline.append(Moment(second=round(seconds[index], 2), people=total))
         for zone_id in {*counted, *per_zone}:
             per_zone.setdefault(zone_id, [0] * index).append(counted.get(zone_id, 0))
@@ -327,11 +331,6 @@ def analyze(
             )
         )
 
-    # Карта сглаживается: человек занимает не одну ячейку, и соседние проходы должны сливаться
-    # в пятно, а не рассыпаться на точки.
-    if heat.any():
-        heat = _box_mean(heat, 1) * 9.0
-
     people = [moment.people for moment in timeline]
     duration = round(max(seconds) - min(seconds), 1) if seconds else 0.0
     report = VisionReport(
@@ -346,7 +345,8 @@ def analyze(
             cell_m=HEAT_CELL_M,
             cols=cols,
             rows=rows,
-            values=[round(v, 3) for v in (heat / max(heat.max(), 1.0)).ravel().tolist()],
+            # Два знака: карта рисуется цветом, третий знак не виден, а ответ короче втрое.
+            values=[round(v, 2) for v in (heat / max(heat.max(), 1.0)).ravel().tolist()],
         ),
         summary=_summary(loads, people, duration),
         assumptions=[
@@ -390,6 +390,29 @@ def _calibration_warning(spots: list[float], person_area_sqm: float) -> list[str
         f"плотной толпы в зале не было, привязка неточная: отмеченный на кадре участок меньше "
         f"выбранного на плане, и людей посчитано больше, чем есть. Отметьте углы заново."
     ]
+
+
+def _splat(heat: np.ndarray, bounds: tuple[float, float, float, float], x: float, y: float, people: int) -> None:
+    """Кладёт на карту пятно вокруг точки опоры человека.
+
+    Вес спадает от середины к краю по колоколу: в середине человек стоял наверняка, у края —
+    только мог. Без пятна карта рассыпается в отдельные ячейки, а после общего размытия
+    превращается в кляксу; здесь и резкость сохраняется, и ступенек нет.
+    """
+    rows, cols = heat.shape
+    radius = int(math.ceil(HEAT_SPOT_M / HEAT_CELL_M))
+    col = int((x - bounds[0]) / HEAT_CELL_M)
+    row = int((y - bounds[1]) / HEAT_CELL_M)
+    c0, c1 = max(0, col - radius), min(cols, col + radius + 1)
+    r0, r1 = max(0, row - radius), min(rows, row + radius + 1)
+    if c0 >= c1 or r0 >= r1:
+        return
+    # Расстояние от центра пятна до середины каждой ячейки окна, в метрах.
+    xs = (np.arange(c0, c1) + 0.5) * HEAT_CELL_M + bounds[0] - x
+    ys = (np.arange(r0, r1) + 0.5) * HEAT_CELL_M + bounds[1] - y
+    distance = np.hypot(xs[None, :], ys[:, None]) / HEAT_SPOT_M
+    weight = np.clip(1.0 - distance**2, 0.0, 1.0) ** 2
+    heat[r0:r1, c0:c1] += weight * people
 
 
 def _summary(loads: list[ZoneLoad], people: list[int], duration: float) -> list[str]:

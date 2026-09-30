@@ -375,6 +375,8 @@ export interface CommandResult {
   understood: string[];
   unknown: string[];
   source: string;
+  /** Ответы на вопросы о плане: «сколько окон», «где банкомат», «какая свободная площадь». */
+  answers?: string[];
   recommendations: Recommendation[];
   elapsed_ms: number;
 }

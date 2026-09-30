@@ -1138,18 +1138,88 @@ def advise(plan: Plan, deadline: Deadline | None = None) -> AssistantReport:
 
 
 class CommandResult(BaseModel):
-    """Ответ на команду словами: что поняли и что предлагаем сделать."""
+    """Ответ на команду словами: что поняли, что отвечаем и что предлагаем сделать."""
 
     understood: list[str] = Field(default_factory=list, description="Понятые действия человеческими словами")
     unknown: list[str] = Field(default_factory=list, description="Части фразы, оставшиеся без ответа")
     source: str = Field(default="разбор фразы", description="Чем разобрана фраза")
+    answers: list[str] = Field(default_factory=list, description="Ответы на вопросы о плане")
     recommendations: list[Recommendation] = Field(default_factory=list)
     elapsed_ms: float = 0.0
+
+
+def _address(plan: Plan, object_id: str) -> str:
+    """Короткий адрес объекта — тот же, что в строке адреса редактора: О-07."""
+    index = next((i for i, item in enumerate(plan.equipment) if item.id == object_id), None)
+    return f"О-{index + 1:02d}" if index is not None else object_id
+
+
+def _answer(action: language.Action, plan: Plan) -> str:
+    """Ответ на вопрос о плане. Считается по плану, ничего в нём не меняя."""
+    if action.question == "area":
+        state = summarize(plan)
+        return (
+            f"Площадь помещения {state['total_area']} м², занято оборудованием "
+            f"{state['occupied_area']} м², свободно {state['free_area']} м²."
+        )
+    if action.question == "state":
+        state = summarize(plan)
+        if not state["errors"] and not state["warnings"]:
+            return "Проверка нарушений не нашла: план соответствует нормам, заложенным в сервис."
+        return (
+            f"Нарушений {state['errors']}, замечаний {state['warnings']}. Разбор каждого — "
+            f"во вкладке «Обзор»."
+        )
+    if action.question == "where":
+        if action.object_id:
+            item = next((e for e in plan.equipment if e.id == action.object_id), None)
+            if item is not None:
+                x, y = item.position
+                return (
+                    f"{item.label or _label(plan, item.type)} ({_address(plan, item.id)}) — зона "
+                    f"«{_zone_label(plan, item.zone)}», {round(x, 2)} × {round(y, 2)} м от левого "
+                    f"нижнего угла плана."
+                )
+        if action.equipment_type:
+            same = [e for e in plan.equipment if e.type == action.equipment_type]
+            if not same:
+                return f"{_label(plan, action.equipment_type)} на плане нет."
+            where = ", ".join(
+                f"{_address(plan, e.id)} в зоне «{_zone_label(plan, e.zone)}»" for e in same[:5]
+            )
+            tail = f" и ещё {len(same) - 5}" if len(same) > 5 else ""
+            return f"{_label(plan, action.equipment_type)}: {where}{tail}."
+        return "Не понял, о каком объекте вопрос: назовите тип или адрес вида О-07."
+    if action.question == "count":
+        if action.equipment_type:
+            same = [e for e in plan.equipment if e.type == action.equipment_type]
+            if action.zone_id:
+                same = [e for e in same if e.zone == action.zone_id]
+                where = f" в зоне «{_zone_label(plan, action.zone_id)}»"
+            else:
+                where = ""
+            names = ", ".join(e.label or _address(plan, e.id) for e in same[:5])
+            tail = f" и ещё {len(same) - 5}" if len(same) > 5 else ""
+            listing = f" — {names}{tail}" if same else ""
+            return f"{_label(plan, action.equipment_type)}{where}: {len(same)}{listing}."
+        return f"Объектов на плане: {len(plan.equipment)}, зон: {len(plan.zones)}."
+    return "Вопрос понят, но ответить на него сервис пока не умеет."
+
+
+QUESTION_WORDS = {
+    "count": "вопрос: сколько",
+    "where": "вопрос: где стоит",
+    "area": "вопрос: какая площадь",
+    "state": "вопрос: что с планом",
+}
 
 
 def _action_words(action: language.Action, plan: Plan) -> str:
     """Понятое действие обратно человеческими словами — чтобы было видно, что сервис понял."""
     label = _label(plan, action.equipment_type) if action.equipment_type else None
+    if action.kind == "question":
+        asked = QUESTION_WORDS.get(action.question or "", "вопрос о плане")
+        return f"{asked}{f': {label}' if label else ''}"
     where = ""
     if action.zone_id:
         where = f" в зону «{_zone_label(plan, action.zone_id)}»"
@@ -1250,7 +1320,11 @@ def run_command(plan: Plan, text: str) -> CommandResult:
     current = plan
     for action in understanding.actions:
         result.understood.append(_action_words(action, plan))
-        if action.kind == "add" and action.equipment_type:
+        if action.kind == "question":
+            result.answers.append(_answer(action, current))
+        elif action.kind == "check":
+            result.answers.append(_answer(language.Action(kind="question", question="state"), current))
+        elif action.kind == "add" and action.equipment_type:
             for _ in range(min(action.count, 6)):
                 recommendation = place_equipment(current, action.equipment_type, action.zone_id)
                 result.recommendations.append(recommendation)

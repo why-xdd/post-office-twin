@@ -193,7 +193,7 @@ export function Assistant({ book, types, onFocusObject, onNotice }: AssistantPro
             runCommand();
           }}
         >
-          <label htmlFor="assistant-command">Скажите, что сделать</label>
+          <label htmlFor="assistant-command">Скажите, что сделать, или спросите о плане</label>
           <div className="assistant__command-row">
             <input
               id="assistant-command"
@@ -207,7 +207,10 @@ export function Assistant({ book, types, onFocusObject, onNotice }: AssistantPro
               Понять
             </button>
           </div>
-          <p className="assistant__hint">План меняется только после «Принять».</p>
+          <p className="assistant__hint">
+            Понимает и вопросы: «сколько окон обслуживания», «где стоит банкомат», «какая
+            свободная площадь». План меняется только после «Принять».
+          </p>
         </form>
 
         <div className="assistant__run">
@@ -228,6 +231,11 @@ export function Assistant({ book, types, onFocusObject, onNotice }: AssistantPro
                 <span>({commandResult.source})</span>
               </p>
             )}
+            {(commandResult.answers ?? []).map((answer) => (
+              <p key={answer} className="assistant__answer">
+                {humanize(answer, doc, book)}
+              </p>
+            ))}
             {commandResult.unknown.length > 0 && (
               <p className="assistant__unknown">Не понято: {commandResult.unknown.join('; ')}</p>
             )}

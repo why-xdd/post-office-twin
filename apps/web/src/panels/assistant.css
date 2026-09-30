@@ -435,6 +435,12 @@
   color: var(--ink-3);
 }
 
+/* Ответ на вопрос о плане: не команда, а справка, поэтому выделен как факт. */
+.assistant__answer {
+  margin-top: 4px;
+  font-weight: 560;
+}
+
 .assistant__unknown {
   margin-top: 4px;
   color: var(--signal);

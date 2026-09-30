@@ -137,6 +137,7 @@ export function Workspace({ planId }: WorkspaceProps) {
   const select = useWorkspace((s) => s.select);
   const highlight = useWorkspace((s) => s.highlight);
   const tool = useWorkspace((s) => s.tool);
+  const placingType = useWorkspace((s) => s.placingType);
   const reviewErrors = useWorkspace((s) => s.report?.errors ?? 0);
   const viewKind = useWorkspace((s) => s.view);
   const setViewKind = useWorkspace((s) => s.setView);
@@ -153,6 +154,11 @@ export function Workspace({ planId }: WorkspaceProps) {
   const [cursor, setCursor] = useState<Point | null>(null);
   // Что выдвинуто снизу на узком экране: панель вкладки, библиотека или ничего.
   const [drawer, setDrawer] = useState<'panel' | 'library' | null>(null);
+  // Пальцем или мышью: от этого зависит текст подсказок к инструментам.
+  const touch = useMemo(
+    () => typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches,
+    [],
+  );
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [addressText, setAddressText] = useState('');
@@ -294,6 +300,12 @@ export function Workspace({ planId }: WorkspaceProps) {
     const timer = window.setTimeout(() => setNotice(null), 4000);
     return () => window.clearTimeout(timer);
   }, [notice]);
+
+  // Выбрали инструмент или предмет в библиотеке — выдвинутый лист уходит: дальше работают по
+  // плану, а на узком экране лист его закрывает.
+  useEffect(() => {
+    if (tool !== 'select' || placingType) setDrawer((open) => (open === 'library' ? null : open));
+  }, [tool, placingType]);
 
   // Лист плана меняет ширину вместе с режимом: план вписывается заново, когда раскладка уже сменилась.
   useEffect(() => {
@@ -481,8 +493,18 @@ export function Workspace({ planId }: WorkspaceProps) {
   }
 
   const review = mode === 'review';
-  const toolHint =
-    tool === 'outline'
+  // На сенсорном экране по плану не щёлкают и клавиш Esc и Shift там нет: подсказка другая.
+  const toolHint = touch
+    ? tool === 'outline'
+      ? 'Отмечайте углы помещения. Замкнуть — касание первой точки'
+      : tool === 'wall'
+        ? 'Отметьте начало и конец перегородки'
+        : tool === 'zone'
+          ? 'Отмечайте вершины зоны. Замкнуть — двойное касание'
+          : tool === 'equipment'
+            ? 'Отметьте место на плане, чтобы поставить предмет'
+            : null
+    : tool === 'outline'
       ? 'Щёлкайте по углам помещения. Замкнуть — щелчок по первой точке или Enter, Backspace — убрать точку, Esc — отмена'
       : tool === 'wall'
         ? 'Щёлкните начало и конец перегородки. Shift — под любым углом, Esc — отмена'

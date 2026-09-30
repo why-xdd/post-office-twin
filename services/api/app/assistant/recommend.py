@@ -790,6 +790,14 @@ def apply_changes(plan: Plan, changes: list[Change]) -> Plan:
             value = getattr(change, field_name)
             if value is not None:
                 entry[field_name] = value
+        # Привязка к зоне берётся по новому месту объекта: иначе скамья, уехавшая из зоны
+        # ожидания, остаётся к ней привязанной, и план начинает сам себе противоречить.
+        if change.zone is None and entry.get("position"):
+            landed = core.zone_of_point(plan, tuple(entry["position"]))
+            if landed:
+                entry["zone"] = landed
+            else:
+                entry.pop("zone", None)
         equipment[change.object_id] = {k: v for k, v in entry.items() if v is not None}
     document["equipment"] = list(equipment.values())
     return Plan.model_validate(document)

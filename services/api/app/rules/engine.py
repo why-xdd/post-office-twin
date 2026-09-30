@@ -449,6 +449,28 @@ def structural_findings(plan: Plan) -> list[Finding]:
             )
         )
 
+    # Зона, нарисованная «восьмёркой»: считать по ней нельзя, а молча чинить — обманывать.
+    from shapely.geometry import Polygon as _Polygon
+
+    crooked = [zone for zone in plan.zones if not _Polygon(zone.polygon).is_valid]
+    if crooked:
+        findings.append(
+            Finding(
+                rule_id="zone_polygon_valid",
+                title="Контур зоны сам себя пересекает",
+                message=(
+                    "Границы зон пересекают сами себя: "
+                    + ", ".join(f"«{zone.label or zone.id}»" for zone in crooked)
+                    + ". Площадь и проверки по такой зоне считаются по её исправленному контуру — "
+                    "перерисуйте границу, чтобы числа были точными."
+                ),
+                objects=[zone.id for zone in crooked],
+                # Предупреждение, а не ошибка: план остаётся рабочим, но числа по этой зоне
+                # посчитаны по исправленному контуру.
+                **{**base, "severity": Severity.WARNING},
+            )
+        )
+
     outside = core.objects_outside(plan)
     if outside:
         findings.append(

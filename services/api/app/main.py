@@ -173,11 +173,25 @@ def create_plan(payload: CreatePlanRequest) -> PlanRef:
     return PlanRef(id=plan_id, version=version)
 
 
+def _plan_exists(plan_id: str) -> bool:
+    """Есть ли такой план вообще: отличает «нет плана» от «нет такой версии»."""
+    try:
+        return bool(store.list_versions(plan_id))
+    except KeyError:
+        return False
+
+
 @app.get("/api/plans/{plan_id}", summary="Открыть план")
 def get_plan(plan_id: str, version: int | None = None) -> dict[str, Any]:
     try:
         return store.get(plan_id, version)
     except KeyError:
+        # План может быть на месте, а вот запрошенной версии не существовать: об этом и говорим,
+        # иначе человек ищет пропавший план, которого никто не терял.
+        if version is not None and _plan_exists(plan_id):
+            raise HTTPException(
+                status_code=404, detail=f"У плана {plan_id} нет версии {version}"
+            ) from None
         raise HTTPException(status_code=404, detail=f"План {plan_id} не найден") from None
 
 
@@ -370,8 +384,12 @@ async def vision_analyze(
             [tuple(point) for point in marks["frame"]], [tuple(point) for point in marks["plan"]]
         )
         return vision.analyze(plan, images, moments, matrix, size, person_area_sqm)
-    except KeyError:
-        raise HTTPException(status_code=422, detail="В привязке нужны поля frame и plan по четыре точки.") from None
+    except (KeyError, TypeError, ValueError):
+        # Привязка приходит из браузера, но руками её присылают и кривой: четыре точки по два числа.
+        raise HTTPException(
+            status_code=422,
+            detail="В привязке нужны поля frame и plan: по четыре точки, в каждой два числа.",
+        ) from None
     except vision.VisionError as error:
         raise HTTPException(status_code=422, detail=str(error)) from None
 

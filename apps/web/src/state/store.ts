@@ -8,6 +8,7 @@
 
 import { create } from 'zustand';
 import { transformInPlace } from '../lib/equipmentOps';
+import { zoneAt } from '../lib/geometry';
 import { removeWall } from '../lib/wallEdit';
 import type { Equipment, Plan, ValidationReport, VisionHeatmap, Zone } from '../lib/plan';
 
@@ -288,10 +289,10 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   /** То же, что делает сервер при применении рекомендации: add, move, remove. */
   applyChanges: (changes) =>
     get().commit((draft) => {
-      const equipment = draft.equipment ?? [];
+      let equipment = draft.equipment ?? [];
       for (const change of changes) {
         if (change.op === 'remove') {
-          draft.equipment = equipment.filter((e) => e.id !== change.object_id);
+          equipment = equipment.filter((e) => e.id !== change.object_id);
           continue;
         }
         let item = equipment.find((e) => e.id === change.object_id);
@@ -310,8 +311,12 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
           item.rotation_deg = change.rotation_deg;
         }
         if (change.size_m) item.size_m = change.size_m;
-        if (change.zone) item.zone = change.zone;
         if (change.operator_position) item.operator_position = change.operator_position;
+        // Зона берётся по новому месту, а не переносится следом за объектом: иначе скамья,
+        // уехавшая из зоны ожидания, остаётся к ней привязанной, и план сам себе противоречит.
+        const zone = change.zone ?? zoneAt(draft, item.position)?.id;
+        if (zone) item.zone = zone;
+        else delete item.zone;
       }
       draft.equipment = equipment;
     }),

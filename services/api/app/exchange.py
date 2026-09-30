@@ -151,7 +151,11 @@ def split_rows(text: str, is_header, delimiters: tuple[str, ...] = (";", "\t", "
     очереди, и берётся первый, при котором находится строка заголовков.
     """
     for delimiter in delimiters:
-        rows = list(csv.reader(io.StringIO(text), delimiter=delimiter))
+        try:
+            rows = list(csv.reader(io.StringIO(text), delimiter=delimiter))
+        except csv.Error:
+            # Внутри файла нашлось то, что не бывает в таблице: картинка, архив, чужая кодировка.
+            continue
         # Отчёты 1С начинаются с шапки организации; таблица — с первой узнаваемой строки заголовков.
         for index, row in enumerate(rows[:30]):
             found = is_header(row)

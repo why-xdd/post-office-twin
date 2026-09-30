@@ -14,7 +14,13 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-Point = Annotated[tuple[float, float], Field(description="Координаты [x, y] в метрах")]
+# Координата — конечное число. Без этого запрета «nan» из чужой выгрузки доходит до геометрии и
+# роняет расчёт, а сохранённый план после этого не открывается вовсе.
+Coordinate = Annotated[float, Field(allow_inf_nan=False)]
+Point = Annotated[tuple[Coordinate, Coordinate], Field(description="Координаты [x, y] в метрах")]
+# Габарит: строго больше нуля. Объект нулевого или отрицательного размера не существует, а
+# площади и пересечения по нему считаются молча и неверно.
+Extent = Annotated[float, Field(gt=0, allow_inf_nan=False)]
 
 
 class Base(BaseModel):
@@ -112,7 +118,7 @@ class Equipment(Base):
     type: str
     label: str | None = None
     position: Point
-    size_m: tuple[float, float]
+    size_m: tuple[Extent, Extent]
     rotation_deg: float = 0.0
     zone: str | None = None
     operator_position: Point | None = Field(
@@ -156,7 +162,7 @@ class EquipmentTypeDef(Base):
     code: str
     label: str
     group: str | None = None
-    default_size_m: tuple[float, float] | None = None
+    default_size_m: tuple[Extent, Extent] | None = None
     floor_object: bool | None = Field(
         default=None, description="Занимает площадь пола; настенные и настольные — нет"
     )

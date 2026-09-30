@@ -15,12 +15,16 @@ from dataclasses import dataclass
 
 from shapely.geometry import LineString, Point, Polygon
 from shapely.ops import unary_union
+from shapely.validation import make_valid
 
 from app.dictionaries import is_floor_object
 from app.models import Equipment, Plan, Wall, Zone
 
 # Точность округления линейных величин при выводе, метры.
 PRECISION = 3
+# Насколько ненапольный объект может выступать за контур помещения: на толщину стены, на которой
+# он висит.
+WALL_MOUNT_TOLERANCE_M = 0.35
 
 
 @dataclass(frozen=True)
@@ -62,7 +66,21 @@ def floor_equipment(plan: Plan) -> list[Equipment]:
 
 
 def zone_polygon(zone: Zone) -> Polygon:
-    return Polygon(zone.polygon)
+    """Многоугольник зоны. Самопересечение чинится: такой полигон рисуют руками, и падать нельзя.
+
+    Восьмёрка («бабочка») в исходных данных встречается, когда зону обводили мышью и перепутали
+    порядок точек. Shapely на таком считать не умеет, поэтому фигура приводится к правильной, а о
+    самом факте сообщает отдельное правило проверки.
+    """
+    shape = Polygon(zone.polygon)
+    if shape.is_valid:
+        return shape
+    fixed = make_valid(shape)
+    if isinstance(fixed, Polygon):
+        return fixed
+    # Восьмёрка распадается на несколько кусков: берём наибольший, он и есть зона.
+    parts = [part for part in getattr(fixed, "geoms", []) if isinstance(part, Polygon)]
+    return max(parts, key=lambda part: part.area) if parts else shape.buffer(0)
 
 
 def outline(plan: Plan) -> Polygon | None:
@@ -117,14 +135,25 @@ def free_area(plan: Plan) -> float | None:
 
 
 def objects_outside(plan: Plan) -> list[str]:
-    """Объекты, выходящие за границы помещения."""
+    """Объекты, выходящие за границы помещения.
+
+    Ненапольное оборудование меряется мягче: камера и табло висят на самой стене, извещатель — на
+    потолке, принтер стоит на столе. Их габариты выходят за контур по построению, поэтому для них
+    проверяется только то, что объект стоит в этом помещении, а не снаружи здания.
+    """
     shape = outline(plan)
     if shape is None:
         return []
     outside: list[str] = []
-    for item in plan.equipment:
+    for item in floor_equipment(plan):
         poly = equipment_polygon(item)
         if not shape.contains(poly):
+            outside.append(item.id)
+    room = shape.buffer(WALL_MOUNT_TOLERANCE_M)
+    for item in plan.equipment:
+        if is_floor_object(plan, item.type):
+            continue
+        if not room.contains(Point(item.position)):
             outside.append(item.id)
     return outside
 
@@ -240,9 +269,14 @@ def clearances(plan: Plan, limit_m: float) -> list[Clearance]:
     for i in range(len(items)):
         for j in range(i + 1, len(items)):
             distance = polygons[i].distance(polygons[j])
+            # Габариты, наехавшие друг на друга, — это отдельное нарушение «объекты стоят друг
+            # на друге»; здесь такие пары не повторяются.
+            if polygons[i].intersection(polygons[j]).area > 0.001:
+                continue
             # Сравнивается то же округлённое число, что показывается человеку: иначе 0,79999 м
-            # попадает в нарушение с текстом «0,8 м при требуемых 0,8 м».
-            if 0 < round(distance, PRECISION) < limit_m:
+            # попадает в нарушение с текстом «0,8 м при требуемых 0,8 м». Ноль считается: между
+            # объектами, поставленными вплотную, прохода нет вовсе.
+            if round(distance, PRECISION) < limit_m:
                 tight.append(
                     Clearance(
                         first_id=items[i].id,
@@ -262,8 +296,9 @@ def wall_clearances(plan: Plan, limit_m: float) -> list[Clearance]:
         for wall_id, line in walls:
             distance = poly.distance(line)
             # Сравнивается то же округлённое число, что показывается человеку: иначе 0,79999 м
-            # попадает в нарушение с текстом «0,8 м при требуемых 0,8 м».
-            if 0 < round(distance, PRECISION) < limit_m:
+            # попадает в нарушение с текстом «0,8 м при требуемых 0,8 м». Ноль считается:
+            # рабочее место вплотную к стене означает, что оператору некуда встать.
+            if round(distance, PRECISION) < limit_m:
                 tight.append(
                     Clearance(
                         first_id=item.id,

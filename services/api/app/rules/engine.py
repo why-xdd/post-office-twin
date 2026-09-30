@@ -288,6 +288,18 @@ def _check_path_width(plan: Plan, rule: Rule, explain: bool = True) -> list[Find
                 if candidate not in culprits:
                     culprits.append(candidate)
         cause = f" Сужение создают: {', '.join(f'«{c}»' for c in culprits)}." if culprits else ""
+        # Виновники названы по одному маршруту. Если и без них к части целей путь узок, тесно
+        # из-за другого — например, между самими окнами: об этом нужно сказать прямо, иначе
+        # перестановка «виновников» обещает то, чего не даст.
+        stuck: list[str] = []
+        if culprits and explain:
+            without = passability.widths_without(plan, sorted(group), set(culprits))
+            stuck = sorted(t for t, w in without.items() if w < limit and t not in culprits)
+        if stuck:
+            cause += (
+                f" Даже без них путь к {', '.join(f'«{t}»' for t in stuck)} остаётся уже {limit} м: "
+                f"тесно между самими этими объектами."
+            )
         if severity is Severity.ERROR:
             message = (
                 f"Путь от входа сужается до {width} м — к {names}. Норма {rule.value} м, даже с "
@@ -299,7 +311,7 @@ def _check_path_width(plan: Plan, rule: Rule, explain: bool = True) -> list[Find
                 f"Путь от входа сужается до {width} м — к {names}. Это допустимо только при "
                 f"карманах для разъезда длиной не менее 2 м.{cause}"
             )
-        findings.append(_finding(rule, message, culprits or sorted(group), width, severity=severity))
+        findings.append(_finding(rule, message, [*culprits, *stuck] or sorted(group), width, severity=severity))
     return findings
 
 

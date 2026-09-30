@@ -180,10 +180,17 @@ def test_rotation_keeps_the_place_and_turns_the_object(plan: Plan) -> None:
 
 
 def test_ambiguous_target_is_explained_not_refused(plan: Plan) -> None:
-    """Окон три: сервис не молчит «не понял», а говорит, как назвать нужное."""
+    """Стеллажей несколько: сервис не молчит «не понял», а говорит, как назвать нужный."""
+    result = recommend.run_command(plan, "разверни стеллаж")
+    assert result.recommendations == []
+    assert result.answers and "Назовите нужный по адресу" in result.answers[0] and "О-" in result.answers[0]
+
+
+def test_window_command_is_refused_with_the_reason(plan: Plan) -> None:
+    """Окна кассы встроены в перегородку: на «разверни кассу» — объяснение, а не поворот."""
     result = recommend.run_command(plan, "разверни кассу")
     assert result.recommendations == []
-    assert result.answers and "О-01" in result.answers[0]
+    assert result.answers == [recommend.BUILT_IN_REFUSAL]
 
 
 def test_address_in_a_phrase_is_not_a_quantity(plan: Plan) -> None:

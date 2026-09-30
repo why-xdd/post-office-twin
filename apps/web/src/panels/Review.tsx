@@ -5,7 +5,7 @@
  * раскрываются по щелчку; инструменты редактора сюда не выносятся.
  */
 
-import { ArrowRight, Check, ChevronDown, CircleCheck, LoaderCircle, Save, Undo2, Wand2 } from 'lucide-react';
+import { ArrowRight, Check, ChevronDown, CircleCheck, LoaderCircle, Save, TriangleAlert, Undo2, Wand2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AddressBook } from '../lib/addresses';
 import { ApiError } from '../lib/api';
@@ -375,8 +375,8 @@ function ProposalCard({ proposal, onApply, onCancel }: { proposal: FixProposal; 
       <div className="proposal">
         <p className="proposal__title">Автоматически исправить не получилось</p>
         <p className="review__fix-note">
-          Перестановкой объектов нарушения не снимаются. Откройте редактор: там ассистент предложит варианты по
-          каждому нарушению.
+          {proposal.notes.length > 0 ? proposal.notes.join(' ') : 'Перестановкой объектов нарушения не снимаются.'} Откройте
+          редактор: там ассистент предложит варианты по каждому нарушению.
         </p>
         <button type="button" className="btn btn--outline" onClick={onCancel}>
           Понятно
@@ -407,6 +407,13 @@ function ProposalCard({ proposal, onApply, onCancel }: { proposal: FixProposal; 
           </li>
         ))}
       </ul>
+      {/* Что останется после «Применить» и почему — до нажатия, а не сюрпризом после. */}
+      {proposal.notes.map((note) => (
+        <p key={note} className="rec__caution" role="note">
+          <TriangleAlert size={14} aria-hidden="true" />
+          <span>{note}</span>
+        </p>
+      ))}
       {proposal.assumptions.length > 0 && (
         <details className="rec__assumptions">
           <summary>

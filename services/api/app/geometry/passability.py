@@ -441,6 +441,27 @@ def bottleneck_blockers(
     return result
 
 
+def widths_without(plan: Plan, target_ids: list[str], exclude: set[str]) -> dict[str, float]:
+    """Ширина пути от входа к каждой цели, если убрать объекты exclude; 0 — цель недостижима.
+
+    Проверка виновников сужения: если и без них путь к цели узок, значит тесно из-за чего-то
+    ещё, например между самими окнами.
+    """
+    start = entrance_point(plan)
+    cache = erosion(plan, exclude=exclude)
+    if start is None or cache is None:
+        return {}
+    items = {item.id: item for item in plan.equipment}
+    widths: dict[str, float] = {}
+    for target_id in target_ids:
+        item = items.get(target_id)
+        if item is None:
+            continue
+        width, reachable = cache.width(Point(start), Point(client_access_point(plan, item)))
+        widths[target_id] = width if reachable else 0.0
+    return widths
+
+
 def largest_clear_circle(plan: Plan, zone_types: tuple[str, ...]) -> tuple[float, tuple[float, float] | None]:
     """Диаметр наибольшего свободного круга в клиентских зонах и его центр.
 

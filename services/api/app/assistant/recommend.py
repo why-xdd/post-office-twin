@@ -33,6 +33,23 @@ from app.models import Equipment, Plan
 from app.rules.engine import SERVICE_WINDOW_TYPES, VISITOR_TARGET_TYPES, Severity, validate
 
 # Объекты, которые разумно двигать первыми: их перенос дешевле перепланировки окон.
+# Окно кассы встроено в перегородку между залом и служебной зоной: к нему подведены кабели,
+# стоит кассовое оборудование и охрана. Движок его не переставляет и не поворачивает — двигает
+# остальное оборудование, а если без окна нарушение не снять, прямо говорит об этом.
+BUILT_IN_TYPES = frozenset({"cashier_window"})
+BUILT_IN_ASSUMPTION = (
+    "Окна кассы встроены в перегородку между залом и служебной зоной и не переставляются: "
+    "двигается остальное оборудование."
+)
+BUILT_IN_LEFT = (
+    "Часть нарушений связана с окнами кассы. Окна встроены в перегородку, поэтому автоматически "
+    "не переставляются: такие нарушения снимает перепланировка, решение за проектировщиком."
+)
+BUILT_IN_REFUSAL = (
+    "Окна кассы встроены в перегородку между залом и служебной зоной: ассистент их не переставляет "
+    "и не поворачивает. Если перепланировка это допускает, передвиньте окно на плане вручную."
+)
+
 MOVE_PRIORITY = {
     "waiting_seat": 0,
     "info_stand": 0,
@@ -291,6 +308,7 @@ def recommend_path_fix(plan: Plan, before: dict[str, Any]) -> Recommendation | N
     changes: list[Change] = []
     moved: set[str] = set()
     stats: dict[str, float | int] = {}
+    frozen = False
     # После перестановки виновников сужение может сместиться к другому объекту, поэтому
     # анализ повторяется на обновлённом плане, пока проход не достигнет нормы.
     for _round in range(PATH_FIX_ROUNDS):
@@ -305,6 +323,9 @@ def recommend_path_fix(plan: Plan, before: dict[str, Any]) -> Recommendation | N
         progressed = False
         for object_id in culprits:
             item = next((e for e in current.equipment if e.id == object_id), None)
+            if item is not None and item.type in BUILT_IN_TYPES:
+                frozen = True
+                continue
             if item is None:
                 continue
             found = search.place(
@@ -385,7 +406,8 @@ def recommend_path_fix(plan: Plan, before: dict[str, Any]) -> Recommendation | N
         ],
         assumptions=[
             "Виновники сужения определены расчётом: без них проход от входа становится шире. "
-            "Каждый переставлен на место с наибольшей шириной прохода, не добавляющее ошибок."
+            "Каждый переставлен на место с наибольшей шириной прохода, не добавляющее ошибок.",
+            *([BUILT_IN_ASSUMPTION] if frozen else []),
         ],
         effects=_effects(before, after),
         objects=[c.object_id for c in changes],
@@ -416,11 +438,9 @@ def recommend_fixes(
         for object_id in finding.objects:
             involved.setdefault(object_id, []).append(finding)
 
-    movable = [
-        item
-        for item in core.floor_equipment(plan)
-        if item.id in involved
-    ]
+    involved_items = [item for item in core.floor_equipment(plan) if item.id in involved]
+    movable = [item for item in involved_items if item.type not in BUILT_IN_TYPES]
+    frozen = len(movable) < len(involved_items)
     movable.sort(key=lambda i: (MOVE_PRIORITY.get(i.type, 2), -len(involved[i.id])))
     movable = movable[:MAX_FIX_OBJECTS]
 
@@ -488,6 +508,7 @@ def recommend_fixes(
                 assumptions=[
                     "Новое место выбрано так, чтобы не добавить ни одной ошибки проверки и не сузить "
                     "путь посетителя; из допустимых мест предпочтено ближайшее к текущему.",
+                    *([BUILT_IN_ASSUMPTION] if frozen else []),
                     *(
                         [
                             "Перенос не устраняет: "
@@ -864,6 +885,9 @@ class ImprovementReport(BaseModel):
     partial: bool = Field(
         default=False, description="Отведённое время кончилось: показаны найденные шаги"
     )
+    notes: list[str] = Field(
+        default_factory=list, description="Почему осталось то, что осталось: например, окна кассы не переставляются"
+    )
 
 
 def apply_changes(plan: Plan, changes: list[Change]) -> Plan:
@@ -999,6 +1023,18 @@ def improve(
         effects=_effects(initial, final),
         elapsed_ms=round((time.perf_counter() - started) * 1000, 1),
         partial=deadline.reached,
+        notes=[BUILT_IN_LEFT] if _errors_hold_built_in(current) else [],
+    )
+
+
+def _errors_hold_built_in(plan: Plan) -> bool:
+    """Осталось ли нарушение, в котором участвует окно кассы: его движок не переставляет."""
+    built_in = {e.id for e in plan.equipment if e.type in BUILT_IN_TYPES}
+    if not built_in:
+        return False
+    report = validate(plan)
+    return any(
+        f.severity is Severity.ERROR and built_in.intersection(f.objects) for f in report.findings
     )
 
 
@@ -1115,6 +1151,8 @@ def recommend_zone_moves(plan: Plan, deadline: "Deadline | None" = None) -> list
         if results and deadline is not None and deadline.spent():
             break
         item = next(e for e in plan.equipment if e.id == problem["объект"])
+        if item.type in BUILT_IN_TYPES:
+            continue
         allowed = [z for z in plan.zones if z.type in problem["допустимые"]]
         if not allowed:
             continue
@@ -1385,6 +1423,13 @@ def _command_target(plan: Plan, action: language.Action) -> Equipment | None:
     return None
 
 
+def _is_built_in(plan: Plan, action: language.Action) -> bool:
+    """Команда про окно кассы: названное по адресу или просто «окно», когда их несколько."""
+    target = _command_target(plan, action)
+    kind = target.type if target is not None else action.equipment_type
+    return kind in BUILT_IN_TYPES
+
+
 def _move_recommendation(plan: Plan, action: language.Action) -> Recommendation | None:
     object_id = action.object_id
     if object_id is None and action.equipment_type:
@@ -1456,6 +1501,8 @@ def run_command(plan: Plan, text: str) -> CommandResult:
                 result.recommendations.append(recommendation)
                 if recommendation.changes:
                     current = apply_changes(current, recommendation.changes)
+        elif action.kind in ("move", "rotate") and _is_built_in(current, action):
+            result.answers.append(BUILT_IN_REFUSAL)
         elif action.kind == "move":
             recommendation = _move_recommendation(current, action)
             if recommendation is not None:

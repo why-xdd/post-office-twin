@@ -10,7 +10,7 @@ import pytest
 from app.assistant import capacity, recommend
 from app.geometry import passability
 from app.models import Plan
-from app.rules.engine import VISITOR_TARGET_TYPES, validate
+from app.rules.engine import VISITOR_TARGET_TYPES, Severity, validate
 
 SAMPLE = Path(__file__).resolve().parents[3] / "data" / "example_plan.json"
 
@@ -76,10 +76,39 @@ def test_improvement_never_adds_errors(improvement: recommend.ImprovementReport)
         previous = step.errors_after
 
 
-def test_improved_plan_has_no_errors(improvement: recommend.ImprovementReport) -> None:
+def test_improvement_leaves_only_what_needs_the_windows(plan: Plan, improvement: recommend.ImprovementReport) -> None:
+    """Окна кассы встроены в перегородку, и движок их не двигает. Всё, что можно снять
+    перестановкой остального, снято; оставшиеся нарушения держатся на окнах, и отчёт об этом
+    говорит прямо."""
     improved = Plan.model_validate(improvement.improved_plan)
-    assert validate(improved).errors == 0
-    assert improvement.final["min_route_width"] >= 1.2
+    windows = {e.id for e in plan.equipment if e.type in recommend.BUILT_IN_TYPES}
+    left = [f for f in validate(improved).findings if f.severity is Severity.ERROR]
+    assert len(left) < improvement.initial["errors"]
+    assert left and all(windows.intersection(f.objects) for f in left)
+    assert improvement.notes == [recommend.BUILT_IN_LEFT]
+    # Проход от входа при этом расширен до нормы: банкомат и скамья больше его не зажимают.
+    assert improvement.final["entrance_route_width"] >= 1.2
+
+
+def test_fixes_never_move_cashier_windows(plan: Plan, improvement: recommend.ImprovementReport) -> None:
+    windows = {e.id for e in plan.equipment if e.type in recommend.BUILT_IN_TYPES}
+    moved = {c.object_id for step in improvement.steps for c in step.recommendation.changes}
+    assert windows and not windows & moved
+
+
+def test_path_rule_names_the_windows_when_they_hold_the_narrowing(improvement: recommend.ImprovementReport) -> None:
+    """Скамья сужает путь к банкомату, но к окнам тесно и без неё — между самими окнами.
+    Правило говорит об этом, а не обещает, что перестановка скамьи всё решит."""
+    improved = Plan.model_validate(improvement.improved_plan)
+    path = next(f for f in validate(improved).findings if f.rule_id == "movement_path_width" and f.severity is Severity.ERROR)
+    assert {"eq_cashier_1", "eq_cashier_2"} <= set(path.objects)
+    assert "Даже без них" in path.message
+
+
+def test_command_does_not_move_a_cashier_window(plan: Plan) -> None:
+    result = recommend.run_command(plan, "переставь окно к входу")
+    assert not result.recommendations
+    assert recommend.BUILT_IN_REFUSAL in result.answers
 
 
 def test_changes_reproduce_the_improved_plan(plan: Plan, improvement: recommend.ImprovementReport) -> None:
@@ -109,7 +138,7 @@ def test_place_equipment_does_not_add_errors(plan: Plan) -> None:
 
 def test_fixes_only_removes_errors_without_adding_equipment(plan: Plan) -> None:
     report = recommend.improve(plan, fixes_only=True)
-    assert report.final["errors"] == 0
+    assert report.final["errors"] < report.initial["errors"]
     assert all(step.recommendation.scenario == "fix" for step in report.steps)
     assert report.final["equipment_total"] == report.initial["equipment_total"]
 
@@ -160,7 +189,7 @@ def test_improvement_does_not_make_the_plan_worse_overall(plan: Plan) -> None:
     before = objective.score(plan)
     after = objective.score(improved, plan)
     assert after.total < before.total
-    assert after.errors == 0
+    assert after.errors < before.errors
     # Путь посетителя до окон не должен вырасти ради снятия ошибок.
     assert after.walk_m is not None and before.walk_m is not None
     assert after.walk_m <= before.walk_m + 0.5
@@ -203,7 +232,9 @@ def test_conclusion_is_built_from_computed_numbers(plan: Plan) -> None:
     # Внутренние идентификаторы в текст для заказчика не попадают.
     assert "eq_" not in result.text
     assert result.facts["нарушений"] == 7
-    assert result.facts["после_исправления"]["нарушений"] == 0
+    # Два нарушения держатся на окнах кассы: их движок не двигает и прямо об этом пишет.
+    assert result.facts["после_исправления"]["нарушений"] < result.facts["нарушений"]
+    assert "окнами кассы" in result.text
 
 
 def test_assistant_answers_within_its_time_budget(plan: Plan) -> None:

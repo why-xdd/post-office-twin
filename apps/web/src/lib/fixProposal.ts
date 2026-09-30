@@ -33,6 +33,8 @@ export interface FixProposal {
   rows: ProposalRow[];
   warnings: Shift | null;
   assumptions: string[];
+  /** Почему что-то осталось неисправленным: говорится прямо, а не прячется в допущениях. */
+  notes: string[];
 }
 
 const CACHE_LIMIT = 6;
@@ -91,6 +93,7 @@ function toProposal(report: ImprovementReport): FixProposal {
     rows: toRows(report, changes),
     warnings: shift(report, 'warnings'),
     assumptions: [...assumptions],
+    notes: report.notes ?? [],
     changes,
     errorsBefore: Number(report.initial.errors ?? 0),
     errorsAfter: Number(report.final.errors ?? 0),

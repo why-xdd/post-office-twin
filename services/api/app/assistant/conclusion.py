@@ -67,6 +67,8 @@ def facts(plan: Plan, fixes_only: bool = True) -> dict[str, Any]:
             if finding.severity is Severity.ERROR
         ],
         "предложено_шагов": len(improvement.steps),
+        # Почему после исправления что-то осталось: например, окна кассы движок не двигает.
+        "пометки": improvement.notes,
         "шаги": [step.recommendation.title for step in improvement.steps],
         "после_исправления": {
             "нарушений": after.errors,
@@ -123,6 +125,7 @@ def from_template(data: dict[str, Any]) -> str:
             + ("; " + ", ".join(gains) if gains else "")
             + "."
         )
+    lines.extend(data.get("пометки", []))
     return _human(" ".join(lines))
 
 

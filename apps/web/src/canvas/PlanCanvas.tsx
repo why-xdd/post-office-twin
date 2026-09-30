@@ -100,6 +100,24 @@ const ZONE_FILL: Record<string, string> = {
   staff_room: 'url(#hatch-back)',
 };
 
+/** Шкала тепловой карты: редко — холодная синь, часто — сигнальный красный. Цвета из палитры. */
+const HEAT_RAMP: [number, number, number][] = [
+  [44, 90, 116],
+  [184, 137, 58],
+  [179, 57, 31],
+];
+
+function heatColour(value: number): [number, number, number, number] {
+  if (value < 0.08) return [0, 0, 0, 0];
+  const weight = Math.sqrt(Math.min(1, value));
+  const position = weight * (HEAT_RAMP.length - 1);
+  const low = Math.min(HEAT_RAMP.length - 2, Math.floor(position));
+  const mix = position - low;
+  const channel = (index: number) =>
+    Math.round(HEAT_RAMP[low][index] + (HEAT_RAMP[low + 1][index] - HEAT_RAMP[low][index]) * mix);
+  return [channel(0), channel(1), channel(2), Math.round((0.32 + weight * 0.55) * 255)];
+}
+
 function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, onCursor, onNotice }: PlanCanvasProps) {
   const doc = useWorkspace((s) => s.doc);
   const heatmap = useWorkspace((s) => s.heatmap);
@@ -122,7 +140,7 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
   const setTool = useWorkspace((s) => s.setTool);
 
   // Карта рисуется картинкой в клетку ячейки и растягивается на план: браузер сглаживает её
-  // сам, и вместо лесенки из квадратов получается пятно, по которому видно скопление.
+  // сам, и вместо лесенки из квадратов получается поле, по которому видно скопление.
   const heatImage = useMemo(() => {
     if (!heatmap || !heatmap.values.length) return null;
     const canvas = document.createElement('canvas');
@@ -131,19 +149,21 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
     const context = canvas.getContext('2d');
     if (!context) return null;
     const image = context.createImageData(heatmap.cols, heatmap.rows);
-    const cold = [239, 217, 168];
-    const hot = [168, 48, 15];
+    // Шкала делится не по наибольшей ячейке, а по верхнему проценту: одна горячая точка иначе
+    // прижимает весь остальной зал к нулю, и карта выглядит пустой.
+    const filled = heatmap.values.filter((value) => value > 0.02).sort((a, b) => a - b);
+    const top = filled.length ? filled[Math.min(filled.length - 1, Math.floor(filled.length * 0.96))] : 1;
     for (let index = 0; index < heatmap.values.length; index += 1) {
-      const value = Math.max(0, Math.min(1, heatmap.values[index]));
+      const value = Math.max(0, Math.min(1, heatmap.values[index] / Math.max(top, 0.05)));
       const col = index % heatmap.cols;
       // Строки карты идут снизу вверх, у картинки — сверху вниз.
       const row = heatmap.rows - 1 - Math.floor(index / heatmap.cols);
       const at = (row * heatmap.cols + col) * 4;
-      const weight = Math.sqrt(value);
-      image.data[at] = Math.round(cold[0] + (hot[0] - cold[0]) * weight);
-      image.data[at + 1] = Math.round(cold[1] + (hot[1] - cold[1]) * weight);
-      image.data[at + 2] = Math.round(cold[2] + (hot[2] - cold[2]) * weight);
-      image.data[at + 3] = value < 0.04 ? 0 : Math.round((0.2 + weight * 0.62) * 255);
+      const [red, green, blue, alpha] = heatColour(value);
+      image.data[at] = red;
+      image.data[at + 1] = green;
+      image.data[at + 2] = blue;
+      image.data[at + 3] = alpha;
     }
     context.putImageData(image, 0, 0);
     return canvas.toDataURL();
@@ -736,16 +756,25 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
             heatmap.origin[1] + heatmap.rows * heatmap.cell_m,
           ]);
           return (
-            <image
-              className="plan-heat"
-              aria-hidden="true"
-              href={heatImage}
-              x={sx}
-              y={sy}
-              width={heatmap.cols * heatmap.cell_m * view.scale}
-              height={heatmap.rows * heatmap.cell_m * view.scale}
-              preserveAspectRatio="none"
-            />
+            <>
+              {/* Карта обрезается контуром: посетители ходят по полу, а не по стенам. */}
+              {outline && (
+                <clipPath id="heat-floor">
+                  <path d={screenPath(view, outline)} />
+                </clipPath>
+              )}
+              <image
+                className="plan-heat"
+                aria-hidden="true"
+                href={heatImage}
+                x={sx}
+                y={sy}
+                width={heatmap.cols * heatmap.cell_m * view.scale}
+                height={heatmap.rows * heatmap.cell_m * view.scale}
+                preserveAspectRatio="none"
+                clipPath={outline ? 'url(#heat-floor)' : undefined}
+              />
+            </>
           );
         })()}
 

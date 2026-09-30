@@ -141,7 +141,7 @@
   height: 10px;
   border-radius: 2px;
   border: 1px solid var(--label-edge);
-  background: linear-gradient(to right, var(--heat-cold), var(--heat-hot));
+  background: linear-gradient(to right, var(--notice), var(--brass), var(--signal));
 }
 
 .camera__legend figcaption {
@@ -177,4 +177,46 @@
 
 .camera__hint--check {
   color: var(--ink-2);
+}
+
+/* Предпросмотр плана для привязки: те же точки, что и на кадре */
+.camera__plan {
+  width: 100%;
+  height: auto;
+  margin-top: 6px;
+  border: 1px solid var(--label-edge);
+  border-radius: 3px;
+  background: var(--sheet, #f4f1e8);
+  cursor: crosshair;
+}
+
+.camera__plan-outline {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 0.12;
+  stroke-linejoin: round;
+}
+
+.camera__plan-zone {
+  fill: rgba(94, 107, 110, 0.12);
+  stroke: var(--zone-edge);
+  stroke-width: 0.04;
+  stroke-dasharray: 0.3 0.2;
+}
+
+.camera__plan-corner {
+  fill: var(--notice);
+  opacity: 0.6;
+}
+
+.camera__plan-mark circle {
+  fill: var(--brass);
+  stroke: #fff;
+  stroke-width: 0.06;
+}
+
+.camera__plan-mark text {
+  fill: #fff;
+  font-size: 0.42px;
+  font-weight: 700;
 }

@@ -18,35 +18,24 @@ import './camera.css';
 
 type Point = [number, number];
 
-/** Углы пола отмечаются в одном порядке — иначе план и кадр «перекрутятся». */
-const CORNERS = ['дальний левый', 'дальний правый', 'ближний правый', 'ближний левый'];
-
-interface Area {
-  id: string;
-  label: string;
-  /** Углы области на плане в том же порядке, что и на кадре. */
-  corners: Point[];
+/** Габарит плана: по нему строится предпросмотр и переводятся щелчки по нему. */
+function planBox(doc: Plan): { minX: number; minY: number; width: number; height: number } {
+  const points = [
+    ...(doc.walls ?? []).flatMap((wall) => [wall.from, wall.to] as Point[]),
+    ...(doc.zones ?? []).flatMap((zone) => zone.polygon as Point[]),
+  ];
+  if (!points.length) return { minX: 0, minY: 0, width: 10, height: 10 };
+  const xs = points.map((p) => p[0]);
+  const ys = points.map((p) => p[1]);
+  const [minX, maxX, minY, maxY] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  return { minX, minY, width: Math.max(maxX - minX, 0.1), height: Math.max(maxY - minY, 0.1) };
 }
 
-function planAreas(doc: Plan): Area[] {
-  const areas: Area[] = [];
-  const bounds = (points: Point[]): Point[] => {
-    const xs = points.map((p) => p[0]);
-    const ys = points.map((p) => p[1]);
-    const [minX, maxX, minY, maxY] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
-    return [
-      [minX, maxY],
-      [maxX, maxY],
-      [maxX, minY],
-      [minX, minY],
-    ];
-  };
-  const walls = (doc.walls ?? []).flatMap((wall) => [wall.from, wall.to] as Point[]);
-  if (walls.length) areas.push({ id: 'outline', label: 'Помещение целиком', corners: bounds(walls) });
-  for (const zone of doc.zones ?? []) {
-    areas.push({ id: zone.id, label: zone.label || zone.type, corners: bounds(zone.polygon as Point[]) });
-  }
-  return areas;
+/** Углы помещения, к которым притягивается щелчок по плану: попасть точно мышью трудно. */
+function planCorners(doc: Plan): Point[] {
+  const outline = outlinePoints(doc);
+  if (outline) return outline;
+  return (doc.walls ?? []).flatMap((wall) => [wall.from, wall.to] as Point[]);
 }
 
 export function Camera() {
@@ -55,24 +44,25 @@ export function Camera() {
   const input = useRef<HTMLInputElement>(null);
   const [video, setVideo] = useState<ExtractedFrames | null>(null);
   const [marks, setMarks] = useState<Point[]>([]);
-  const [areaId, setAreaId] = useState('outline');
+  const [planMarks, setPlanMarks] = useState<Point[]>([]);
   const [busy, setBusy] = useState<'frames' | 'analyze' | null>(null);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<VisionReport | null>(null);
 
-  const areas = useMemo(() => (doc ? planAreas(doc) : []), [doc]);
-  const area = areas.find((item) => item.id === areaId) ?? areas[0];
+  const box = useMemo(() => (doc ? planBox(doc) : null), [doc]);
+  const corners = useMemo(() => (doc ? planCorners(doc) : []), [doc]);
+  const outline = useMemo(() => (doc ? outlinePoints(doc) : null), [doc]);
+  const ready = marks.length === 4 && planMarks.length === 4;
 
-  // Проверка привязки: контур помещения с плана, наложенный обратно на кадр. Легло на стены —
-  // точки отмечены верно; уехало — видно сразу, до расчёта.
+  // Проверка привязки: контур помещения с плана, наложенный обратно на кадр. Лёг на стены —
+  // точки отмечены верно; уехал — видно сразу, до расчёта.
   const check = useMemo(() => {
-    if (!doc || !area || marks.length !== 4) return null;
-    const matrix = homography(area.corners, marks);
-    const outline = outlinePoints(doc);
-    if (!matrix || !outline) return null;
+    if (!ready || !outline) return null;
+    const matrix = homography(planMarks, marks);
+    if (!matrix) return null;
     return outline.map((point) => project(matrix, point));
-  }, [doc, area, marks]);
+  }, [ready, outline, planMarks, marks]);
 
   if (!doc) return null;
 
@@ -93,16 +83,49 @@ export function Camera() {
     }
   };
 
-  /** Камера смотрит на зал целиком — тогда углы области совпадают с углами кадра. */
-  const useFrameCorners = () => {
-    if (!video) return;
+  /** Камера смотрит на зал целиком: углы кадра и углы габарита помещения — одни и те же точки. */
+  const useWholeRoom = () => {
+    if (!video || !box) return;
     setMarks([
       [0, 0],
       [video.width, 0],
       [video.width, video.height],
       [0, video.height],
     ]);
+    setPlanMarks([
+      [box.minX, box.minY + box.height],
+      [box.minX + box.width, box.minY + box.height],
+      [box.minX + box.width, box.minY],
+      [box.minX, box.minY],
+    ]);
   };
+
+  /** Щелчок по плану: точка притягивается к ближайшему углу помещения, если он рядом. */
+  const markPlan = (event: React.MouseEvent<SVGSVGElement>) => {
+    if (!box || planMarks.length >= 4) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    // Поле вокруг плана в viewBox: щелчок переводится с его учётом.
+    const pad = box.width * 0.04;
+    const spanX = box.width + pad * 2;
+    const spanY = box.height + pad * 2;
+    const x = box.minX - pad + ((event.clientX - rect.left) / rect.width) * spanX;
+    const y = box.minY + box.height + pad - ((event.clientY - rect.top) / rect.height) * spanY;
+    const snap = (spanX / rect.width) * 14;
+    let point: Point = [x, y];
+    let best = snap;
+    for (const corner of corners) {
+      const distance = Math.hypot(corner[0] - x, corner[1] - y);
+      if (distance < best) {
+        best = distance;
+        point = [corner[0], corner[1]];
+      }
+    }
+    setPlanMarks([...planMarks, [Number(point[0].toFixed(2)), Number(point[1].toFixed(2))]]);
+  };
+
+  /** Точка плана в координаты предпросмотра: ось Y на плане растёт вверх, у картинки — вниз. */
+  const onPreview = (point: Point): Point =>
+    box ? [point[0] - box.minX, box.minY + box.height - point[1]] : [0, 0];
 
   const markCorner = (event: React.MouseEvent<HTMLImageElement>) => {
     if (!video || marks.length >= 4) return;
@@ -113,13 +136,13 @@ export function Camera() {
   };
 
   const analyze = async () => {
-    if (!video || marks.length !== 4 || !area) return;
+    if (!video || !ready) return;
     setBusy('analyze');
     setError(null);
     try {
       const result = await api.visionAnalyze(doc, video.frames, video.seconds, {
         frame: marks as [number, number][],
-        plan: area.corners as [number, number][],
+        plan: planMarks as [number, number][],
         frame_size: [video.width, video.height],
       });
       setReport(result);
@@ -134,6 +157,7 @@ export function Camera() {
   const reset = () => {
     setVideo(null);
     setMarks([]);
+    setPlanMarks([]);
     setReport(null);
     setHeatmap(null);
     setError(null);
@@ -178,12 +202,18 @@ export function Camera() {
           <div className="camera__step">
             <h3>
               <MapPin size={14} aria-hidden="true" />
-              {marks.length < 4 ? `Отметьте ${CORNERS[marks.length]} угол пола` : 'Углы отмечены'}
+              {marks.length < 4
+                ? `Точка ${marks.length + 1} на кадре`
+                : planMarks.length < 4
+                  ? `Точка ${planMarks.length + 1} на плане`
+                  : 'Привязка готова'}
             </h3>
             <p className="camera__hint">
-              Нужны четыре точки пола, которые на плане образуют прямоугольник вокруг выбранной
-              области, по порядку: {CORNERS.join(', ')}. «Дальний» — это верх плана, «ближний» —
-              низ, где вход. Если камера видит зал целиком, углы области совпадают с углами кадра.
+              Отметьте четыре точки пола на кадре, а потом <b>те же самые</b> точки на плане — в
+              том же порядке. Годятся любые четыре узнаваемые точки, лишь бы они не лежали на
+              одной линии: углы помещения, углы перегородки, края дверного проёма. Щелчок по плану
+              притягивается к ближайшему углу помещения. Если камера видит зал целиком, всё это
+              заменяет кнопка «Зал целиком».
             </p>
             <div className="camera__frame">
               <img src={video.preview} alt="Первый кадр записи" onClick={markCorner} />
@@ -215,27 +245,71 @@ export function Camera() {
             </div>
             {check && (
               <p className="camera__hint camera__hint--check">
-                Синим показан контур помещения с плана, наложенный на кадр по вашим точкам. Лёг на
-                стены — привязка верная; уехал — отметьте углы заново, иначе людей посчитает
-                неверно.
+                Синим — контур помещения с плана, наложенный на кадр по вашим точкам. Лёг на стены
+                — привязка верная; уехал — отметьте точки заново, иначе людей посчитает неверно.
               </p>
             )}
-            <div className="camera__row">
-              <label className="camera__field">
-                <span>Эти углы на плане — это</span>
-                <select value={areaId} onChange={(event) => setAreaId(event.target.value)}>
-                  {areas.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.label}
-                    </option>
+
+            {box && (
+              <>
+                <p className="camera__hint">
+                  {planMarks.length < 4
+                    ? `Те же точки на плане, по порядку. Отмечено ${planMarks.length} из 4.`
+                    : 'Точки на плане отмечены.'}
+                </p>
+                <svg
+                  className="camera__plan"
+                  viewBox={`${-box.width * 0.04} ${-box.width * 0.04} ${box.width * 1.08} ${box.height + box.width * 0.08}`}
+                  role="img"
+                  aria-label="План отделения для привязки"
+                  onClick={markPlan}
+                >
+                  {(doc.zones ?? []).map((zone) => (
+                    <polygon
+                      key={zone.id}
+                      className="camera__plan-zone"
+                      points={(zone.polygon as Point[]).map((point) => onPreview(point).join(',')).join(' ')}
+                    />
                   ))}
-                </select>
-              </label>
-              <button type="button" className="btn btn--outline" onClick={useFrameCorners}>
+                  {outline && (
+                    <polygon
+                      className="camera__plan-outline"
+                      points={outline.map((point) => onPreview(point).join(',')).join(' ')}
+                    />
+                  )}
+                  {corners.map((corner, index) => {
+                    const [cx, cy] = onPreview(corner);
+                    return <circle key={index} className="camera__plan-corner" cx={cx} cy={cy} r={box.width / 90} />;
+                  })}
+                  {planMarks.map((point, index) => {
+                    const [cx, cy] = onPreview(point);
+                    return (
+                      <g key={index} className="camera__plan-mark">
+                        <circle cx={cx} cy={cy} r={box.width / 36} />
+                        <text x={cx} y={cy} dy={box.width / 110} textAnchor="middle">
+                          {index + 1}
+                        </text>
+                      </g>
+                    );
+                  })}
+                </svg>
+              </>
+            )}
+
+            <div className="camera__row">
+              <button type="button" className="btn btn--outline" onClick={useWholeRoom}>
                 <Scan size={14} aria-hidden="true" />
-                Углы кадра
+                Зал целиком
               </button>
-              <button type="button" className="btn btn--outline" onClick={() => setMarks([])} disabled={!marks.length}>
+              <button
+                type="button"
+                className="btn btn--outline"
+                onClick={() => {
+                  setMarks([]);
+                  setPlanMarks([]);
+                }}
+                disabled={!marks.length && !planMarks.length}
+              >
                 <RotateCcw size={14} aria-hidden="true" />
                 Отметить заново
               </button>
@@ -244,7 +318,7 @@ export function Camera() {
               Кадров в записи: {video.frames.length}, длительность {formatNumber(video.duration, 0)} с.
             </p>
             <div className="camera__row">
-              <button type="button" className="btn btn--steel-light" onClick={analyze} disabled={marks.length !== 4 || busy !== null}>
+              <button type="button" className="btn btn--steel-light" onClick={analyze} disabled={!ready || busy !== null}>
                 {busy === 'analyze' ? 'Считаем посетителей…' : 'Разобрать запись'}
               </button>
               <button type="button" className="btn btn--outline" onClick={reset} disabled={busy !== null}>

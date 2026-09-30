@@ -121,6 +121,34 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
   const endTransient = useWorkspace((s) => s.endTransient);
   const setTool = useWorkspace((s) => s.setTool);
 
+  // Карта рисуется картинкой в клетку ячейки и растягивается на план: браузер сглаживает её
+  // сам, и вместо лесенки из квадратов получается пятно, по которому видно скопление.
+  const heatImage = useMemo(() => {
+    if (!heatmap || !heatmap.values.length) return null;
+    const canvas = document.createElement('canvas');
+    canvas.width = heatmap.cols;
+    canvas.height = heatmap.rows;
+    const context = canvas.getContext('2d');
+    if (!context) return null;
+    const image = context.createImageData(heatmap.cols, heatmap.rows);
+    const cold = [239, 217, 168];
+    const hot = [168, 48, 15];
+    for (let index = 0; index < heatmap.values.length; index += 1) {
+      const value = Math.max(0, Math.min(1, heatmap.values[index]));
+      const col = index % heatmap.cols;
+      // Строки карты идут снизу вверх, у картинки — сверху вниз.
+      const row = heatmap.rows - 1 - Math.floor(index / heatmap.cols);
+      const at = (row * heatmap.cols + col) * 4;
+      const weight = Math.sqrt(value);
+      image.data[at] = Math.round(cold[0] + (hot[0] - cold[0]) * weight);
+      image.data[at + 1] = Math.round(cold[1] + (hot[1] - cold[1]) * weight);
+      image.data[at + 2] = Math.round(cold[2] + (hot[2] - cold[2]) * weight);
+      image.data[at + 3] = value < 0.04 ? 0 : Math.round((0.2 + weight * 0.62) * 255);
+    }
+    context.putImageData(image, 0, 0);
+    return canvas.toDataURL();
+  }, [heatmap]);
+
   const container = useRef<HTMLDivElement>(null);
   const svg = useRef<SVGSVGElement>(null);
   const [size, setSize] = useState({ width: 800, height: 600 });
@@ -702,30 +730,24 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
           })}
 
         {/* Тепловая карта посещаемости: где посетители стояли чаще всего */}
-        {layers.heat && heatmap && (
-          <g className="plan-heat" aria-hidden="true">
-            {heatmap.values.map((value, index) => {
-              if (value < 0.06) return null;
-              const col = index % heatmap.cols;
-              const row = Math.floor(index / heatmap.cols);
-              const x = heatmap.origin[0] + col * heatmap.cell_m;
-              const y = heatmap.origin[1] + row * heatmap.cell_m;
-              const [sx, sy] = toScreen(view, [x, y + heatmap.cell_m]);
-              const side = heatmap.cell_m * view.scale;
-              return (
-                <rect
-                  key={index}
-                  x={sx}
-                  y={sy}
-                  width={side}
-                  height={side}
-                  fill={`color-mix(in oklab, var(--heat-hot) ${Math.round(Math.sqrt(value) * 100)}%, var(--heat-cold))`}
-                  opacity={0.34 + Math.sqrt(value) * 0.5}
-                />
-              );
-            })}
-          </g>
-        )}
+        {layers.heat && heatmap && heatImage && (() => {
+          const [sx, sy] = toScreen(view, [
+            heatmap.origin[0],
+            heatmap.origin[1] + heatmap.rows * heatmap.cell_m,
+          ]);
+          return (
+            <image
+              className="plan-heat"
+              aria-hidden="true"
+              href={heatImage}
+              x={sx}
+              y={sy}
+              width={heatmap.cols * heatmap.cell_m * view.scale}
+              height={heatmap.rows * heatmap.cell_m * view.scale}
+              preserveAspectRatio="none"
+            />
+          );
+        })()}
 
         {/* Маршруты посетителей */}
         {layers.routes &&

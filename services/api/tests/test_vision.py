@@ -214,3 +214,55 @@ def test_api_rejects_short_recording(client, plan: Plan) -> None:
     )
     assert response.status_code == 422
     assert "от 8" in response.json()["detail"]
+
+
+def test_bad_calibration_is_called_out(plan: Plan) -> None:
+    """Привязка растянула кадр — сервис говорит, что цифрам верить нельзя.
+
+    Отметить угол стены вместо угла пола легко, и тогда каждый пиксель «весит» больше метров:
+    люди выходят крупнее и многочисленнее. Правды сервис не знает, но видит, что типичное пятно
+    не похоже на одного человека, и обязан об этом сказать.
+    """
+    import io as _io
+    import sys as _sys
+
+    _sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    import make_camera_sample as sample
+
+    rng = __import__("random").Random(sample.SEED)
+    scale = sample.WIDTH / plan.ops.bbox.width_m
+    size = (sample.WIDTH, round(plan.ops.bbox.height_m * scale))
+    base = sample.background(plan, size, scale)
+    people = [sample.Visitor(path, waits) for path, waits in sample.routes(plan, rng)[:12]]
+    noise = __import__("random").Random(sample.SEED + 1)
+
+    payload: list[bytes] = []
+    active: list[sample.Visitor] = []
+    queue = list(people)
+    for second in range(30):
+        if queue and second % 3 == 0:
+            active.append(queue.pop(0))
+        for visitor in active:
+            for _ in range(sample.FPS):
+                visitor.step(1 / sample.FPS, noise)
+        active = [v for v in active if not v.done]
+        buffer = _io.BytesIO()
+        sample.render(plan, active, size, scale, base).resize(
+            (480, round(480 * size[1] / size[0]))
+        ).save(buffer, format="JPEG", quality=80)
+        payload.append(buffer.getvalue())
+
+    frames, source = counter.decode_frames(payload)
+    width, height = source
+    # Отмечена середина кадра, а сказано «помещение целиком»: кадр растянут вдвое.
+    matrix = counter.homography(
+        [(width * 0.25, height * 0.25), (width * 0.75, height * 0.25), (width * 0.75, height * 0.75), (width * 0.25, height * 0.75)],
+        [
+            (0, plan.ops.bbox.height_m),
+            (plan.ops.bbox.width_m, plan.ops.bbox.height_m),
+            (plan.ops.bbox.width_m, 0),
+            (0, 0),
+        ],
+    )
+    report = counter.analyze(plan, frames, [float(i) for i in range(len(payload))], matrix, source)
+    assert any("привязка неточная" in line for line in report.assumptions), report.assumptions

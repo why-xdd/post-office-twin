@@ -278,6 +278,9 @@ def analyze(
     timeline: list[Moment] = []
     per_zone: dict[str | None, list[int]] = {}
     outside = 0
+    # Площади засчитанных пятен: по ним видно, похоже ли пятно на одного человека. Если
+    # типичное пятно — «трое», значит привязка растянула кадр, и счёт завышен.
+    spots: list[float] = []
     for index, frame in enumerate(frames):
         mask = clean(np.abs(frame - background) > MOTION_THRESHOLD)
         counted: dict[str | None, int] = {}
@@ -291,6 +294,7 @@ def analyze(
             if area_sqm < person_area_sqm * MIN_BLOB_SHARE:
                 continue
             people = max(1, round(area_sqm / person_area_sqm))
+            spots.append(area_sqm)
             x, y = project(matrix, np.array([[foot[0] * scale, foot[1] * scale]], dtype=np.float64))[0]
             if outline is not None and not outline.buffer(0.3).contains(Point(x, y)):
                 outside += 1
@@ -353,6 +357,7 @@ def analyze(
             "кто простоял на одном месте всю запись без единого движения, будет принят за мебель.",
             "Привязка к плану — по четырём точкам, отмеченным человеком; точность зависит от них.",
         ]
+        + _calibration_warning(spots, person_area_sqm)
         + (
             [f"Вне контура помещения отброшено пятен: {outside}."]
             if outside
@@ -360,6 +365,31 @@ def analyze(
         ),
     )
     return report
+
+
+# Во сколько раз типичное пятно может быть больше человека, прежде чем это перестанет
+# объясняться толпой: полтора человека — ещё очередь, три — уже растянутый кадр.
+SUSPICIOUS_BLOB_RATIO = 1.8
+
+
+def _calibration_warning(spots: list[float], person_area_sqm: float) -> list[str]:
+    """Предупреждение о неточной привязке, если типичное пятно не похоже на человека.
+
+    Ошибиться в четырёх точках легко: отметил угол стены вместо угла пола — и кадр растянулся
+    на всё помещение, каждый пиксель стал «больше» в метрах, а люди — крупнее и многочисленнее.
+    Сервис не может знать правду, но может сказать, что цифры выглядят подозрительно.
+    """
+    if len(spots) < 10:
+        return []
+    typical = float(np.median(spots))
+    ratio = typical / person_area_sqm
+    if ratio < SUSPICIOUS_BLOB_RATIO:
+        return []
+    return [
+        f"Типичное пятно на кадре — {ratio:.1f} человека по площади ({typical:.2f} м²). Если "
+        f"плотной толпы в зале не было, привязка неточная: отмеченный на кадре участок меньше "
+        f"выбранного на плане, и людей посчитано больше, чем есть. Отметьте углы заново."
+    ]
 
 
 def _summary(loads: list[ZoneLoad], people: list[int], duration: float) -> list[str]:

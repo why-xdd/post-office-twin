@@ -6,11 +6,12 @@
  * считает людей по зонам и рисует тепловую карту прямо на чертеже.
  */
 
-import { ChevronDown, Film, MapPin, RotateCcw } from 'lucide-react';
+import { ChevronDown, Film, MapPin, RotateCcw, Scan } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
 import { ApiError, api } from '../lib/api';
+import { homography, project } from '../lib/homography';
 import type { Plan, VisionReport } from '../lib/plan';
-import { formatNumber, plural } from '../lib/planFacts';
+import { formatNumber, outlinePoints, plural } from '../lib/planFacts';
 import { extractFrames, type ExtractedFrames } from '../lib/video';
 import { useWorkspace } from '../state/store';
 import './camera.css';
@@ -63,6 +64,16 @@ export function Camera() {
   const areas = useMemo(() => (doc ? planAreas(doc) : []), [doc]);
   const area = areas.find((item) => item.id === areaId) ?? areas[0];
 
+  // Проверка привязки: контур помещения с плана, наложенный обратно на кадр. Легло на стены —
+  // точки отмечены верно; уехало — видно сразу, до расчёта.
+  const check = useMemo(() => {
+    if (!doc || !area || marks.length !== 4) return null;
+    const matrix = homography(area.corners, marks);
+    const outline = outlinePoints(doc);
+    if (!matrix || !outline) return null;
+    return outline.map((point) => project(matrix, point));
+  }, [doc, area, marks]);
+
   if (!doc) return null;
 
   const pick = async (file: File) => {
@@ -80,6 +91,17 @@ export function Camera() {
       setBusy(null);
       setProgress(0);
     }
+  };
+
+  /** Камера смотрит на зал целиком — тогда углы области совпадают с углами кадра. */
+  const useFrameCorners = () => {
+    if (!video) return;
+    setMarks([
+      [0, 0],
+      [video.width, 0],
+      [video.width, video.height],
+      [0, video.height],
+    ]);
   };
 
   const markCorner = (event: React.MouseEvent<HTMLImageElement>) => {
@@ -159,10 +181,28 @@ export function Camera() {
               {marks.length < 4 ? `Отметьте ${CORNERS[marks.length]} угол пола` : 'Углы отмечены'}
             </h3>
             <p className="camera__hint">
-              Щёлкните по кадру четыре раза: {CORNERS.join(', ')}. По этим точкам кадр совмещается с планом.
+              Нужны четыре точки пола, которые на плане образуют прямоугольник вокруг выбранной
+              области, по порядку: {CORNERS.join(', ')}. «Дальний» — это верх плана, «ближний» —
+              низ, где вход. Если камера видит зал целиком, углы области совпадают с углами кадра.
             </p>
             <div className="camera__frame">
               <img src={video.preview} alt="Первый кадр записи" onClick={markCorner} />
+              <svg
+                className="camera__overlay"
+                viewBox={`0 0 ${video.width} ${video.height}`}
+                preserveAspectRatio="none"
+                aria-hidden="true"
+              >
+                {marks.length > 1 && (
+                  <polygon
+                    className="camera__quad"
+                    points={marks.map((point) => point.join(',')).join(' ')}
+                  />
+                )}
+                {check && (
+                  <polygon className="camera__outline" points={check.map((point) => point.join(',')).join(' ')} />
+                )}
+              </svg>
               {marks.map((point, index) => (
                 <span
                   key={index}
@@ -173,6 +213,13 @@ export function Camera() {
                 </span>
               ))}
             </div>
+            {check && (
+              <p className="camera__hint camera__hint--check">
+                Синим показан контур помещения с плана, наложенный на кадр по вашим точкам. Лёг на
+                стены — привязка верная; уехал — отметьте углы заново, иначе людей посчитает
+                неверно.
+              </p>
+            )}
             <div className="camera__row">
               <label className="camera__field">
                 <span>Эти углы на плане — это</span>
@@ -184,6 +231,10 @@ export function Camera() {
                   ))}
                 </select>
               </label>
+              <button type="button" className="btn btn--outline" onClick={useFrameCorners}>
+                <Scan size={14} aria-hidden="true" />
+                Углы кадра
+              </button>
               <button type="button" className="btn btn--outline" onClick={() => setMarks([])} disabled={!marks.length}>
                 <RotateCcw size={14} aria-hidden="true" />
                 Отметить заново

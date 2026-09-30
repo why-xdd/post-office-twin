@@ -1235,6 +1235,9 @@ def _action_words(action: language.Action, plan: Plan) -> str:
         return f"поставить: {label}{count}{where}"
     if action.kind == "move":
         return f"переставить: {_object_name(plan, action.object_id) if action.object_id else label}{where}"
+    if action.kind == "rotate":
+        target = _object_name(plan, action.object_id) if action.object_id else label
+        return f"развернуть: {target} на {int(action.angle)}°"
     if action.kind == "remove":
         return f"убрать: {_object_name(plan, action.object_id) if action.object_id else label}"
     if action.kind == "fix":
@@ -1263,6 +1266,76 @@ def _remove_recommendation(plan: Plan, object_id: str) -> Recommendation | None:
         effects=_effects(before, after, item.type),
         objects=[object_id],
     )
+
+
+def _rotate_recommendation(plan: Plan, action: language.Action) -> Recommendation | None:
+    """Разворот объекта на месте: «разверни кассу на 90 градусов».
+
+    Место остаётся прежним, меняется только поворот, поэтому эффект виден сразу: развёрнутый
+    объект перестаёт перекрывать проход — или, наоборот, начинает, и проверка об этом скажет.
+    """
+    item = _command_target(plan, action)
+    if item is None:
+        return None
+    turned = round((item.rotation_deg + action.angle) % 360, 1)
+    change = Change(
+        op="move",
+        object_id=item.id,
+        equipment_type=item.type,
+        label=item.label,
+        position=item.position,
+        rotation_deg=turned,
+        previous_position=item.position,
+        previous_rotation_deg=item.rotation_deg,
+    )
+    before = summarize(plan)
+    after_plan = apply_changes(plan, [change])
+    after = summarize(after_plan)
+    degrees = int(action.angle) if float(action.angle).is_integer() else action.angle
+    return Recommendation(
+        id=f"command:rotate:{item.id}",
+        scenario="layout",
+        priority=0,
+        title=f"Развернуть: {_object_name(plan, item.id)} на {degrees}°",
+        summary=(
+            f"Поворот с {int(item.rotation_deg)}° на {int(turned)}°, место прежнее. "
+            f"Ошибок станет {after['errors']} вместо {before['errors']}."
+        ),
+        changes=[change],
+        reasons=[Reason(text="Действие запрошено командой; проверка показывает, как изменится план.")],
+        effects=_effects(before, after, item.type),
+        objects=[item.id],
+    )
+
+
+def _ambiguous(plan: Plan, action: language.Action) -> str:
+    """Почему команду не выполнили: объект не назван однозначно.
+
+    Ответить «не понял» на понятную фразу нечестно: сервис фразу понял, но не знает, о каком из
+    трёх окон речь. Поэтому он говорит, сколько их, и как назвать нужное.
+    """
+    if action.equipment_type:
+        same = [e for e in plan.equipment if e.type == action.equipment_type]
+        if len(same) > 1:
+            addresses = ", ".join(_address(plan, e.id) for e in same[:6])
+            return (
+                f"{_label(plan, action.equipment_type)} на плане {len(same)}: {addresses}. "
+                f"Назовите нужный по адресу — например «{addresses.split(', ')[0]}»."
+            )
+        if not same:
+            return f"{_label(plan, action.equipment_type)} на плане нет."
+    return "Не понял, о каком объекте речь: назовите его по адресу вида О-07."
+
+
+def _command_target(plan: Plan, action: language.Action) -> Equipment | None:
+    """Объект, о котором говорит команда: по адресу, по подписи или единственный своего типа."""
+    if action.object_id:
+        return next((e for e in plan.equipment if e.id == action.object_id), None)
+    if action.equipment_type:
+        same = [e for e in plan.equipment if e.type == action.equipment_type]
+        if len(same) == 1:
+            return same[0]
+    return None
 
 
 def _move_recommendation(plan: Plan, action: language.Action) -> Recommendation | None:
@@ -1342,7 +1415,14 @@ def run_command(plan: Plan, text: str) -> CommandResult:
                 result.recommendations.append(recommendation)
                 current = apply_changes(current, recommendation.changes)
             else:
-                result.unknown.append(action.text)
+                result.answers.append(_ambiguous(current, action))
+        elif action.kind == "rotate":
+            recommendation = _rotate_recommendation(current, action)
+            if recommendation is not None:
+                result.recommendations.append(recommendation)
+                current = apply_changes(current, recommendation.changes)
+            else:
+                result.answers.append(_ambiguous(current, action))
         elif action.kind == "remove":
             object_id = action.object_id
             if object_id is None and action.equipment_type:
@@ -1353,7 +1433,7 @@ def run_command(plan: Plan, text: str) -> CommandResult:
                 result.recommendations.append(recommendation)
                 current = apply_changes(current, recommendation.changes)
             else:
-                result.unknown.append(action.text)
+                result.answers.append(_ambiguous(current, action))
         elif action.kind == "fix":
             state = summarize(current)
             result.recommendations.extend(recommend_fixes(current, state, limit=3))

@@ -60,6 +60,14 @@ COMMANDS = [
     ("сколько скамеек в зоне ожидания?", "question", "waiting_seat", {"asked": "count", "zone": "z_waiting"}),
     ("какая свободная площадь?", "question", None, {"asked": "area"}),
     ("покажи камеру зала", "question", "camera", {"asked": "where"}),
+    ("покажи нарушения", "question", None, {"asked": "state"}),
+    ("почему тут нарушение", "question", None, {"asked": "state"}),
+    ("разверни кассу на 90 градусов", "rotate", "cashier_window", {"angle": 90.0}),
+    ("поверни банкомат на 45", "rotate", "atm", {"angle": 45.0}),
+    ("освободи проход у входа", "fix", None, {}),
+    ("перенеси окно к стене", "move", "cashier_window", {"near_wall": True}),
+    ("сколько окон", "question", "cashier_window", {"asked": "count"}),
+    ("поставь стол сортировки", "add", "sorting_table", {}),
 ]
 
 # Фразы, которые командой не являются: сервис должен переспросить, а не угадывать.
@@ -74,6 +82,8 @@ NOT_COMMANDS = [
     "отмени последнее действие",
     "открой третью версию плана",
     "распечатай опись",
+    "поменяй местами банкомат и почтомат",
+    "увеличь зону ожидания",
 ]
 
 
@@ -93,6 +103,8 @@ def test_phrase_is_understood(plan: Plan, text: str, kind: str, type_code: str |
         assert action.object_id == extra["object"]
     if "asked" in extra:
         assert action.question == extra["asked"]
+    if "angle" in extra:
+        assert action.angle == extra["angle"]
     for flag in ("near_entrance", "near_wall", "near_partition"):
         if extra.get(flag):
             assert getattr(action, flag) is True, f"во фразе «{text}» не отмечено {flag}"
@@ -123,6 +135,23 @@ def test_where_answer_names_zone_and_place(plan: Plan) -> None:
 def test_check_answers_with_the_current_state(plan: Plan) -> None:
     result = recommend.run_command(plan, "проверь план")
     assert result.answers and "арушен" in result.answers[0]
+
+
+def test_rotation_keeps_the_place_and_turns_the_object(plan: Plan) -> None:
+    """«Разверни банкомат на 90 градусов» — поворот на месте, а не перестановка."""
+    result = recommend.run_command(plan, "разверни банкомат на 90 градусов")
+    assert len(result.recommendations) == 1
+    change = result.recommendations[0].changes[0]
+    item = next(e for e in plan.equipment if e.id == change.object_id)
+    assert change.position == item.position, "место не меняется"
+    assert change.rotation_deg == (item.rotation_deg + 90) % 360
+
+
+def test_ambiguous_target_is_explained_not_refused(plan: Plan) -> None:
+    """Окон три: сервис не молчит «не понял», а говорит, как назвать нужное."""
+    result = recommend.run_command(plan, "разверни кассу")
+    assert result.recommendations == []
+    assert result.answers and "О-01" in result.answers[0]
 
 
 def test_address_in_a_phrase_is_not_a_quantity(plan: Plan) -> None:

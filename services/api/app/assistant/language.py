@@ -30,7 +30,7 @@ NUMBERS = {
 
 # Слова, по которым узнаётся тип оборудования, когда полное название никто не пишет.
 SYNONYMS: dict[str, tuple[str, ...]] = {
-    "cashier_window": ("касс", "окно обслуживания", "операционн", "окошк"),
+    "cashier_window": ("касс", "окно обслуживания", "операционн", "окошк", "окн", "окон"),
     "pvz_counter": ("пвз", "выдач", "стойка выдачи"),
     "self_service_kiosk": ("терминал очеред", "электронн очеред", "киоск", "самообслуж", "талон"),
     "payment_terminal_stand": ("терминал оплат", "оплат"),
@@ -54,7 +54,7 @@ SYNONYMS: dict[str, tuple[str, ...]] = {
     "fitting_room": ("примерочн",),
     "trash_bin": ("урн", "мусор"),
     "potted_plant": ("растен", "цвет"),
-    "sorting_table": ("стол сортировк", "сортировочн"),
+    "sorting_table": ("стол сортировк", "сортировочн", "стол"),
 }
 
 ZONE_SYNONYMS: dict[str, tuple[str, ...]] = {
@@ -69,10 +69,13 @@ ZONE_SYNONYMS: dict[str, tuple[str, ...]] = {
 ADD_WORDS = ("поставь", "поставим", "постав", "добавь", "добавьте", "размести", "установи", "нужно", "нужен", "нужна", "хочу")
 REMOVE_WORDS = ("убери", "удали", "убрать", "снеси", "демонтируй", "убрат")
 MOVE_WORDS = ("передвинь", "перенеси", "переставь", "сдвинь", "подвинь", "перемести")
+ROTATE_WORDS = ("разверни", "поверни", "разворот", "повернуть", "развернуть")
+# Осмысленные просьбы, которых сервис не умеет: лучше честно переспросить, чем понять неверно.
+NOT_SUPPORTED = ("поменяй местами", "местами", "обменяй")
 # Всё, что означает «разберись сам»: устранение нарушений и расширение проходов.
 FIX_WORDS = (
     "исправь", "почини", "расставь", "оптимизируй", "в порядок", "по нормам",
-    "расширь", "шире", "разберись", "исправить",
+    "расширь", "шире", "разберись", "исправить", "освободи", "разгрузи",
 )
 CHECK_WORDS = ("проверь", "что не так", "какие нарушения", "проверка", "всё ли в порядке")
 
@@ -86,15 +89,23 @@ NEAR_ENTRANCE_WORDS = ("у вход", "около вход", "возле вхо�
 NEAR_WALL_WORDS = ("у стен", "к стене", "вдоль стен", "рядом со стен", "около стен", "пристен")
 NEAR_PARTITION_WORDS = ("перегородк",)
 
-# Единицы измерения: число перед ними — размер или расстояние, а не количество предметов.
-UNITS = ("м", "мм", "см", "метр", "метра", "метров", "метрах", "кв", "%", "процент")
+# Адрес объекта в тексте: О-07, о7, О 12.
+ADDRESS = re.compile(r"\bо[\s-]?(\d{1,2})\b")
+
+# Единицы измерения: число перед ними — размер, угол или расстояние, а не количество предметов.
+UNITS = (
+    "м", "мм", "см", "метр", "метра", "метров", "метрах", "кв", "%", "процент",
+    "градус", "градуса", "градусов", "гр",
+)
+# Слова о нарушениях: спрашивают о состоянии плана, а не о предмете.
+TROUBLE_WORDS = ("нарушени", "ошибк", "замечани", "не в порядке")
 
 
 @dataclass
 class Action:
     """Одно понятое действие: что сделать, с чем и где."""
 
-    kind: str  # add | move | remove | fix | check | question
+    kind: str  # add | move | remove | rotate | fix | check | question
     equipment_type: str | None = None
     object_id: str | None = None
     zone_id: str | None = None
@@ -104,6 +115,8 @@ class Action:
     near_wall: bool = False
     # Для вопроса: о чём спросили — count | where | area | state.
     question: str | None = None
+    # Для разворота: на сколько градусов по часовой стрелке.
+    angle: float = 90.0
     text: str = ""
 
 
@@ -274,9 +287,6 @@ def _find_zone(fragment: str, plan: Plan) -> str | None:
     return None
 
 
-ADDRESS = re.compile(r"\bо[\s-]?(\d{1,2})\b")
-
-
 def _find_object(fragment: str, plan: Plan) -> str | None:
     """Объект по адресу (О-03) или по подписи."""
     address = ADDRESS.search(fragment)
@@ -309,8 +319,24 @@ def _count(fragment: str) -> int:
     return 1
 
 
+def _angle(part: str) -> float:
+    """На сколько градусов развернуть. По умолчанию — на прямой угол.
+
+    Номер из адреса объекта углом не считается: «поверни О-10 на 45» — это 45°, а не 10°.
+    """
+    found = re.search(r"\b(\d{1,3})\s*(?:градус\w*|гр\b|°)?", ADDRESS.sub(" ", part))
+    if found:
+        value = int(found.group(1)) % 360
+        if value:
+            return float(value)
+    return 90.0
+
+
 def _question(part: str) -> str | None:
     """О чём спрашивают, если это вопрос, а не команда."""
+    # «Покажи нарушения» и «почему тут ошибка» — вопрос о состоянии плана, а не о предмете.
+    if any(hint in part for hint in TROUBLE_WORDS):
+        return "state"
     if any(hint in part for hint in AREA_QUESTIONS):
         return "area"
     if any(part.startswith(hint) or f" {hint} " in part for hint in COUNT_QUESTIONS):
@@ -327,6 +353,11 @@ def understand(text: str, plan: Plan) -> Understanding:
     result = Understanding()
     normalised = _normalise(text)
     if not normalised:
+        return result
+    # Проверяется вся фраза целиком: «поменяй местами банкомат и почтомат» распадается на части,
+    # и вторая половина выглядела бы как «поставить почтомат».
+    if any(word in normalised for word in NOT_SUPPORTED):
+        result.unknown.append(normalised)
         return result
 
     # Фраза делится на части: «поставь кассу у стены и убери банкомат» — это два действия.
@@ -359,7 +390,9 @@ def _understand_part(part: str, plan: Plan) -> Action | None:
 
     # Вопрос разбирается раньше команд: «сколько у нас окон» — это не «поставить окно».
     asked = _question(part)
-    if asked is not None and not any(word in part for word in ADD_WORDS + REMOVE_WORDS + MOVE_WORDS):
+    if asked is not None and not any(
+        word in part for word in ADD_WORDS + REMOVE_WORDS + MOVE_WORDS + ROTATE_WORDS
+    ):
         return Action(
             kind="question",
             question=asked,
@@ -375,6 +408,16 @@ def _understand_part(part: str, plan: Plan) -> Action | None:
     if any(word in part for word in REMOVE_WORDS):
         if object_id or type_code:
             return Action(kind="remove", object_id=object_id, equipment_type=type_code, text=part)
+        return None
+    if any(word in part for word in ROTATE_WORDS):
+        if object_id or type_code:
+            return Action(
+                kind="rotate",
+                object_id=object_id,
+                equipment_type=type_code,
+                angle=_angle(part),
+                text=part,
+            )
         return None
     if any(word in part for word in MOVE_WORDS):
         if object_id or type_code:

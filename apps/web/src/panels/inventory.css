@@ -174,10 +174,6 @@
   font-weight: 660;
 }
 
-.passport__section--alert h3 {
-  color: var(--signal);
-}
-
 .passport__facts {
   display: grid;
   grid-template-columns: 132px 1fr;
@@ -225,22 +221,6 @@
 .passport__links .btn {
   min-height: 32px;
   text-decoration: none;
-}
-
-.passport__list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  font-size: var(--text-13);
-}
-
-.passport__list li {
-  display: flex;
-  align-items: center;
-  gap: var(--s-2);
 }
 
 /* Учёт в 1С: выгрузка описи и сверка с ведомостью */

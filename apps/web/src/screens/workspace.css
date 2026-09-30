@@ -17,6 +17,65 @@
   margin-left: auto;
 }
 
+/* Карточка нарушения на телефоне: над планом, а не вместо него */
+.ws-peek {
+  display: none;
+}
+
+.ws-peek__pin {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  color: #fff;
+  background: var(--signal);
+  font-family: var(--font-plate);
+  font-stretch: 70%;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.ws-peek--warning .ws-peek__pin {
+  background: var(--caution);
+}
+
+.ws-peek__title {
+  font-size: var(--text-14);
+  font-weight: 640;
+  line-height: 1.3;
+}
+
+.ws-peek__measure {
+  margin-top: 2px;
+  color: var(--signal);
+  font-size: var(--text-13);
+  line-height: 1.35;
+}
+
+.ws-peek--warning .ws-peek__measure {
+  color: var(--caution);
+}
+
+.ws-peek .ws-peek__more {
+  min-height: 40px;
+  margin-top: var(--s-2);
+  padding: 0 var(--s-3);
+  font-size: var(--text-13);
+}
+
+.ws-peek__close {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin: -10px -10px 0 0;
+  border: 0;
+  border-radius: var(--radius-plate);
+  color: var(--ink-2);
+  background: none;
+}
+
 .ws-hint {
   position: absolute;
   top: var(--s-4);
@@ -714,6 +773,42 @@
     bottom: var(--s-3);
     left: var(--s-3);
     font-size: var(--text-12);
+  }
+
+  /* Сохранённое состояние на телефоне — одна галочка: первая строка нужна названию плана.
+     Подпись остаётся для экранного диктора. */
+  .ws-rail .ws-rail__save--saved {
+    min-width: 0;
+    padding: 0 var(--s-2);
+  }
+
+  .ws-rail__save--saved .ws-rail__save-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .ws-peek {
+    position: absolute;
+    right: var(--s-3);
+    bottom: var(--s-3);
+    left: var(--s-3);
+    z-index: 3;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: var(--s-3);
+    align-items: start;
+    padding: var(--s-3);
+    border-radius: var(--radius-plate);
+    color: var(--ink);
+    background: var(--label);
+    box-shadow:
+      0 0 0 1px var(--label-edge),
+      0 6px 18px rgba(20, 24, 26, 0.22);
+    animation: notice-in var(--dur-base) var(--ease-drawer) both;
   }
 }
 

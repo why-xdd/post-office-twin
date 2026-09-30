@@ -55,6 +55,10 @@
   --caution-bg: #f0e1bc;
   --notice: #2c5a74;
   --notice-bg: #d6e2e8;
+  /* Сигнальные цвета на стали светлее бумажных: иначе теряются на тёмном */
+  --signal-on-steel: #f2c1b1;
+  --signal-mark-on-steel: #e0876f;
+  --caution-mark-on-steel: #e6c173;
   --ok: #2d6843;
   --ok-bg: #d3e4d6;
 

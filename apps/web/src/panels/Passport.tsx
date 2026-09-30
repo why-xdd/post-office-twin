@@ -4,7 +4,7 @@
  * что человек видит по щелчку.
  */
 
-import { CalendarClock, ExternalLink, IdCard, MapPin, Wrench } from 'lucide-react';
+import { ExternalLink, IdCard, MapPin, Wrench } from 'lucide-react';
 import { useState } from 'react';
 import { TextField } from '../components/fields';
 import { Plate } from '../components/Plate';
@@ -12,6 +12,7 @@ import type { AddressBook } from '../lib/addresses';
 import { key } from '../lib/addresses';
 import type { Equipment, EquipmentTypeInfo } from '../lib/plan';
 import { formatNumber } from '../lib/planFacts';
+import { formatDate, inspectionState } from '../lib/inspections';
 import { useWorkspace } from '../state/store';
 import { glyphFor } from '../canvas/glyphs';
 import './inventory.css';
@@ -24,26 +25,6 @@ interface PassportProps {
   types: Map<string, EquipmentTypeInfo>;
 }
 
-const DAY = 24 * 60 * 60 * 1000;
-
-function formatDate(date: string | undefined): string {
-  if (!date) return 'Не указан';
-  const parsed = new Date(`${date}T00:00:00`);
-  if (Number.isNaN(parsed.getTime())) return date;
-  return parsed.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
-}
-
-function inspectionState(date: string | undefined): { tone: 'overdue' | 'soon' | 'ok' | 'none'; text: string } {
-  if (!date) return { tone: 'none', text: 'Не указан' };
-  const parsed = new Date(`${date}T00:00:00`);
-  if (Number.isNaN(parsed.getTime())) return { tone: 'none', text: date };
-  const days = Math.round((parsed.getTime() - new Date(new Date().toDateString()).getTime()) / DAY);
-  const formatted = formatDate(date);
-  if (days < 0) return { tone: 'overdue', text: `${formatted} — просрочен на ${-days} дн.` };
-  if (days <= 30) return { tone: 'soon', text: `${formatted} — через ${days} дн.` };
-  return { tone: 'ok', text: formatted };
-}
-
 export function Passport({ book, types }: PassportProps) {
   const doc = useWorkspace((s) => s.doc);
   const selection = useWorkspace((s) => s.selection);
@@ -54,31 +35,8 @@ export function Passport({ book, types }: PassportProps) {
 
   if (!doc) return null;
 
-  if (!item) {
-    const overdue = (doc.equipment ?? []).filter((e) => inspectionState(e.inventory?.next_inspection).tone === 'overdue');
-    return (
-      <div className="passport">
-        <p className="passport__prompt">Щёлкните объект на плане, чтобы открыть его паспорт.</p>
-        {overdue.length > 0 && (
-          <section className="passport__section passport__section--alert">
-            <h3>
-              <CalendarClock size={15} aria-hidden="true" /> Просрочен осмотр
-            </h3>
-            <ul className="passport__list">
-              {overdue.map((e) => (
-                <li key={e.id}>
-                  <Plate surface="label" size="sm">
-                    {book.byId.get(key('equipment', e.id)) ?? ''}
-                  </Plate>
-                  {e.label || types.get(e.type)?.label || e.type}
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
-      </div>
-    );
-  }
+  // Что просрочено, видно слева в «Сроках осмотра»; здесь — только приглашение выбрать объект.
+  if (!item) return <p className="passport__prompt">Щёлкните объект на плане, чтобы открыть его паспорт.</p>;
 
   const info = types.get(item.type);
   const Glyph = glyphFor(item.type);

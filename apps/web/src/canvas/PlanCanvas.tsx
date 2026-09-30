@@ -44,6 +44,7 @@ import {
   type Guide,
 } from '../lib/room';
 import { zoneLabelPoints } from '../lib/zoneLabels';
+import { inspectionState } from '../lib/inspections';
 import { useWorkspace, type Selection } from '../state/store';
 import { glyphFor } from './glyphs';
 import './canvas.css';
@@ -903,6 +904,8 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
           const isHighlighted = highlightSet.has(item.id);
           const isPreviewed = preview?.some((change) => change.object_id === item.id && change.op !== 'add');
           const isHover = hoverId === item.id && !(selection?.kind === 'equipment' && selection.id === item.id);
+          // В «Эксплуатации» план — паспорт отделения: у объекта видно, что подходит срок осмотра.
+          const due = mode === 'operate' ? inspectionState(item.inventory?.next_inspection) : null;
           return (
             <g
               key={item.id}
@@ -928,6 +931,11 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
                   className="plan-equipment__glyph"
                   aria-hidden="true"
                 />
+              )}
+              {due && (due.tone === 'overdue' || due.tone === 'soon') && (
+                <circle cx={Math.max(...xs)} cy={Math.max(...ys)} r={5} className={`plan-due plan-due--${due.tone}`}>
+                  <title>Осмотр: {due.relative}</title>
+                </circle>
               )}
               {tags.has(item.id) && (
                 <AddressTag

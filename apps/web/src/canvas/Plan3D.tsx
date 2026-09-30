@@ -84,7 +84,7 @@ export function Plan3D({ types }: Props) {
     sphere: THREE.Sphere | null;
     /** Кадр выставлен для этого движка: движок пересоздаётся, и камера каждый раз новая. */
     framed: boolean;
-    flight: { to: THREE.Vector3; at: THREE.Vector3; started: number } | null;
+    flight: { from: THREE.Vector3; fromAt: THREE.Vector3; to: THREE.Vector3; at: THREE.Vector3; started: number } | null;
   } | null>(null);
 
   const [quality, setQuality] = useState<Quality>(readQuality);
@@ -108,11 +108,12 @@ export function Plan3D({ types }: Props) {
       place = new THREE.Vector3(centre.x, centre.y + distance, centre.z + 0.01);
     } else if (shot === 'entrance') {
       parts.camera.up.set(0, 1, 0);
-      // Взгляд посетителя: чуть позади фигуры у входа, на высоте глаз.
+      // Взгляд посетителя: глаза на высоте 1,65 м чуть впереди фигуры у входа. Позади неё
+      // полупрозрачная фигура закрывала середину кадра.
       const door = scene.figures[0]?.centre ?? scene.centre;
       const away = new THREE.Vector3(centre.x - door[0], 0, centre.z + door[1]).normalize();
-      place = new THREE.Vector3(door[0] - away.x * 1.4, 1.65, -door[1] - away.z * 1.4);
-      target = new THREE.Vector3(centre.x, 1.2, centre.z);
+      place = new THREE.Vector3(door[0] + away.x * 0.35, 1.65, -door[1] + away.z * 0.35);
+      target = new THREE.Vector3(centre.x, 1.3, centre.z);
     } else {
       parts.camera.up.set(0, 1, 0);
       place = new THREE.Vector3(
@@ -127,7 +128,13 @@ export function Plan3D({ types }: Props) {
       parts.controls.update();
       return;
     }
-    parts.flight = { to: place, at: target, started: performance.now() };
+    parts.flight = {
+      from: parts.camera.position.clone(),
+      fromAt: parts.controls.target.clone(),
+      to: place,
+      at: target,
+      started: performance.now(),
+    };
   };
 
   // Постановка сцены: создаётся один раз на качество, потому что материалы у режимов разные.
@@ -139,7 +146,8 @@ export function Plan3D({ types }: Props) {
     renderer.setSize(box.clientWidth, box.clientHeight);
     if (quality === 'rich') {
       renderer.shadowMap.enabled = true;
-      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      // В three r18x мягкий PCF убран: обычный PCF теперь сглаживает тени сам.
+      renderer.shadowMap.type = THREE.PCFShadowMap;
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
       renderer.toneMappingExposure = 0.92;
     }
@@ -204,11 +212,13 @@ export function Plan3D({ types }: Props) {
       const parts = engine.current;
       if (!parts) return;
       if (parts.flight) {
-        // Перелёт камеры: доля пути с замедлением к концу, 700 мс.
+        // Перелёт камеры за 700 мс с замедлением к концу. Положение считается от начальной точки,
+        // а не от текущей: на медленном кадре камера всё равно приходит точно в цель, иначе вид
+        // «От входа» оставался выше уровня глаз.
         const share = Math.min(1, (now - parts.flight.started) / 700);
         const eased = 1 - Math.pow(1 - share, 3);
-        parts.camera.position.lerp(parts.flight.to, eased * 0.35);
-        parts.controls.target.lerp(parts.flight.at, eased * 0.35);
+        parts.camera.position.lerpVectors(parts.flight.from, parts.flight.to, eased);
+        parts.controls.target.lerpVectors(parts.flight.fromAt, parts.flight.at, eased);
         if (share >= 1) parts.flight = null;
       }
       parts.controls.update();

@@ -61,6 +61,22 @@
   pointer-events: none;
 }
 
+/* Сроки осмотра на плане в «Эксплуатации»: полный кружок — просрочен, кольцо — подходит срок */
+.plan-due {
+  stroke: #fff;
+  stroke-width: 1.5;
+}
+
+.plan-due--overdue {
+  fill: var(--signal);
+}
+
+.plan-due--soon {
+  fill: #fff;
+  stroke: var(--caution);
+  stroke-width: 2.5;
+}
+
 .plan-operator {
   fill: var(--steel-300);
   stroke: var(--ink-2);

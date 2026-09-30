@@ -12,6 +12,7 @@ import {
   ArrowLeft,
   Box,
   Boxes,
+  CalendarClock,
   Check,
   ChevronDown,
   ClipboardList,
@@ -32,6 +33,7 @@ import {
   Undo2,
   Video,
   Wand2,
+  X,
 } from 'lucide-react';
 import {
   Suspense,
@@ -52,7 +54,7 @@ import { ApiError, api, type PlanVersion } from '../lib/api';
 import type { View } from '../lib/geometry';
 import type { EquipmentTypeInfo, Point, Rule, ZoneTypeInfo } from '../lib/plan';
 import { formatNumber, planArea, plural } from '../lib/planFacts';
-import { sortFindings } from '../lib/plainFindings';
+import { plainFinding, sortFindings } from '../lib/plainFindings';
 import { withTransform } from '../lib/equipmentOps';
 import { fitsRoom } from '../lib/room';
 import { navigate } from '../lib/router';
@@ -157,6 +159,8 @@ export function Workspace({ planId }: WorkspaceProps) {
   const viewKind = useWorkspace((s) => s.view);
   const setViewKind = useWorkspace((s) => s.setView);
   const previewing = useWorkspace((s) => s.preview !== null);
+  const activeFinding = useWorkspace((s) => s.activeFinding);
+  const setActiveFinding = useWorkspace((s) => s.setActiveFinding);
 
   const [load, setLoad] = useState<LoadState>({ kind: 'loading' });
   const [types, setTypes] = useState<EquipmentTypeInfo[]>([]);
@@ -552,6 +556,8 @@ export function Workspace({ planId }: WorkspaceProps) {
 
   const area = planArea(doc);
 
+  const peek = review && activeFinding !== null ? report?.findings[activeFinding] : undefined;
+
   const openPanel = (id: SidePanel) => {
     setPanel(id);
     setDrawer('panel');
@@ -718,10 +724,10 @@ export function Workspace({ planId }: WorkspaceProps) {
                 className="icon-btn ws-rail__library"
                 aria-pressed={drawer === 'library'}
                 onClick={() => setDrawer(drawer === 'library' ? null : 'library')}
-                title="Библиотека оборудования"
+                title={mode === 'operate' ? 'Сроки осмотра и слои' : 'Библиотека оборудования'}
               >
-                <Boxes size={17} aria-hidden="true" />
-                <span className="visually-hidden">Библиотека оборудования</span>
+                {mode === 'operate' ? <CalendarClock size={17} aria-hidden="true" /> : <Boxes size={17} aria-hidden="true" />}
+                <span className="visually-hidden">{mode === 'operate' ? 'Сроки осмотра и слои' : 'Библиотека оборудования'}</span>
               </button>
               <button type="button" className="icon-btn" onClick={undo} disabled={past.length === 0} title="Отменить — Ctrl+Z">
                 <Undo2 size={17} aria-hidden="true" />
@@ -807,12 +813,27 @@ export function Workspace({ planId }: WorkspaceProps) {
             ) : (
               <Check size={16} aria-hidden="true" />
             )}
-            {saving ? 'Сохраняем' : dirty ? 'Сохранить' : 'Сохранено'}
+            <span className="ws-rail__save-label">{saving ? 'Сохраняем' : dirty ? 'Сохранить' : 'Сохранено'}</span>
           </button>
         </div>
       </header>
 
-      {!review && <Library types={types} zoneTypes={zoneTypes} layers={layers} onLayers={setLayers} onNotice={setNotice} />}
+      {!review && (
+        <Library
+          book={book}
+          types={types}
+          zoneTypes={zoneTypes}
+          layers={layers}
+          onLayers={setLayers}
+          onNotice={setNotice}
+          onPick={(id) => {
+            select({ kind: 'equipment', id });
+            focusObject(id);
+            // На узком экране лист со списком уходит: объект и его паспорт должны быть видны.
+            setDrawer(null);
+          }}
+        />
+      )}
 
       <main className="ws-sheet" aria-label="Лист плана">
         {viewKind === '3d' ? (
@@ -836,12 +857,38 @@ export function Workspace({ planId }: WorkspaceProps) {
             {toolHint}
           </p>
         )}
-        {viewKind === '2d' && review && reviewErrors > 0 && (
+        {viewKind === '2d' && review && reviewErrors > 0 && !peek && (
           <p className="ws-hint" role="note">
             {previewing
               ? 'Пунктирные стрелки — куда переедут объекты'
               : 'Красные номера — нарушения норм. Нажмите на номер, чтобы узнать, что не так'}
           </p>
+        )}
+        {/* Телефон: метку нажали — коротко, что не так, прямо над планом. Лист обзора план закрыл бы. */}
+        {viewKind === '2d' && peek && drawer === null && (
+          <section className={`ws-peek ws-peek--${peek.severity}`} aria-label="Нарушение на плане">
+            <span className="ws-peek__pin" aria-hidden="true">
+              {peek.severity === 'error' ? (activeFinding ?? 0) + 1 : '!'}
+            </span>
+            <div className="ws-peek__text">
+              <p className="ws-peek__title">{plainFinding(peek, doc).title}</p>
+              {plainFinding(peek, doc).measure && <p className="ws-peek__measure">{plainFinding(peek, doc).measure}</p>}
+              <button type="button" className="btn btn--steel ws-peek__more" onClick={() => openPanel('review')}>
+                Подробнее и исправление
+              </button>
+            </div>
+            <button
+              type="button"
+              className="ws-peek__close"
+              aria-label="Закрыть"
+              onClick={() => {
+                setActiveFinding(null);
+                highlight([]);
+              }}
+            >
+              <X size={18} aria-hidden="true" />
+            </button>
+          </section>
         )}
         {notice && (
           <div className="ws-notice" role="status">
@@ -954,10 +1001,15 @@ export function Workspace({ planId }: WorkspaceProps) {
 
       {!review && (
         <footer className="ws-status on-steel">
-          <span>
-            <PanelsTopLeft size={13} aria-hidden="true" /> {cursor ? `X ${formatNumber(cursor[0])} · Y ${formatNumber(cursor[1])} м` : 'Курсор вне плана'}
-          </span>
-          <span>Масштаб {view ? `${Math.round((view.scale / 60) * 100)}%` : '—'}</span>
+          {/* Курсор и масштаб относятся к чертежу: в объёме их нет. */}
+          {viewKind === '2d' && (
+            <>
+              <span>
+                <PanelsTopLeft size={13} aria-hidden="true" /> {cursor ? `X ${formatNumber(cursor[0])} · Y ${formatNumber(cursor[1])} м` : 'Курсор вне плана'}
+              </span>
+              <span>Масштаб {view ? `${Math.round((view.scale / 60) * 100)}%` : '—'}</span>
+            </>
+          )}
           <span>Площадь {formatNumber(area)} м²</span>
           <span>
             <Box size={13} aria-hidden="true" /> {doc.equipment?.length ?? 0}{' '}
@@ -969,7 +1021,11 @@ export function Workspace({ planId }: WorkspaceProps) {
               Выбрано: {book.byId.get(`${selection.kind}:${selection.id}`)} — {ADDRESS_KIND_LABEL[selection.kind]}
             </span>
           )}
-          <span className="ws-status__hint">Колесо — масштаб · перетаскивание пустого места — сдвиг · / — адрес</span>
+          <span className="ws-status__hint">
+            {viewKind === '3d'
+              ? 'Перетаскивание — поворот · колесо — приближение · правая кнопка — сдвиг'
+              : 'Колесо — масштаб · перетаскивание пустого места — сдвиг · / — адрес'}
+          </span>
         </footer>
       )}
 
@@ -1006,8 +1062,9 @@ export function Workspace({ planId }: WorkspaceProps) {
               aria-current={drawer === 'library'}
               onClick={() => setDrawer(drawer === 'library' ? null : 'library')}
             >
-              <Boxes size={18} aria-hidden="true" />
-              <span className="ws-dock__label">Библиотека</span>
+              {/* В «Эксплуатации» в этом листе не оборудование, а сроки осмотра и слои. */}
+              {mode === 'operate' ? <CalendarClock size={18} aria-hidden="true" /> : <Boxes size={18} aria-hidden="true" />}
+              <span className="ws-dock__label">{mode === 'operate' ? 'Сроки' : 'Библиотека'}</span>
             </button>
             {tabs.map((tab) => (
               <button

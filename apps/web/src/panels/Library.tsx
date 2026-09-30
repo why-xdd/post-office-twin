@@ -6,18 +6,23 @@ import { BrickWall, MousePointer2, PenLine, Pencil, Plus, Search, SquareDashed, 
 import { useMemo, useState } from 'react';
 import type { Layers } from '../canvas/PlanCanvas';
 import { glyphFor } from '../canvas/glyphs';
+import type { AddressBook } from '../lib/addresses';
 import type { EquipmentTypeInfo, ZoneTypeInfo } from '../lib/plan';
 import { CustomTypeForm } from './CustomType';
+import { Maintenance } from './Maintenance';
 import { formatNumber } from '../lib/planFacts';
 import { useWorkspace, type Tool } from '../state/store';
 import './library.css';
 
 interface LibraryProps {
+  book: AddressBook;
   types: EquipmentTypeInfo[];
   zoneTypes: ZoneTypeInfo[];
   layers: Layers;
   onLayers: (layers: Layers) => void;
   onNotice: (text: string) => void;
+  /** Показать объект на плане: в «Эксплуатации» — из списка сроков осмотра. */
+  onPick: (id: string) => void;
 }
 
 const TOOLS: { tool: Tool; label: string; hotkey: string; icon: typeof MousePointer2 }[] = [
@@ -38,7 +43,7 @@ const LAYER_LABELS: { key: keyof Layers; label: string; onlyWithHeatmap?: boolea
   { key: 'heat', label: 'Тепловая карта камеры', onlyWithHeatmap: true },
 ];
 
-export function Library({ types, zoneTypes, layers, onLayers, onNotice }: LibraryProps) {
+export function Library({ book, types, zoneTypes, layers, onLayers, onNotice, onPick }: LibraryProps) {
   const tool = useWorkspace((s) => s.tool);
   const heatmap = useWorkspace((s) => s.heatmap);
   const placingType = useWorkspace((s) => s.placingType);
@@ -182,10 +187,7 @@ export function Library({ types, zoneTypes, layers, onLayers, onNotice }: Librar
 
       {!design && (
         <div className="library__body library__operate">
-          <p>
-            Режим эксплуатации: план открыт только для просмотра. Выберите объект, чтобы открыть его паспорт —
-            ответственного, учётные данные и сроки обслуживания.
-          </p>
+          <Maintenance book={book} types={types} onPick={onPick} />
         </div>
       )}
 

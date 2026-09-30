@@ -180,10 +180,133 @@
 }
 
 .library__empty,
-.library__operate p {
-  margin: var(--s-4) var(--s-3);
+/* Сроки осмотра в «Эксплуатации»: полный кружок — просрочен, кольцо — подходит срок */
+.maintenance {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-2) var(--s-2) var(--s-4);
+}
+
+.maintenance__title {
+  margin: var(--s-2) var(--s-2) 0;
+  color: var(--on-steel-3);
+  font-size: var(--text-11);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.maintenance__summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 var(--s-2);
   color: var(--on-steel-2);
   font-size: var(--text-13);
+  line-height: 1.4;
+}
+
+.maintenance__count {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.maintenance__count b {
+  color: var(--on-steel);
+  font-weight: 680;
+  font-variant-numeric: tabular-nums;
+}
+
+.maintenance__mark {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.maintenance__count--overdue .maintenance__mark,
+.maintenance__item--overdue .maintenance__mark {
+  background: var(--signal-mark-on-steel);
+}
+
+.maintenance__count--soon .maintenance__mark,
+.maintenance__item--soon .maintenance__mark {
+  box-shadow: inset 0 0 0 2px var(--caution-mark-on-steel);
+}
+
+.maintenance__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.maintenance__item {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--s-2);
+  width: 100%;
+  padding: 6px var(--s-2);
+  border: 0;
+  border-radius: var(--radius-plate);
+  color: var(--on-steel);
+  background: transparent;
+  font: inherit;
+  font-size: var(--text-13);
+  line-height: 1.25;
+  text-align: left;
+}
+
+.maintenance__item:hover {
+  background: var(--steel-700);
+}
+
+.maintenance__item[aria-current='true'] {
+  color: var(--ink);
+  background: var(--label);
+}
+
+.maintenance__name {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.maintenance__when {
+  color: var(--on-steel-2);
+  font-size: var(--text-12);
+}
+
+.maintenance__item--overdue .maintenance__when {
+  color: var(--signal-on-steel);
+}
+
+.maintenance__item[aria-current='true'] .maintenance__when {
+  color: var(--ink-2);
+}
+
+.maintenance__item[aria-current='true'] .maintenance__mark {
+  outline: 1.5px solid var(--ink);
+  outline-offset: 1px;
+}
+
+.maintenance__hint {
+  margin: var(--s-1) var(--s-2) 0;
+  color: var(--on-steel-3);
+  font-size: var(--text-12);
+  line-height: 1.4;
+}
+
+@media (pointer: coarse) {
+  .maintenance__item {
+    min-height: 44px;
+  }
 }
 
 .library__layers {

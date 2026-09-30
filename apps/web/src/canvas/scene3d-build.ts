@@ -55,7 +55,9 @@ function material(
   if (quality === 'plain') {
     return new THREE.MeshLambertMaterial({ color, transparent, opacity });
   }
-  const made = new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: metal, transparent, opacity, map });
+  // Параметр со значением undefined three.js считает ошибкой и пишет предупреждение: текстуру
+  // передаём, только когда она есть.
+  const made = new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: metal, transparent, opacity, ...(map ? { map } : {}) });
   if (glow) {
     made.emissive = new THREE.Color(color);
     made.emissiveIntensity = glow;

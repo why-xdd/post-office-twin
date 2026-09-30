@@ -2,24 +2,46 @@
  * Рабочее пространство: рейка, стеллаж библиотеки, лист плана, колонка ячеек-вкладок,
  * строка состояния. План остаётся на месте при переключении режима — меняются только
  * панель справа и то, что делает щелчок по объекту.
+ *
+ * На узком экране те же части собираются иначе: план занимает весь экран, а библиотека и
+ * панели приходят снизу выдвижным листом по кнопкам нижней планки — там, куда достаёт большой
+ * палец. Раскладка одна и та же, разметка тоже: меняется только то, как она разложена.
  */
 
 import {
   ArrowLeft,
   Box,
+  Boxes,
   ChevronDown,
+  ClipboardList,
   CornerDownLeft,
   Download,
+  IdCard,
   Image,
   Keyboard,
+  ListChecks,
   LoaderCircle,
   Maximize,
   PanelsTopLeft,
   Redo2,
   Save,
+  SlidersHorizontal,
+  Sparkles,
   Undo2,
+  Video,
+  Wand2,
 } from 'lucide-react';
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import {
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from 'react';
 import { PlanCanvas, type Layers } from '../canvas/PlanCanvas';
 import { Mark } from '../components/Mark';
 import { ADDRESS_KIND_LABEL, buildAddressBook, parseAddress } from '../lib/addresses';
@@ -76,6 +98,17 @@ const HOTKEYS: [string, string][] = [
   ['Esc', 'отменить действие, снять выделение'],
 ];
 
+// Значки нижней планки: на узком экране подпись коротка, и знак помогает найти нужное быстрее.
+const DOCK_ICONS: Record<SidePanel, ReactNode> = {
+  review: <Wand2 size={18} aria-hidden="true" />,
+  checks: <ListChecks size={18} aria-hidden="true" />,
+  assistant: <Sparkles size={18} aria-hidden="true" />,
+  properties: <SlidersHorizontal size={18} aria-hidden="true" />,
+  inventory: <ClipboardList size={18} aria-hidden="true" />,
+  passport: <IdCard size={18} aria-hidden="true" />,
+  camera: <Video size={18} aria-hidden="true" />,
+};
+
 const MODES: { id: Mode; label: string; hint: string }[] = [
   { id: 'review', label: 'Обзор', hint: 'Нарушения и исправление в один шаг' },
   { id: 'design', label: 'Редактор', hint: 'Инструменты, свойства объектов, ассистент' },
@@ -118,6 +151,8 @@ export function Workspace({ planId }: WorkspaceProps) {
   const [focus, setFocus] = useState<{ id: string; nonce: number } | null>(null);
   const [view, setView] = useState<View | null>(null);
   const [cursor, setCursor] = useState<Point | null>(null);
+  // Что выдвинуто снизу на узком экране: панель вкладки, библиотека или ничего.
+  const [drawer, setDrawer] = useState<'panel' | 'library' | null>(null);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [addressText, setAddressText] = useState('');
@@ -476,8 +511,13 @@ export function Workspace({ planId }: WorkspaceProps) {
 
   const area = planArea(doc);
 
+  const openPanel = (id: SidePanel) => {
+    setPanel(id);
+    setDrawer('panel');
+  };
+
   return (
-    <div className={`workspace workspace--${mode}`}>
+    <div className={`workspace workspace--${mode}${drawer ? ` workspace--drawer-${drawer}` : ''}`}>
       <header className="ws-rail on-steel">
         <button
           type="button"
@@ -571,6 +611,9 @@ export function Workspace({ planId }: WorkspaceProps) {
           </form>
         )}
 
+        {/* Перенос строки рейки на узком экране: переключатели уходят под название плана. */}
+        <span className="ws-rail__break" aria-hidden="true" />
+
         <div className="segmented" role="radiogroup" aria-label="Режим">
           {MODES.map((item) => (
             <button
@@ -604,6 +647,17 @@ export function Workspace({ planId }: WorkspaceProps) {
         <div className="ws-rail__tools">
           {!review && (
             <>
+              {/* На планшете стеллаж библиотеки уезжает за край: эта кнопка возвращает его. */}
+              <button
+                type="button"
+                className="icon-btn ws-rail__library"
+                aria-pressed={drawer === 'library'}
+                onClick={() => setDrawer(drawer === 'library' ? null : 'library')}
+                title="Библиотека оборудования"
+              >
+                <Boxes size={17} aria-hidden="true" />
+                <span className="visually-hidden">Библиотека оборудования</span>
+              </button>
               <button type="button" className="icon-btn" onClick={undo} disabled={past.length === 0} title="Отменить — Ctrl+Z">
                 <Undo2 size={17} aria-hidden="true" />
                 <span className="visually-hidden">Отменить</span>
@@ -648,7 +702,9 @@ export function Workspace({ planId }: WorkspaceProps) {
           )}
           <button type="button" className="btn btn--label ws-rail__save" onClick={() => void save()} disabled={saving || !dirty}>
             {saving ? <LoaderCircle size={16} className="spin" aria-hidden="true" /> : <Save size={16} aria-hidden="true" />}
-            {dirty ? 'Сохранить версию' : 'Сохранено'}
+            {/* На узком экране подпись короче: место в первой строке нужно названию плана. */}
+            <span className="ws-rail__save-long">{dirty ? 'Сохранить версию' : 'Сохранено'}</span>
+            <span className="ws-rail__save-short">{dirty ? 'Сохранить' : 'Сохранено'}</span>
           </button>
         </div>
       </header>
@@ -807,10 +863,58 @@ export function Workspace({ planId }: WorkspaceProps) {
         </footer>
       )}
 
-      <div className="ws-narrow on-steel" role="note">
-        <Mark size={32} />
-        <p>Редактор плана рассчитан на экран шире 1024 пикселей. Откройте его на компьютере.</p>
-      </div>
+      {/* Затемнение над выдвинутым листом: касание мимо листа закрывает его, как принято. */}
+      {drawer && <button type="button" className="ws-scrim" aria-label="Закрыть панель" onClick={() => setDrawer(null)} />}
+
+      {/* Нижняя планка узкого экрана: план, панели, библиотека — в пределах большого пальца. */}
+      <nav className="ws-dock on-steel" aria-label="Разделы">
+        <button
+          type="button"
+          className="ws-dock__item"
+          aria-current={drawer === null}
+          onClick={() => setDrawer(null)}
+        >
+          <PanelsTopLeft size={18} aria-hidden="true" />
+          <span className="ws-dock__label">План</span>
+        </button>
+        {review ? (
+          <button
+            type="button"
+            className="ws-dock__item"
+            aria-current={drawer === 'panel'}
+            onClick={() => openPanel('review')}
+          >
+            <Wand2 size={18} aria-hidden="true" />
+            <span className="ws-dock__label">Обзор</span>
+            {reviewErrors > 0 && <span className="ws-dock__count">{reviewErrors}</span>}
+          </button>
+        ) : (
+          <>
+            <button
+              type="button"
+              className="ws-dock__item"
+              aria-current={drawer === 'library'}
+              onClick={() => setDrawer(drawer === 'library' ? null : 'library')}
+            >
+              <Boxes size={18} aria-hidden="true" />
+              <span className="ws-dock__label">Библиотека</span>
+            </button>
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                className="ws-dock__item"
+                aria-current={drawer === 'panel' && panel === tab.id}
+                onClick={() => openPanel(tab.id)}
+              >
+                {DOCK_ICONS[tab.id]}
+                <span className="ws-dock__label">{tab.label}</span>
+                {tab.count !== undefined && tab.count > 0 && <span className="ws-dock__count">{tab.count}</span>}
+              </button>
+            ))}
+          </>
+        )}
+      </nav>
     </div>
   );
 }

@@ -381,35 +381,283 @@
   font-weight: 600;
 }
 
-/* Узкий экран */
-.ws-narrow {
+.ws-rail__save-short,
+.ws-rail__library,
+.ws-rail__break {
   display: none;
 }
 
+/* Затемнение под выдвинутым листом — только на узком экране */
+.ws-scrim {
+  display: none;
+}
+
+/* Нижняя планка: только на узком экране, где нет места на колонки */
+.ws-dock {
+  display: none;
+}
+
+/* Планшет: библиотека уезжает, план и панель делят экран */
 @media (max-width: 1023px) {
-  .workspace > :not(.ws-narrow) {
+  .workspace,
+  .workspace--review {
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 40vw);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .ws-rail__library {
+    display: inline-flex;
+  }
+
+  .ws-rail__break {
+    display: block;
+    order: 2;
+    flex: 0 0 100%;
+    height: 0;
+  }
+
+  /* Рейка не помещается в одну строку: переключатели уходят во вторую. */
+  .ws-rail {
+    flex-wrap: wrap;
+    row-gap: 6px;
+    height: auto;
+    padding: 6px var(--s-2) 8px;
+  }
+
+  .ws-rail__title {
+    flex: 1 1 0;
+    max-width: none;
+  }
+
+  .ws-rail__tools {
+    order: 0;
+    margin-left: auto;
+  }
+
+  .ws-rail .segmented {
+    order: 3;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .ws-rail .segmented button {
+    flex: 1 1 auto;
+    padding: 0 7px;
+  }
+
+  /* Адрес и подписи кнопок — работа с клавиатурой и мышью; на узком экране место дороже. */
+  .ws-rail .address,
+  .ws-rail__tools .icon-btn:nth-child(n + 5) {
     display: none;
   }
 
-  .workspace {
-    display: flex;
-    align-items: center;
-    justify-content: center;
+  .ws-rail__save {
+    height: 36px;
+    font-size: var(--text-12);
   }
 
-  .ws-narrow {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: var(--s-4);
-    max-width: 36ch;
-    padding: var(--s-6);
-    color: var(--on-steel);
-    text-align: center;
+  .ws-rail__save-long {
+    display: none;
+  }
+
+  .ws-rail__save-short {
+    display: inline;
+  }
+
+  /* Ячеек больше, чем ширины колонки: они прокручиваются, а не сминаются. */
+  .ws-tabs {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .ws-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .ws-tab {
+    flex: 0 0 auto;
+  }
+
+  .library {
+    position: absolute;
+    top: 56px;
+    bottom: 0;
+    left: 0;
+    z-index: 4;
+    width: 272px;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4), 12px 0 32px rgba(12, 16, 18, 0.45);
+    transform: translateX(-100%);
+    transition: transform var(--dur-drawer) var(--ease-drawer);
+  }
+
+  .workspace--drawer-library .library {
+    transform: none;
+  }
+
+  .ws-status {
+    display: none;
   }
 }
 
-@media (max-width: 1320px) {
+/* Телефон: план во весь экран, панели приходят снизу */
+@media (max-width: 767px) {
+  .workspace,
+  .workspace--review {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto;
+  }
+
+  /* Библиотеку открывает нижняя планка — отдельная кнопка в рейке не нужна. */
+  .ws-rail__library {
+    display: none;
+  }
+
+  .ws-rail .segmented button {
+    font-size: var(--text-11);
+  }
+
+  .ws-scrim {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: calc(56px + env(safe-area-inset-bottom));
+    left: 0;
+    z-index: 5;
+    display: block;
+    border: 0;
+    background: rgba(12, 16, 18, 0.45);
+  }
+
+  /* Лист выдвигается над нижней планкой, а не под неё. */
+  .library,
+  .ws-column {
+    position: fixed;
+    top: auto;
+    right: 0;
+    bottom: calc(56px + env(safe-area-inset-bottom));
+    left: 0;
+    z-index: 6;
+    width: auto;
+    max-height: 68vh;
+    border-radius: 10px 10px 0 0;
+    box-shadow: 0 -2px 0 rgba(0, 0, 0, 0.4), 0 -18px 40px rgba(12, 16, 18, 0.5);
+    transform: translateY(101%);
+    transition: transform var(--dur-drawer) var(--ease-drawer);
+  }
+
+  .workspace--drawer-library .library,
+  .workspace--drawer-panel .ws-column {
+    transform: none;
+  }
+
+  /* Лист уезжает вместе с планкой, поэтому смещение считается от её высоты. */
+  .library,
+  .ws-column {
+    transform: translateY(calc(101% + 56px + env(safe-area-inset-bottom)));
+  }
+
+  .ws-column {
+    display: flex;
+  }
+
+  /* Полоска-ручка: знак того, что лист выдвинут поверх плана и закрывается. */
+  .library::before,
+  .ws-column::before {
+    content: '';
+    flex: 0 0 auto;
+    width: 36px;
+    height: 4px;
+    margin: 6px auto;
+    border-radius: 2px;
+    background: var(--steel-500, rgba(255, 255, 255, 0.28));
+  }
+
+  /* Вкладки живут в нижней планке, в выдвинутом листе они лишние. */
+  .ws-tabs {
+    display: none;
+  }
+
+  .ws-panel {
+    padding-bottom: var(--s-4);
+  }
+
+  .ws-dock {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    z-index: 7;
+    padding: 4px 2px calc(4px + env(safe-area-inset-bottom));
+    background: var(--steel-950);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  }
+
+  .ws-dock__label {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ws-dock__item {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    min-height: 48px;
+    padding: 4px 2px;
+    border: 0;
+    border-radius: var(--radius-plate);
+    color: var(--on-steel-3);
+    background: transparent;
+    font-size: 10px;
+    line-height: 1.1;
+  }
+
+  .ws-dock__item[aria-current='true'] {
+    color: var(--ink);
+    background: var(--label);
+  }
+
+  .ws-dock__count {
+    position: absolute;
+    top: 2px;
+    right: 50%;
+    min-width: 16px;
+    margin-right: -22px;
+    padding: 0 4px;
+    border-radius: 8px;
+    color: var(--label);
+    background: var(--signal);
+    font-family: var(--font-plate);
+    font-size: var(--text-11);
+    font-weight: 660;
+    text-align: center;
+  }
+
+  .ws-hint {
+    top: auto;
+    bottom: var(--s-3);
+    left: var(--s-3);
+    font-size: var(--text-12);
+  }
+}
+
+/* Палец крупнее курсора: ячейки и значки растут там, где точного указателя нет. */
+@media (pointer: coarse) {
+  .ws-tab,
+  .icon-btn,
+  .ws-rail__back {
+    min-height: 44px;
+  }
+
+  .ws-tab {
+    height: 44px;
+  }
+}
+
+@media (min-width: 1024px) and (max-width: 1320px) {
   .workspace {
     grid-template-columns: 236px minmax(0, 1fr) 368px;
   }

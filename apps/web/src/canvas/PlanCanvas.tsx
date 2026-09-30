@@ -64,6 +64,8 @@ const ROTATE_STEP = 15;
 type Gesture =
   | { kind: 'none' }
   | { kind: 'pan'; startX: number; startY: number; origin: View }
+  // Щипок двумя пальцами: масштаб от расстояния между ними, сдвиг — от их середины.
+  | { kind: 'pinch'; startGap: number; startCenter: Point; origin: View }
   | { kind: 'drag'; id: string; startWorld: Point; startPosition: Point; moved: boolean }
   | { kind: 'rotate'; id: string }
   | { kind: 'wall'; id: string; axis: 'x' | 'y'; startWorld: Point; base: Plan; delta: number };
@@ -117,6 +119,8 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
   const [wallMenu, setWallMenu] = useState<WallMenu | null>(null);
   const [wallShift, setWallShift] = useState<number | null>(null);
   const gesture = useRef<Gesture>({ kind: 'none' });
+  // Касания на плане: по двум из них считается щипок. Мышь сюда попадает тоже, но одна.
+  const touches = useRef<Map<number, Point>>(new Map());
   const fitted = useRef(false);
 
   useLayoutEffect(() => {
@@ -248,12 +252,34 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
     return toScreen(view, [(wall.from[0] + wall.to[0]) / 2 + nx * shift, (wall.from[1] + wall.to[1]) / 2 + ny * shift]);
   };
 
+  /** Середина и расстояние между двумя касаниями — основа щипка. */
+  const twoFingers = (): { center: Point; gap: number } | null => {
+    const points = [...touches.current.values()];
+    if (points.length < 2) return null;
+    const [first, second] = points;
+    return {
+      center: [(first[0] + second[0]) / 2, (first[1] + second[1]) / 2],
+      gap: Math.max(Math.hypot(first[0] - second[0], first[1] - second[1]), 1),
+    };
+  };
+
   const onPointerDown = (event: React.PointerEvent<SVGSVGElement>) => {
     if (!doc) return;
     const { sx, sy } = pointer(event);
     const world = toWorld(view, sx, sy);
     svg.current?.setPointerCapture(event.pointerId);
     setWallMenu(null);
+    touches.current.set(event.pointerId, [sx, sy]);
+
+    // Второй палец переводит жест в щипок: начатое перетаскивание при этом откатывается,
+    // иначе объект уезжал бы вместе с масштабированием.
+    const fingers = twoFingers();
+    if (fingers) {
+      const started = gesture.current;
+      if (started.kind === 'drag' || started.kind === 'rotate' || started.kind === 'wall') endTransient();
+      gesture.current = { kind: 'pinch', startGap: fingers.gap, startCenter: fingers.center, origin: view };
+      return;
+    }
 
     if (event.button === 1 || (event.button === 0 && event.altKey)) {
       gesture.current = { kind: 'pan', startX: sx, startY: sy, origin: view };
@@ -418,9 +444,23 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
     if (!doc) return;
     const { sx, sy } = pointer(event);
     const world = toWorld(view, sx, sy);
+    if (touches.current.has(event.pointerId)) touches.current.set(event.pointerId, [sx, sy]);
     setCursor(world);
     onCursor(world);
     const current = gesture.current;
+
+    if (current.kind === 'pinch') {
+      const fingers = twoFingers();
+      if (!fingers) return;
+      const [cx, cy] = current.startCenter;
+      const zoomed = zoomAt(current.origin, cx, cy, fingers.gap / current.startGap);
+      setView({
+        scale: zoomed.scale,
+        originX: zoomed.originX + (fingers.center[0] - cx),
+        originY: zoomed.originY + (fingers.center[1] - cy),
+      });
+      return;
+    }
 
     if (current.kind === 'pan') {
       setView({
@@ -502,9 +542,12 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
 
   const onPointerUp = (event: React.PointerEvent<SVGSVGElement>) => {
     svg.current?.releasePointerCapture(event.pointerId);
+    touches.current.delete(event.pointerId);
     const current = gesture.current;
     if (current.kind === 'drag' || current.kind === 'rotate' || current.kind === 'wall') endTransient();
     if (current.kind === 'wall') setWallShift(null);
+    // Пока на плане остаётся второй палец, жест ещё не кончился.
+    if (current.kind === 'pinch' && touches.current.size > 0) return;
     gesture.current = { kind: 'none' };
   };
 
@@ -560,6 +603,7 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
         onPointerLeave={() => {
           setCursor(null);
           onCursor(null);

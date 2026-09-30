@@ -271,6 +271,8 @@ class _FeatureContext:
     # а не десятками обращений по одному. На зале с тридцатью объектами это главная статья
     # расходов поиска — до миллиона отдельных замеров расстояния на один подбор.
     arrays: dict[str, np.ndarray] = field(default_factory=dict)
+    # Уже стоящие предметы того же типа: по ним видно, встанет кандидат в общий ряд или нет.
+    same_kind: list[Equipment] = field(default_factory=list)
     # Признаки, одинаковые для всех кандидатов поиска, и признаки зон: считаются один раз.
     constants: dict[str, float] = field(default_factory=dict)
     zone_features: dict[str | None, dict[str, float]] = field(default_factory=dict)
@@ -289,6 +291,7 @@ class _FeatureContext:
                 ("partitions", self.partitions),
                 ("routes", self.routes),
                 ("access_points", self.access_points),
+                ("same_kind", [core.equipment_polygon(item) for item in self.same_kind]),
                 (
                     "window_axes",
                     [LineString([self.entrance, w.centroid]) for w in self.windows] if self.entrance else [],
@@ -419,6 +422,7 @@ def _features(poly: Polygon, rotation: float, score: float, ctx: _FeatureContext
     features["route_distance"] = float(route_distances.min()) if len(route_distances) else 10.0
     features["route_hits"] = float((route_distances < ROUTE_BAND_M).sum())
     features["access_distance"] = _nearest(arrays["access_points"], poly)
+    features.update(_row_features(poly, centre, rotation, ctx))
     features["route_pinch"] = (
         min(features["nearest_obstacle"], 3.0) if features["route_distance"] < ROUTE_BAND_M else 3.0
     )
@@ -426,6 +430,31 @@ def _features(poly: Polygon, rotation: float, score: float, ctx: _FeatureContext
     for kind in ZONE_KINDS:
         features[f"in_{kind}"] = 1.0 if any(z.contains(centre) for z in ctx.zones_by_kind.get(kind, [])) else 0.0
     return features
+
+
+def _row_features(poly: Polygon, centre: Point, rotation: float, ctx: _FeatureContext) -> dict[str, float]:
+    """Насколько кандидат встаёт в ряд с уже стоящими предметами того же типа.
+
+    Три окна обслуживания в отделении стоят в линию, скамьи в зоне ожидания — рядом друг с
+    другом, стеллажи — вдоль одной стены. Полная проверка этого не видит: нормы не запрещают
+    поставить четвёртое окно поперёк остальных. Поэтому модель узнаёт строй по расстоянию до
+    ближайшего своего, отклонению от его оси и параллельности ему.
+    """
+    same = ctx.arrays.get("same_kind")
+    if same is None or not len(same):
+        return {"same_type_distance": 10.0, "same_type_offset": 10.0, "same_type_parallel": 1.0}
+    distances = shapely.distance(same, poly)
+    index = int(distances.argmin())
+    neighbour = ctx.same_kind[index]
+    neighbour_axis, _ = _axes(neighbour.rotation_deg, neighbour.size_m)
+    own_axis, _ = _axes(rotation, ctx.size)
+    dx, dy = centre.x - neighbour.position[0], centre.y - neighbour.position[1]
+    return {
+        "same_type_distance": float(distances[index]),
+        # Отклонение от линии, на которой стоит сосед: у ряда оно близко к нулю.
+        "same_type_offset": abs(dx * neighbour_axis[1] - dy * neighbour_axis[0]),
+        "same_type_parallel": abs(own_axis[0] * neighbour_axis[0] + own_axis[1] * neighbour_axis[1]),
+    }
 
 
 def _fitness_for(type_code: str, type_def: EquipmentType) -> FitnessFn:
@@ -550,6 +579,7 @@ def generate(
         occupied=unary_union(obstacles) if obstacles else None,
         size=size,
         tree=tree,
+        same_kind=[item for item in plan.equipment if item.type == type_code and item.id not in exclude],
     )
     context.prepare()
     context.routes, context.access_points = _flow_context(plan, entrance, exclude)

@@ -116,9 +116,25 @@ function signedArea(points: Point[]): number {
   return sum / 2;
 }
 
-export function equipmentAt(plan: Plan, point: Point): Equipment | null {
+/**
+ * Объект под точкой. С допуском — ещё и ближайший объект не дальше допуска: палец крупнее
+ * мелкого объекта на плане, и промах на пару миллиметров не должен уводить в пустоту.
+ */
+export function equipmentAt(plan: Plan, point: Point, tolerance = 0): Equipment | null {
   const items = [...(plan.equipment ?? [])].reverse();
-  return items.find((item) => pointInPolygon(point, equipmentCorners(item))) ?? null;
+  const inside = items.find((item) => pointInPolygon(point, equipmentCorners(item)));
+  if (inside || tolerance <= 0) return inside ?? null;
+  let nearest: Equipment | null = null;
+  let best = tolerance;
+  for (const item of items) {
+    const corners = equipmentCorners(item);
+    const distance = Math.min(...corners.map((corner, index) => distanceToSegment(point, corner, corners[(index + 1) % corners.length])));
+    if (distance < best) {
+      nearest = item;
+      best = distance;
+    }
+  }
+  return nearest;
 }
 
 export function distanceToSegment([px, py]: Point, [ax, ay]: Point, [bx, by]: Point): number {

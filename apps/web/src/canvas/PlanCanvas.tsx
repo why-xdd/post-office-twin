@@ -76,6 +76,8 @@ const POSITION_STEP = 0.05;
 // экрана: на любом масштабе это одно и то же расстояние под курсором.
 const ALIGN_TOLERANCE_PX = 7;
 const DRAFT_STEP = 0.25;
+/** На сколько пикселей экрана касание может промахнуться мимо объекта. */
+const TOUCH_SLOP_PX = 12;
 const ROTATE_STEP = 15;
 
 type Gesture =
@@ -469,7 +471,8 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
       }
     }
 
-    const item = equipmentAt(doc, world);
+    // Касание пальцем ловит и мелкий объект рядом: на телефоне шкаф бывает меньше пальца.
+    const item = equipmentAt(doc, world, event.pointerType === 'touch' ? TOUCH_SLOP_PX / view.scale : 0);
     if (item) {
       select({ kind: 'equipment', id: item.id });
       if (mode === 'design') {
@@ -1365,7 +1368,7 @@ interface Box {
   y1: number;
 }
 
-const PIN_GAP_PX = 26;
+const PIN_GAP_PX = 28;
 /** На каком расстоянии от ручки поворота щелчок её берёт. */
 const KNOB_GRAB_PX = 10;
 /** Радиус, который метка держит свободным. Один для тихой и выбранной: при щелчке метка не прыгает. */

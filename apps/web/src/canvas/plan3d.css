@@ -175,6 +175,17 @@
   line-height: 1.5;
 }
 
+@media (max-width: 767px) {
+  .plan3d__shot-label {
+    display: none;
+  }
+
+  .plan3d__shot,
+  .plan3d__mode {
+    min-height: 34px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .plan3d__shot,
   .plan3d__mode {

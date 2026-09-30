@@ -375,9 +375,17 @@ export function Plan3D({ types }: Props) {
 
       <div className="plan3d__shots" role="group" aria-label="Ракурсы камеры">
         {SHOTS.map((shot) => (
-          <button key={shot.id} type="button" className="plan3d__shot" onClick={() => flyTo(shot.id)} title={shot.hint}>
+          <button
+            key={shot.id}
+            type="button"
+            className="plan3d__shot"
+            onClick={() => flyTo(shot.id)}
+            title={shot.hint}
+            aria-label={shot.label}
+          >
             {shot.id === 'top' ? <Grid3x3 size={15} aria-hidden="true" /> : shot.id === 'entrance' ? <DoorOpen size={15} aria-hidden="true" /> : <Camera size={15} aria-hidden="true" />}
-            {shot.label}
+            {/* На узком экране остаются значки: подписи ракурсов не помещаются рядом с качеством. */}
+            <span className="plan3d__shot-label">{shot.label}</span>
           </button>
         ))}
       </div>

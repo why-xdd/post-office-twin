@@ -320,7 +320,8 @@ export function snapToSlantedWall(
       faces.push({ origin: [ax + nx * half, ay + ny * half], normal: [nx, ny] });
       faces.push({ origin: [ax - nx * half, ay - ny * half], normal: [-nx, -ny] });
     }
-    const angle = (Math.atan2(uy, ux) * 180) / Math.PI;
+    // Поворот на плане идёт по часовой стрелке, угол стены — против: знак меняется.
+    const angle = -(Math.atan2(uy, ux) * 180) / Math.PI;
     const current = item.rotation_deg ?? 0;
     const turns = [0, 90, 180, 270].map((k) => (((angle + k) % 360) + 360) % 360);
     const rotation = turns.reduce((a, b) => (circular(b, current) < circular(a, current) ? b : a));

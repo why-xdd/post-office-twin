@@ -16,14 +16,14 @@ const plan = {
 
 describe('объект у наклонной стены', () => {
   it('разворачивается вдоль стены и встаёт к ней вплотную', () => {
-    const rack = { id: 'r', type: 'storage_rack', position: [8.3, 3], size_m: [2, 0.5], rotation_deg: 90 } as never;
+    const rack = { id: 'r', type: 'storage_rack', position: [8.6, 3], size_m: [2, 0.5], rotation_deg: 90 } as never;
     const snapped = snapToSlantedWall(plan, rack)!;
     expect(snapped).not.toBeNull();
-    const wallAngle = (Math.atan2(6, -2) * 180) / Math.PI;
-    const diff = Math.abs(((snapped.rotation_deg - wallAngle) % 90 + 90) % 90);
-    expect(Math.min(diff, 90 - diff)).toBeLessThan(0.2);
-    // Ближайший угол объекта лежит на стене: расстояние до линии около нуля, все углы внутри.
+    // Длинная сторона объекта параллельна стене: векторное произведение направлений ≈ 0.
     const corners = equipmentCorners({ ...(rack as object), ...snapped } as never);
+    const edge = [corners[1][0] - corners[0][0], corners[1][1] - corners[0][1]];
+    const cross = (edge[0] * 6 - edge[1] * -2) / (Math.hypot(edge[0], edge[1]) * Math.hypot(2, 6));
+    expect(Math.abs(cross)).toBeLessThan(0.01);
     // Расстояние до прямой через (10, 0) и (8, 6); со стороны помещения оно отрицательное.
     const distances = corners.map(([x, y]) => ((x - 10) * 6 + y * 2) / Math.hypot(2, 6));
     expect(Math.max(...distances)).toBeCloseTo(0, 2);

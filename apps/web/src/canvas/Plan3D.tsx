@@ -18,6 +18,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import type { EquipmentTypeInfo } from '../lib/plan';
+import { dressWithModels } from './models3d';
 import { buildScene } from '../lib/scene3d';
 import { useWorkspace } from '../state/store';
 import { build, lights, type Quality } from './scene3d-build';
@@ -261,6 +262,17 @@ export function Plan3D({ types }: Props) {
     parts.content = built.root;
     parts.disposeContent = built.dispose;
     parts.pickable = built.pickable;
+    // Модели оборудования догружаются следом; если план успели поменять — их уже не ставим.
+    if (built.slots.length) {
+      let undress: (() => void) | null = null;
+      void dressWithModels(built.root, built.slots, scene.floor, () => engine.current?.content === built.root).then((cleanup) => {
+        undress = cleanup;
+      });
+      parts.disposeContent = () => {
+        undress?.();
+        built.dispose();
+      };
+    }
     // Габариты берутся у собранной сцены, но без сетки пола: она нарочно шире помещения и
     // иначе отодвигала бы камеру от того, ради чего её ставят.
     const box = new THREE.Box3();

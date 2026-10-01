@@ -10,6 +10,7 @@
  */
 
 import * as THREE from 'three';
+import { hasModel, type ModelSlot } from './models3d';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import type { Prism, Ribbon, Scene as PlanScene } from '../lib/scene3d';
 import { contactShadowTexture, finishFor, floorTexture, wallTexture } from './materials3d';
@@ -43,6 +44,8 @@ export interface Built {
   /** Объекты, по которым идёт наведение и выбор: ключ — идентификатор объекта плана. */
   pickable: THREE.Object3D[];
   dispose: () => void;
+  /** Оборудование, у которого есть модель: её ставят вместо бруска после загрузки. */
+  slots: ModelSlot[];
 }
 
 function material(
@@ -271,10 +274,19 @@ export function build(scene: PlanScene, quality: Quality, anisotropy = 1): Built
     remember(mesh);
   }
 
+  const slots: ModelSlot[] = [];
+  const operators = new Map(
+    scene.prisms.filter((p) => p.kind === 'operator').map((p) => [p.id.replace(/:operator$/, ''), p.centre]),
+  );
   for (const prism of scene.prisms) {
     const mesh = prismMesh(prism, quality, textures);
     root.add(mesh);
     remember(mesh);
+    const slot: ModelSlot | null =
+      quality === 'rich' && prism.kind === 'equipment' && hasModel(prism.typeCode)
+        ? { prism, block: mesh, extras: [], operator: operators.get(prism.id) }
+        : null;
+    if (slot) slots.push(slot);
     if (quality === 'rich' && textures.shadow && (prism.kind === 'equipment' || prism.kind === 'operator') && prism.base < 0.05) {
       const shade = contactShadow(prism, textures.shadow);
       root.add(shade);
@@ -284,10 +296,12 @@ export function build(scene: PlanScene, quality: Quality, anisotropy = 1): Built
       const glass = glassAbove(prism);
       root.add(glass);
       remember(glass);
+      slot?.extras.push(glass);
     }
     if (prism.kind === 'equipment' || prism.kind === 'operator') {
       const line = edges(mesh, COLOR.edge, prism.violation ? 0.45 : 0.32);
       root.add(line);
+      slot?.extras.push(line);
       created.push(line.geometry, line.material as THREE.Material);
     }
     if (prism.kind === 'equipment' || prism.kind === 'operator') pickable.push(mesh);
@@ -311,6 +325,7 @@ export function build(scene: PlanScene, quality: Quality, anisotropy = 1): Built
   return {
     root,
     pickable,
+    slots,
     dispose: () => {
       for (const item of created) item.dispose();
     },

@@ -387,3 +387,19 @@
   font-size: var(--text-13);
   line-height: 1.45;
 }
+
+/* Следующий шаг после частичного исправления — спокойная кнопка, не главная латунная */
+.review__next {
+  justify-content: center;
+  min-height: 44px;
+}
+
+.review-item__address {
+  margin-left: 6px;
+  color: var(--ink-3);
+  font-family: var(--font-plate);
+  font-stretch: 70%;
+  font-size: var(--text-12);
+  font-weight: 620;
+  letter-spacing: 0.04em;
+}

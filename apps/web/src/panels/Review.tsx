@@ -8,6 +8,7 @@
 import { ArrowRight, Check, ChevronDown, CircleCheck, LoaderCircle, Save, TriangleAlert, Undo2, Wand2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AddressBook } from '../lib/addresses';
+import { formatAddress } from '../lib/addresses';
 import { ApiError } from '../lib/api';
 import { precomputeFix, proposeFix, type FixProposal, type Shift } from '../lib/fixProposal';
 import { humanize } from '../lib/humanize';
@@ -42,6 +43,7 @@ export function Review({ book, saving, onSave, onFocusObject, onFit, onNotice }:
   const report = useWorkspace((s) => s.report);
   const reportState = useWorkspace((s) => s.reportState);
   const active = useWorkspace((s) => s.activeFinding);
+  const setMode = useWorkspace((s) => s.setMode);
   const setActive = useWorkspace((s) => s.setActiveFinding);
   const highlight = useWorkspace((s) => s.highlight);
   const setPreview = useWorkspace((s) => s.setPreview);
@@ -195,7 +197,10 @@ export function Review({ book, saving, onSave, onFocusObject, onFit, onNotice }:
                   ? `Исправлено ${fixed.before} ${plural(fixed.before, 'проблема', 'проблемы', 'проблем')}. ` +
                     // Финал показывает то, ради чего правили: метры прохода до и после.
                     (fixed.entrance
-                      ? `Свободный путь от входа ${formatNumber(fixed.entrance.before)} → ${formatNumber(fixed.entrance.after)} м. `
+                      ? `Свободный путь от входа ${formatNumber(fixed.entrance.before)} м → ${formatNumber(fixed.entrance.after)} м. `
+                      : '') +
+                    (fixed.narrowest
+                      ? `Узкое место на пути к окнам ${formatNumber(fixed.narrowest.before)} м → ${formatNumber(fixed.narrowest.after)} м. `
                       : '')
                   : `План проверен по ${report.checked_rules.length} ${plural(report.checked_rules.length, 'правилу', 'правилам', 'правилам')}. `}
                 {notes.length
@@ -245,10 +250,10 @@ export function Review({ book, saving, onSave, onFocusObject, onFit, onNotice }:
             <p className="review__partial">
               Исправлено {fixed.before - fixed.after} из {fixed.before}.
               {fixed.entrance &&
-                ` Свободный путь от входа ${formatNumber(fixed.entrance.before)} → ${formatNumber(fixed.entrance.after)} м.`}
+                ` Свободный путь от входа ${formatNumber(fixed.entrance.before)} м → ${formatNumber(fixed.entrance.after)} м.`}
               {fixed.narrowest &&
-                ` Узкое место на пути к окнам ${formatNumber(fixed.narrowest.before)} → ${formatNumber(fixed.narrowest.after)} м.`}{' '}
-              Оставшееся — в списке ниже.
+                ` Узкое место на пути к окнам ${formatNumber(fixed.narrowest.before)} м → ${formatNumber(fixed.narrowest.after)} м.`}{' '}
+              Оставшееся перестановкой не снимается — нужна перепланировка, она в редакторе.
             </p>
           )}
           <button type="button" className="btn btn--label" onClick={onSave} disabled={saving || !dirty}>
@@ -315,7 +320,17 @@ export function Review({ book, saving, onSave, onFocusObject, onFit, onNotice }:
         </details>
       )}
 
-      {!clean && (
+      {/* После частичного исправления повторное автоисправление ничего не даст: вместо тупиковой
+          кнопки — честный следующий шаг. */}
+      {!clean && fixed && (
+        <section className="review__fix" aria-live="polite">
+          <button type="button" className="btn btn--label review__next" onClick={() => setMode('design')}>
+            Открыть в редакторе
+          </button>
+          <p className="review__fix-note">Там видно каждое оставшееся нарушение и можно передвинуть окна вручную.</p>
+        </section>
+      )}
+      {!clean && !fixed && (
         <section className={`review__fix${fix.kind === 'shown' ? ' review__fix--shown' : ''}`} aria-live="polite">
           {fix.kind === 'shown' ? (
             <ProposalCard proposal={fix.proposal} onApply={() => applyFix(fix.proposal)} onCancel={cancelFix} />
@@ -367,7 +382,11 @@ function FindingItem({
           <span className="review-item__dot" aria-hidden="true" />
         )}
         <span className="review-item__text">
-          <span className="review-item__title">{plain.title}</span>
+          <span className="review-item__title">
+            {plain.title}
+            {/* Тот же адрес, что в «Проверке» редактора: номер 1 здесь — это Н-01 там. */}
+            <span className="review-item__address">{formatAddress('finding', index)}</span>
+          </span>
           {plain.measure && <span className="review-item__measure">{plain.measure}</span>}
           {plain.culprits && <span className="review-item__culprits">{plain.culprits}</span>}
         </span>

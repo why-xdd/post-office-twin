@@ -379,7 +379,11 @@ export function Workspace({ planId }: WorkspaceProps) {
     } catch {
       seen = false;
     }
-    if (!seen) setGuide(true);
+    if (!seen) {
+      setGuide(true);
+      // Выдвинутый лист на телефоне закрыл бы памятку и её кнопку.
+      setDrawer(null);
+    }
   }, [mode]);
 
   // На телефоне предпросмотр сжимает лист, и план вписывается в видимую часть уже после этого.
@@ -1050,7 +1054,8 @@ export function Workspace({ planId }: WorkspaceProps) {
         )}
         {notice && (
           <div className="ws-notice" role="status">
-            {notice}
+            {/* На телефоне клавиатуры нет: отмена — стрелкой в шапке, а не сочетанием клавиш. */}
+            {touch ? notice.replace('Ctrl+Z', 'стрелка ↶ вверху') : notice}
           </div>
         )}
         {draft && (

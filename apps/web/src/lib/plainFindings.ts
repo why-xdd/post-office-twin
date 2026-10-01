@@ -26,7 +26,8 @@ export interface PlainFinding {
 }
 
 interface Wording {
-  title: string;
+  /** У ошибки и замечания по одному правилу названия разные: это разные по тяжести вещи. */
+  title: string | ((severity: Severity) => string);
   /** Чем это плохо. Для замечания часто мягче, чем для ошибки: нарушение и допущение — разное. */
   impact: string | ((severity: Severity) => string);
   measure?: (measured: string, required: string, unit: string, severity: Severity) => string;
@@ -35,7 +36,7 @@ interface Wording {
 const WORDING: Record<string, Wording> = {
   movement_path_width: {
     // Замер — самое узкое место среди путей от входа к окнам и терминалам: так и называем.
-    title: 'Узкое место на пути к окнам',
+    title: (severity) => (severity === 'error' ? 'Узкое место на пути к окнам' : 'Проход к окнам только с карманами для разъезда'),
     // Ошибка и замечание по этому правилу — разные вещи: уже 1,2 м коляска не проезжает,
     // от 1,2 до нормы проезжает, но двоим не разойтись без карманов для разъезда.
     impact: (severity) =>
@@ -48,8 +49,9 @@ const WORDING: Record<string, Wording> = {
         : `${m} м при норме ${r} м — допустимо только с карманами для разъезда`,
   },
   passage_between_workplaces: {
-    title: 'Тесный проход между рабочими местами',
-    impact: 'Сотрудникам трудно разойтись, мешает эвакуации.',
+    // Правило считает проход между любыми объектами с рабочими местами, в том числе в зале.
+    title: 'Тесный проход между объектами',
+    impact: 'Двоим не разойтись, а при эвакуации здесь образуется затор.',
   },
   no_overlaps: {
     title: 'Объекты стоят друг на друге',
@@ -156,7 +158,7 @@ export function plainFinding(finding: Finding, plan: Plan | null): PlainFinding 
   }
   const impact = typeof wording?.impact === 'function' ? wording.impact(finding.severity) : (wording?.impact ?? '');
   return {
-    title: wording?.title ?? finding.title,
+    title: (typeof wording?.title === 'function' ? wording.title(finding.severity) : wording?.title) ?? finding.title,
     measure,
     impact,
     culprits: joinNames(names),

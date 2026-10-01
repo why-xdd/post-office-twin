@@ -523,3 +523,10 @@
     min-height: 44px;
   }
 }
+
+/* Буквы клавиш на тач-экране ни к чему: клавиатуры нет */
+@media (pointer: coarse) {
+  .tool kbd {
+    display: none;
+  }
+}

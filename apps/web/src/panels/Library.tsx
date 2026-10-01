@@ -2,7 +2,7 @@
  * Стеллаж библиотеки: инструменты, оборудование по группам перечня ОПС, слои плана.
  */
 
-import { BrickWall, MousePointer2, PenLine, Pencil, Plus, Search, SquareDashed, Trash2 } from 'lucide-react';
+import { BrickWall, ChevronRight, MousePointer2, PenLine, Pencil, Plus, Search, SquareDashed, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import type { Layers } from '../canvas/PlanCanvas';
 import { glyphFor } from '../canvas/glyphs';
@@ -88,6 +88,16 @@ export function Library({ book, types, zoneTypes, layers, onLayers, onNotice, on
   }, [types, query]);
 
   const design = mode === 'design';
+  // Открыта одна группа — та, с которой обычно начинают; остальные по щелчку. При поиске
+  // открыты все найденные: иначе совпадение пряталось бы в свёрнутой группе.
+  const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set(types[0] ? [types[0].group] : []));
+  const toggleGroup = (group: string) =>
+    setOpenGroups((open) => {
+      const next = new Set(open);
+      if (next.has(group)) next.delete(group);
+      else next.add(group);
+      return next;
+    });
 
   return (
     <aside className="library on-steel" aria-label="Инструменты и библиотека оборудования">
@@ -141,7 +151,19 @@ export function Library({ book, types, zoneTypes, layers, onLayers, onNotice, on
             {groups.length === 0 && <p className="library__empty">Ничего не найдено. Проверьте написание.</p>}
             {groups.map(([group, list]) => (
               <section key={group} className="library__group">
-                <h3>{group}</h3>
+                <h3>
+                  <button
+                    type="button"
+                    className="library__group-toggle"
+                    aria-expanded={Boolean(query.trim()) || openGroups.has(group)}
+                    onClick={() => toggleGroup(group)}
+                  >
+                    <ChevronRight size={13} aria-hidden="true" className="library__chevron" />
+                    {group}
+                    <span className="library__group-count">{list.length}</span>
+                  </button>
+                </h3>
+                {(Boolean(query.trim()) || openGroups.has(group)) && (
                 <ul>
                   {list.map((type) => {
                     const Glyph = glyphFor(type.code);
@@ -182,6 +204,7 @@ export function Library({ book, types, zoneTypes, layers, onLayers, onNotice, on
                     );
                   })}
                 </ul>
+                )}
               </section>
             ))}
           </div>
@@ -194,8 +217,12 @@ export function Library({ book, types, zoneTypes, layers, onLayers, onNotice, on
         </div>
       )}
 
-      <fieldset className="library__layers">
-        <legend>Слои</legend>
+      {/* Слои нужны изредка: свёрнуты, чтобы библиотеке хватало высоты. */}
+      <details className="library__layers">
+        <summary>
+          <ChevronRight size={13} aria-hidden="true" className="library__chevron" />
+          Слои
+        </summary>
         {LAYER_LABELS.filter(
           (layer) =>
             (!layer.onlyWithHeatmap || heatmap) && (!layer.onlyInDesign || mode === 'design') && (!layer.onlyOnPlan || view === '2d'),
@@ -206,7 +233,7 @@ export function Library({ book, types, zoneTypes, layers, onLayers, onNotice, on
             {label}
           </label>
         ))}
-      </fieldset>
+      </details>
     </aside>
   );
 }

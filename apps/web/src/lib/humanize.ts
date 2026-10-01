@@ -1,6 +1,6 @@
 /**
  * Тексты сервера написаны в терминах идентификаторов и десятичных точек. Для человека
- * идентификатор заменяется адресом и подписью объекта, а дробная часть отделяется запятой.
+ * идентификатор заменяется подписью объекта, а дробная часть отделяется запятой.
  */
 
 import type { AddressBook } from './addresses';
@@ -9,16 +9,12 @@ import type { Plan } from './plan';
 
 export function humanize(text: string, plan: Plan | null, book: AddressBook): string {
   const withNames = text.replace(/«([A-Za-z0-9_.-]+)»/g, (whole, id: string) => {
+    // В тексте — имя объекта, как его называют люди: «Окно №1». Адрес О-01 остаётся на
+    // табличке рядом с нарушением, в предложении он только мешает читать.
     const item = plan?.equipment?.find((e) => e.id === id);
-    if (item) {
-      const address = book.byId.get(key('equipment', id));
-      return `«${address ? `${address} ` : ''}${item.label ?? id}»`;
-    }
+    if (item) return `«${item.label ?? book.byId.get(key('equipment', id)) ?? id}»`;
     const zone = plan?.zones?.find((z) => z.id === id);
-    if (zone) {
-      const address = book.byId.get(key('zone', id));
-      return `«${address ? `${address} ` : ''}${zone.label ?? id}»`;
-    }
+    if (zone) return `«${zone.label ?? book.byId.get(key('zone', id)) ?? id}»`;
     const wall = plan?.walls?.find((w) => w.id === id);
     if (wall) return `«${book.byId.get(key('wall', id)) ?? ''} ${wall.label ?? 'стена'}»`.replace('« ', '«');
     const door = plan?.doors?.find((d) => d.id === id);

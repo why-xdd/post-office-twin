@@ -322,7 +322,9 @@
   font-weight: 600;
   paint-order: stroke;
   stroke: var(--sheet);
-  stroke-width: 4px;
+  /* Широкая обводка цветом листа: подпись читается и поверх соседнего объекта. */
+  stroke-width: 6px;
+  stroke-linejoin: round;
 }
 
 @keyframes ants {

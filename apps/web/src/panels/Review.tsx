@@ -427,6 +427,7 @@ function ProposalCard({ proposal, onApply, onCancel }: { proposal: FixProposal; 
           <li key={row.objectId}>
             <b>{names[index]}</b>
             {row.distance !== null && <span> — на {formatNumber(row.distance, 1)} м</span>}
+            {row.turn !== null && <span>{row.distance !== null ? ',' : ' —'} с поворотом на {row.turn}°</span>}
             {row.bases.length > 0 && <span className="proposal__basis">{row.bases.join(' · ')}</span>}
           </li>
         ))}

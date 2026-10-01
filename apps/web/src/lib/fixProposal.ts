@@ -21,6 +21,8 @@ export interface ProposalRow {
   distance: number | null;
   /** Основания: документ и пункт нормы, которые перенос выполняет. */
   bases: string[];
+  /** На сколько градусов объект ещё и поворачивается; null — не поворачивается. */
+  turn: number | null;
 }
 
 export interface FixProposal {
@@ -84,8 +86,19 @@ function toRows(report: ImprovementReport, changes: RecommendationChange[]): Pro
       objectId: change.object_id,
       distance: from && to ? Math.hypot(to[0] - from[0], to[1] - from[1]) : null,
       bases: [...(bases.get(change.object_id) ?? [])],
+      turn: turnOf(change),
     };
   });
+}
+
+/** Поворот при переезде по кратчайшей дуге, в градусах; мелочь меньше градуса не в счёт. */
+function turnOf(change: RecommendationChange): number | null {
+  const before = change.previous_rotation_deg;
+  const after = change.rotation_deg;
+  if (before === null || before === undefined || after === null || after === undefined) return null;
+  const diff = Math.abs(((after - before) % 360) + 360) % 360;
+  const turn = Math.round(Math.min(diff, 360 - diff));
+  return turn >= 1 ? turn : null;
 }
 
 function toProposal(report: ImprovementReport): FixProposal {

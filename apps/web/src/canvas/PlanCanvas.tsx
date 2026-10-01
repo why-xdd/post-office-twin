@@ -768,6 +768,8 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
   // В обзоре коды-адреса не нужны: объекты узнаются по значкам, нарушения — по номерам меток.
   const review = mode === 'review';
   const addressesVisible = labelsVisible && !review;
+  // Табличка З-0x рядом с названием зоны — повтор; на обзорном масштабе остаётся одно название.
+  const zoneTagsVisible = addressesVisible && view.scale >= ALL_TAGS_SCALE;
   const openFinding = activeFinding !== null && !preview ? report?.findings[activeFinding] : undefined;
   const gapMark = (() => {
     if (!openFinding || openFinding.unit !== 'м' || openFinding.measured == null || !GAP_RULES.has(openFinding.rule_id)) return null;
@@ -792,7 +794,7 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
           group.includes(item.id) ||
           (selection?.kind === 'equipment' && selection.id === item.id))),
     zones: layers.zones && labelsVisible ? labelPoints : null,
-    zoneTags: addressesVisible,
+    zoneTags: zoneTagsVisible,
   });
   // В обзоре метки крупные и есть всегда. В редакторе это тихий слой: маленький номер у места
   // нарушения — тот же, что в адресе Н-03 в «Проверке», — который не мешает двигать объекты.
@@ -1076,10 +1078,10 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
             const [lx, ly] = toScreen(view, labelPoints.get(zone.id) ?? polygonCentroid(zone.polygon));
             return (
               <g key={`label-${zone.id}`} className="plan-zone-label" transform={`translate(${lx} ${ly})`}>
-                {addressesVisible && (
+                {zoneTagsVisible && (
                   <AddressTag x={-18} y={-10} text={book.byId.get(key('zone', zone.id)) ?? ''} tone="steel" />
                 )}
-                <text x={0} y={addressesVisible ? 18 : 4} textAnchor="middle">
+                <text x={0} y={zoneTagsVisible ? 18 : 4} textAnchor="middle">
                   {zone.label ?? zone.type}
                 </text>
               </g>
@@ -1583,7 +1585,7 @@ function pinAnchors(doc: Plan, objects: string[], view: View, options: PinOption
   const anchor = pinAnchor(doc, objects, view, options);
   if (!anchor) return [];
   const items = objects.filter((id) => doc.equipment?.some((e) => e.id === id));
-  if (options.style === 'design' && items.length === 1) {
+  if (items.length === 1) {
     const item = doc.equipment!.find((e) => e.id === items[0])!;
     const corners = equipmentCorners(item).map((corner) => toScreen(view, corner));
     const left = Math.min(...corners.map((c) => c[0]));
@@ -1604,7 +1606,7 @@ function pinAnchor(doc: Plan, objects: string[], view: View, options: PinOptions
   const items = objects
     .map((id) => doc.equipment?.find((e) => e.id === id))
     .filter((item): item is Equipment => Boolean(item));
-  if (options.style === 'design' && items.length === 1) {
+  if (items.length === 1) {
     const corners = equipmentCorners(items[0]).map((corner) => toScreen(view, corner));
     return [Math.max(...corners.map((c) => c[0])), Math.max(...corners.map((c) => c[1]))];
   }

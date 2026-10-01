@@ -743,7 +743,7 @@
     border-radius: var(--radius-plate);
     color: var(--on-steel-3);
     background: transparent;
-    font-size: 10px;
+    font-size: var(--text-11);
     line-height: 1.1;
   }
 
@@ -822,6 +822,19 @@
 
   .ws-tab {
     height: 44px;
+  }
+
+  /* Переключатели режима и вида, версия плана: под палец, а не под курсор */
+  .segmented button {
+    height: 44px;
+  }
+
+  button.ws-rail__version {
+    min-height: 44px;
+  }
+
+  .ws-rail .ws-rail__save {
+    min-height: 44px;
   }
 }
 

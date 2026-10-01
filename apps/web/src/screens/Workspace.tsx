@@ -17,6 +17,7 @@ import {
   ChevronDown,
   ClipboardList,
   CornerDownLeft,
+  CircleHelp,
   Ellipsis,
   FileJson,
   IdCard,
@@ -107,6 +108,40 @@ const HOTKEYS: [string, string][] = [
   ['Esc', 'отменить действие, снять выделение'],
 ];
 
+const GUIDE_SEEN_KEY = 'plan-ops:editor-guide-seen';
+
+/** Четыре вещи, без которых редактор не начать: короче, чем справка, и по делу. */
+function EditorGuide({ touch, onClose }: { touch: boolean; onClose: () => void }) {
+  const steps: [string, string][] = touch
+    ? [
+        ['Поставить предмет', '«Библиотека» внизу → предмет → коснитесь места на плане.'],
+        ['Изменить объект', 'Коснитесь объекта: «Свойства» откроются снизу, тяните его пальцем.'],
+        ['Что не так', '«Проверка»: номер нарушения совпадает с меткой на плане.'],
+        ['Попросить словами', '«Ассистент»: например, «поставь почтовый ящик у входа».'],
+      ]
+    : [
+        ['Поставить предмет', 'Выберите его в библиотеке слева и щёлкните по плану. Esc — отмена.'],
+        ['Изменить объект', 'Щёлкните — справа «Свойства»; тяните мышью, R — поворот, Del — удалить. Shift — выделить несколько.'],
+        ['Что не так', '«Проверка» справа: номер нарушения совпадает с меткой на плане, щелчок закрепляет подсветку.'],
+        ['Попросить словами', '«Ассистент»: например, «поставь почтовый ящик у входа». Ctrl+Z отменит любое действие.'],
+      ];
+  return (
+    <div className="ws-guide" role="dialog" aria-label="Как пользоваться редактором">
+      <p className="ws-guide__title">Редактор плана за минуту</p>
+      <ol>
+        {steps.map(([head, text]) => (
+          <li key={head}>
+            <b>{head}.</b> {text}
+          </li>
+        ))}
+      </ol>
+      <button type="button" className="btn btn--label" onClick={onClose} autoFocus>
+        Понятно
+      </button>
+    </div>
+  );
+}
+
 /** Схема адресов: что значит буква на табличке. Показывается под полем «Адрес», пока оно в фокусе. */
 const ADDRESS_LEGEND: [AddressKind, string][] = [
   ['equipment', 'объект'],
@@ -193,6 +228,8 @@ export function Workspace({ planId }: WorkspaceProps) {
   const [draft, setDraft] = useState<{ savedAt: number } | null>(null);
   const [hotkeys, setHotkeys] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  // Памятка редактора показывается при первом входе в «Редактор» и по пункту «Как пользоваться».
+  const [guide, setGuide] = useState(false);
   const [addressFocus, setAddressFocus] = useState(false);
   const addressInput = useRef<HTMLInputElement>(null);
   const more = useRef<HTMLDivElement>(null);
@@ -333,6 +370,17 @@ export function Workspace({ planId }: WorkspaceProps) {
   useEffect(() => {
     if (tool !== 'select' || placingType) setDrawer((open) => (open === 'library' ? null : open));
   }, [tool, placingType]);
+
+  useEffect(() => {
+    if (mode !== 'design') return;
+    let seen = false;
+    try {
+      seen = localStorage.getItem(GUIDE_SEEN_KEY) === '1';
+    } catch {
+      seen = false;
+    }
+    if (!seen) setGuide(true);
+  }, [mode]);
 
   // На телефоне предпросмотр сжимает лист, и план вписывается в видимую часть уже после этого.
   useEffect(() => {
@@ -865,6 +913,11 @@ export function Workspace({ planId }: WorkspaceProps) {
                           setNotice('Чертёж сохранён файлом SVG в загрузки');
                         },
                       },
+                      {
+                        icon: <CircleHelp size={16} aria-hidden="true" />,
+                        label: 'Как пользоваться',
+                        run: () => setGuide(true),
+                      },
                       // Клавиши нужны там, где есть клавиатура: на телефоне пункт только мешает.
                       ...(touch
                         ? []
@@ -1031,6 +1084,19 @@ export function Workspace({ planId }: WorkspaceProps) {
               </button>
             </div>
           </div>
+        )}
+        {guide && mode === 'design' && (
+          <EditorGuide
+            touch={touch}
+            onClose={() => {
+              setGuide(false);
+              try {
+                localStorage.setItem(GUIDE_SEEN_KEY, '1');
+              } catch {
+                /* приватный режим: памятка просто покажется снова */
+              }
+            }}
+          />
         )}
         {hotkeys && (
           <div className="ws-hotkeys" role="dialog" aria-label="Горячие клавиши">

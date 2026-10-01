@@ -59,6 +59,8 @@ export interface Layers {
   heat: boolean;
   /** Метки нарушений в редакторе. В обзоре они есть всегда: там это главный рассказ экрана. */
   findings: boolean;
+  /** Линейки в метрах по верхнему и левому краю листа. */
+  rulers: boolean;
 }
 
 interface PlanCanvasProps {
@@ -1182,6 +1184,7 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
         })}
 
         <ScaleBar view={view} height={size.height} />
+        {layers.rulers && !review && <Rulers view={view} width={size.width} height={size.height} cursor={cursor} />}
       </svg>
       {wallMenu && (
         <div className="wall-menu" role="menu" aria-label="Проём в стене" style={{ left: wallMenu.sx, top: wallMenu.sy }}>
@@ -1673,6 +1676,89 @@ function PlacingGhost({
     <g className={`plan-placing${fits ? '' : ' plan-placing--blocked'}`} pointerEvents="none">
       <path d={screenPath(view, equipmentCorners(ghost))} />
       <Glyph x={gx - 10} y={gy - 10} width={20} height={20} strokeWidth={1.75} aria-hidden="true" />
+    </g>
+  );
+}
+
+const RULER_PX = 20;
+
+/** Шаг подписей: такой, чтобы между ними было не меньше 64 px. */
+function rulerStep(scale: number): { major: number; minor: number } {
+  const major = [0.5, 1, 2, 5, 10, 20, 50].find((m) => m * scale >= 64) ?? 100;
+  const minor = [major / 10, major / 5, major / 4, major / 2].find((m) => m * scale >= 8) ?? major;
+  return { major, minor };
+}
+
+/**
+ * Линейки по краям листа: метры плана при текущем масштабе и сдвиге, отметка курсора.
+ * Ось Y плана смотрит вверх, поэтому на левой линейке значения растут снизу вверх.
+ */
+function Rulers({ view, width, height, cursor }: { view: View; width: number; height: number; cursor: Point | null }) {
+  const { major, minor } = rulerStep(view.scale);
+  const ticks = (from: number, to: number) => {
+    const out: { value: number; major: boolean }[] = [];
+    const start = Math.ceil(from / minor) * minor;
+    for (let v = start; v <= to + 1e-9 && out.length < 600; v += minor) {
+      // «|| 0» убирает минус у нуля: Math.round(−0,01) даёт −0, и подпись читалась бы «−0».
+      const value = Math.round(v / minor) * minor || 0;
+      out.push({ value, major: Math.abs(value / major - Math.round(value / major)) < 1e-6 });
+    }
+    return out;
+  };
+  const xFrom = (RULER_PX - view.originX) / view.scale;
+  const xTo = (width - view.originX) / view.scale;
+  const yFrom = (view.originY - height) / view.scale;
+  const yTo = (view.originY - RULER_PX) / view.scale;
+  const label = (v: number) => formatNumber(v, major < 1 ? 1 : 0);
+  return (
+    <g className="plan-ruler" pointerEvents="none" aria-hidden="true">
+      <rect x={0} y={0} width={width} height={RULER_PX} className="plan-ruler__band" />
+      <rect x={0} y={0} width={RULER_PX} height={height} className="plan-ruler__band" />
+      {ticks(xFrom, xTo).map(({ value, major: big }) => {
+        const x = view.originX + value * view.scale;
+        return (
+          <g key={`x${value}`}>
+            <line x1={x} y1={big ? 0 : RULER_PX - 5} x2={x} y2={RULER_PX} className="plan-ruler__tick" />
+            {big && (
+              <text x={x + 3} y={10} className="plan-ruler__label">
+                {label(value)}
+              </text>
+            )}
+          </g>
+        );
+      })}
+      {ticks(yFrom, yTo).map(({ value, major: big }) => {
+        const y = view.originY - value * view.scale;
+        return (
+          <g key={`y${value}`}>
+            <line x1={big ? 0 : RULER_PX - 5} y1={y} x2={RULER_PX} y2={y} className="plan-ruler__tick" />
+            {big && (
+              <text x={10} y={y - 3} className="plan-ruler__label" transform={`rotate(-90 10 ${y - 3})`}>
+                {label(value)}
+              </text>
+            )}
+          </g>
+        );
+      })}
+      {cursor && (
+        <>
+          <line
+            x1={view.originX + cursor[0] * view.scale}
+            y1={0}
+            x2={view.originX + cursor[0] * view.scale}
+            y2={RULER_PX}
+            className="plan-ruler__cursor"
+          />
+          <line
+            x1={0}
+            y1={view.originY - cursor[1] * view.scale}
+            x2={RULER_PX}
+            y2={view.originY - cursor[1] * view.scale}
+            className="plan-ruler__cursor"
+          />
+        </>
+      )}
+      <rect x={0} y={0} width={RULER_PX} height={RULER_PX} className="plan-ruler__corner" />
     </g>
   );
 }

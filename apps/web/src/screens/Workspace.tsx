@@ -170,7 +170,7 @@ export function Workspace({ planId }: WorkspaceProps) {
   const [types, setTypes] = useState<EquipmentTypeInfo[]>([]);
   const [zoneTypes, setZoneTypes] = useState<ZoneTypeInfo[]>([]);
   const [rules, setRules] = useState<Rule[]>([]);
-  const [layers, setLayers] = useState<Layers>({ zones: true, labels: true, routes: false, grid: true, heat: true, findings: true });
+  const [layers, setLayers] = useState<Layers>({ zones: true, labels: true, routes: false, grid: true, heat: true, findings: true, rulers: true });
   const [fitSignal, setFitSignal] = useState(0);
   const [focus, setFocus] = useState<{ id: string; nonce: number } | null>(null);
   const [view, setView] = useState<View | null>(null);

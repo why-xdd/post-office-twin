@@ -456,6 +456,45 @@
   stroke-dasharray: none;
 }
 
+/* Линейки по краям листа */
+.plan-ruler__band {
+  fill: var(--sheet);
+  fill-opacity: 0.94;
+  stroke: var(--label-edge);
+  stroke-width: 1;
+}
+
+.plan-ruler__corner {
+  fill: var(--sheet);
+  stroke: var(--label-edge);
+}
+
+.plan-ruler__tick {
+  stroke: var(--ink-3);
+  stroke-width: 1;
+}
+
+.plan-ruler__label {
+  fill: var(--ink-2);
+  font-family: var(--font-plate);
+  font-stretch: 70%;
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.plan-ruler__cursor {
+  stroke: var(--signal);
+  stroke-width: 1.5;
+}
+
+/* На телефоне место дороже: линейки только на широком экране */
+@media (max-width: 767px) {
+  .plan-ruler {
+    display: none;
+  }
+}
+
 /* Рамка выделения группы */
 .plan-marquee {
   fill: rgba(44, 90, 116, 0.08);

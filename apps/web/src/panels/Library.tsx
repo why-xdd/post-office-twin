@@ -39,6 +39,7 @@ const LAYER_LABELS: { key: keyof Layers; label: string; onlyWithHeatmap?: boolea
   { key: 'labels', label: 'Адреса и подписи' },
   { key: 'routes', label: 'Маршруты посетителей' },
   { key: 'grid', label: 'Сетка 25 см' },
+  { key: 'rulers', label: 'Линейки' },
   // Тепловая карта показывается в списке слоёв только после разбора записи с камеры.
   { key: 'heat', label: 'Тепловая карта камеры', onlyWithHeatmap: true },
 ];

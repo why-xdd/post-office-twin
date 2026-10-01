@@ -154,6 +154,39 @@ def _door_squares(plan: Plan, side: float = 1.5) -> list[Polygon]:
 
 SETTLE_WALL_M = 0.3
 SETTLE_ITEM_M = 0.2
+# Сколько разных наклонов стен проверять: у реального помещения их один-два.
+MAX_SLANTED_ANGLES = 3
+
+
+def _slanted_walls(plan: Plan) -> list[tuple[float, object]]:
+    """Наклонные стены: угол в градусах (0–180) и геометрия, к которой прижимать объект.
+
+    Наружная стена — её линия, перегородка — полоса толщиной 10 см, как и в остальном поиске.
+    """
+    result: list[tuple[float, object]] = []
+    for wall in plan.walls:
+        (ax, ay), (bx, by) = wall.from_, wall.to
+        if abs(ax - bx) < 1e-3 or abs(ay - by) < 1e-3 or math.hypot(bx - ax, by - ay) < 1e-3:
+            continue
+        angle = round(math.degrees(math.atan2(by - ay, bx - ax)) % 180.0, 1)
+        line = LineString([(ax, ay), (bx, by)])
+        result.append((angle, line if wall.type == "outer" else line.buffer(0.05, cap_style="flat")))
+    return result
+
+
+def _settle_slanted(poly: Polygon, position: tuple[float, float], walls: list[object]) -> tuple[float, float] | None:
+    """Прижимает повёрнутый вдоль наклонной стены объект к ближайшей такой стене."""
+    best: tuple[float, float, float] | None = None
+    for geometry in walls:
+        gap = poly.distance(geometry)
+        if gap <= 1e-4 or gap > SETTLE_WALL_M:
+            continue
+        if best is None or gap < best[0]:
+            near_poly, near_wall = nearest_points(poly, geometry)
+            best = (gap, near_wall.x - near_poly.x, near_wall.y - near_poly.y)
+    if best is None:
+        return None
+    return round(position[0] + best[1], 3), round(position[1] + best[2], 3)
 
 
 def _blocker_boxes(geometries) -> np.ndarray:
@@ -603,7 +636,18 @@ def generate(
     result: list[Candidate] = []
     prepared_region = region.buffer(1e-6)
     shapely.prepare(prepared_region)
-    rotations = (0.0, 90.0) if size[0] != size[1] else (0.0,)
+    rotations: tuple[float, ...] = (0.0, 90.0) if size[0] != size[1] else (0.0,)
+    # У наклонной стены объект ставится и вдоль неё: иначе между ним и стеной клин пустоты.
+    slanted = _slanted_walls(plan)
+    slanted_angles: set[float] = set()
+    for angle, _ in slanted:
+        if len(slanted_angles) >= MAX_SLANTED_ANGLES:
+            break
+        slanted_angles.add(angle)
+        if size[0] != size[1]:
+            slanted_angles.add(round((angle + 90.0) % 180.0, 1))
+    rotations = rotations + tuple(sorted(slanted_angles))
+    slanted_shapes = [geometry for _, geometry in slanted]
     xs = [min_x + step / 2 + i * step for i in range(max(int((max_x - min_x) / step), 1))]
     ys = [min_y + step / 2 + j * step for j in range(max(int((max_y - min_y) / step), 1))]
 
@@ -668,7 +712,10 @@ def generate(
                 raw_poly = core.equipment_polygon(raw)
                 if not prepared_region.contains(raw_poly):
                     continue
-                settled = _settle(raw_poly.bounds, (x0, y0), wall_boxes, item_boxes)
+                if rotation in slanted_angles:
+                    settled = _settle_slanted(raw_poly, (x0, y0), slanted_shapes) or (round(x0, 3), round(y0, 3))
+                else:
+                    settled = _settle(raw_poly.bounds, (x0, y0), wall_boxes, item_boxes)
                 # Прижатое место предпочтительнее; если оно нарушает зазоры, остаётся место сетки.
                 for x, y in (settled, (round(x0, 3), round(y0, 3))):
                     if (x, y, rotation) in seen:

@@ -39,17 +39,66 @@ function onSegment([px, py]: Point, [ax, ay]: Point, [bx, by]: Point): boolean {
  * на ней лежат (углы и примыкающие перегородки), проёмы на ней и вершины зон на её линии.
  * Возвращает null, если какая-то стена схлопнулась бы.
  */
+/**
+ * Единичная нормаль стены, по которой её сдвигают. У вертикальной — вдоль X, у горизонтальной —
+ * вдоль Y; у наклонной направление выбрано так, чтобы X нормали был положительным.
+ */
+export function wallNormal(wall: Wall): Point {
+  const axis = wallAxis(wall);
+  if (axis === 'x') return [1, 0];
+  if (axis === 'y') return [0, 1];
+  const length = wallLength(wall) || 1;
+  let nx = -(wall.to[1] - wall.from[1]) / length;
+  let ny = (wall.to[0] - wall.from[0]) / length;
+  if (nx < 0) {
+    nx = -nx;
+    ny = -ny;
+  }
+  return [nx, ny];
+}
+
+/** Пересечение прямой через p1–p2 с прямой через q1–q2; null — прямые параллельны. */
+function intersect(p1: Point, p2: Point, q1: Point, q2: Point): Point | null {
+  const d1x = p2[0] - p1[0];
+  const d1y = p2[1] - p1[1];
+  const d2x = q2[0] - q1[0];
+  const d2y = q2[1] - q1[1];
+  const denominator = d1x * d2y - d1y * d2x;
+  if (Math.abs(denominator) < 1e-9) return null;
+  const t = ((q1[0] - p1[0]) * d2y - (q1[1] - p1[1]) * d2x) / denominator;
+  return [p1[0] + d1x * t, p1[1] + d1y * t];
+}
+
+/**
+ * Сдвиг стены по её нормали на delta метров. Концы соседних стен едут вдоль самих соседей:
+ * примыкающая стена удлиняется или укорачивается, но не меняет наклон — так ведёт себя
+ * перепланировка, а не растягивание резинки.
+ */
 export function moveWall(plan: Plan, wallId: string, delta: number): Plan | null {
   const wall = plan.walls?.find((w) => w.id === wallId);
-  const axis = wall ? wallAxis(wall) : null;
-  if (!wall || !axis) return null;
-  const index = axis === 'x' ? 0 : 1;
+  if (!wall) return null;
+  const [nx, ny] = wallNormal(wall);
   const a = wall.from;
   const b = wall.to;
+  const offset = (p: Point): Point => [p[0] + nx * delta, p[1] + ny * delta];
+  const movedA = offset(a);
+  const movedB = offset(b);
+  const same = (p: Point, q: Point) => Math.hypot(p[0] - q[0], p[1] - q[1]) < EPS;
+
+  // Куда уезжает конец: по соседней стене до пересечения со сдвинутой линией.
+  const endpoint = (end: Point, moved: Point): Point => {
+    const neighbour = (plan.walls ?? []).find((w) => w.id !== wallId && (same(w.from, end) || same(w.to, end)));
+    if (!neighbour) return moved;
+    const far = same(neighbour.from, end) ? neighbour.to : neighbour.from;
+    return intersect(movedA, movedB, far, end) ?? moved;
+  };
+  const newA = endpoint(a, movedA);
+  const newB = endpoint(b, movedB);
+  const round = (p: Point): Point => [round3(p[0]), round3(p[1])];
   const shift = (p: Point): Point => {
-    const next: Point = [p[0], p[1]];
-    next[index] = round3(next[index] + delta);
-    return next;
+    if (same(p, a)) return round(newA);
+    if (same(p, b)) return round(newB);
+    return round(offset(p));
   };
   const touches = (p: Point) => onSegment(p, a, b);
 

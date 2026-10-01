@@ -289,6 +289,69 @@ export function placeInRoom(plan: Plan, item: Equipment, previous: Point | null,
   return position;
 }
 
+/**
+ * Привязка к наклонной стене: объект в пределах магнита разворачивается вдоль стены (берётся
+ * ближайший к нынешнему поворот, кратный прямому углу к стене) и встаёт к ней вплотную.
+ * Горизонтальные и вертикальные стены держит обычный магнит, здесь только наклонные.
+ */
+export function snapToSlantedWall(
+  plan: Plan,
+  item: Equipment,
+  outline = outlinePoints(plan),
+): { position: Point; rotation_deg: number } | null {
+  let best: { position: Point; rotation_deg: number; gap: number } | null = null;
+  for (const wall of plan.walls ?? []) {
+    if (axisAligned(wall)) continue;
+    const [ax, ay] = wall.from;
+    const [bx, by] = wall.to;
+    const length = Math.hypot(bx - ax, by - ay);
+    if (length < EPS) continue;
+    const ux = (bx - ax) / length;
+    const uy = (by - ay) / length;
+    // Грани стены и сторона, где должен стоять объект: у наружной — внутрь помещения.
+    const faces: { origin: Point; normal: Point }[] = [];
+    if (isOuter(wall)) {
+      const [ox, oy] = outwardNormal(plan, wall, outline);
+      faces.push({ origin: [ax, ay], normal: [-ox, -oy] });
+    } else {
+      const nx = -uy;
+      const ny = ux;
+      const half = PARTITION_M / 2;
+      faces.push({ origin: [ax + nx * half, ay + ny * half], normal: [nx, ny] });
+      faces.push({ origin: [ax - nx * half, ay - ny * half], normal: [-nx, -ny] });
+    }
+    const angle = (Math.atan2(uy, ux) * 180) / Math.PI;
+    const current = item.rotation_deg ?? 0;
+    const turns = [0, 90, 180, 270].map((k) => (((angle + k) % 360) + 360) % 360);
+    const rotation = turns.reduce((a, b) => (circular(b, current) < circular(a, current) ? b : a));
+    for (const face of faces) {
+      const centreSide = (item.position[0] - face.origin[0]) * face.normal[0] + (item.position[1] - face.origin[1]) * face.normal[1];
+      if (centreSide <= 0) continue;
+      const turned: Equipment = { ...item, rotation_deg: rotation };
+      const corners = equipmentCorners(turned);
+      const distances = corners.map(([x, y]) => (x - face.origin[0]) * face.normal[0] + (y - face.origin[1]) * face.normal[1]);
+      const gap = Math.min(...distances);
+      if (Math.abs(gap) > WALL_MAGNET_M) continue;
+      // Объект должен стоять против стены, а не против её продолжения за концом.
+      const along = corners.map(([x, y]) => (x - ax) * ux + (y - ay) * uy);
+      if (Math.max(...along) < 0 || Math.min(...along) > length) continue;
+      if (best && Math.abs(gap) >= Math.abs(best.gap)) continue;
+      best = {
+        position: [round3(item.position[0] - face.normal[0] * gap), round3(item.position[1] - face.normal[1] * gap)],
+        rotation_deg: Math.round(rotation * 10) / 10,
+        gap,
+      };
+    }
+  }
+  return best ? { position: best.position, rotation_deg: best.rotation_deg } : null;
+}
+
+/** Расстояние между углами по кругу, в градусах. */
+function circular(a: number, b: number): number {
+  const d = Math.abs((((a - b) % 360) + 360) % 360);
+  return Math.min(d, 360 - d);
+}
+
 /** Стена, на которой лежит проём: отрезок проёма коллинеарен ей и не выходит за её концы. */
 export function hostWall(plan: Plan, segment: [number, number, number, number]): Wall | null {
   const [px, py, qx, qy] = segment;

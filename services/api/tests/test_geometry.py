@@ -127,3 +127,35 @@ def test_queue_terminal_distance_from_entrance(plan: Plan) -> None:
     distance = core.distance_from_entrance(plan, kiosks[0])
     assert distance is not None
     assert distance >= 0
+
+
+def test_search_places_along_a_slanted_wall() -> None:
+    """У наклонной стены поиск предлагает место вдоль неё и вплотную, а не клином."""
+    import math
+
+    from shapely.geometry import LineString
+
+    from app.assistant import search
+    from app.models import Plan
+
+    plan = Plan.model_validate(
+        {
+            "ops": {"id": "ops", "name": "Трапеция", "bbox": {"width_m": 10, "height_m": 6}},
+            "walls": [
+                {"id": "b", "from": [0, 0], "to": [10, 0], "type": "outer"},
+                {"id": "s", "from": [10, 0], "to": [8, 6], "type": "outer"},
+                {"id": "t", "from": [8, 6], "to": [0, 6], "type": "outer"},
+                {"id": "l", "from": [0, 6], "to": [0, 0], "type": "outer"},
+            ],
+            "zones": [
+                {"id": "z", "type": "back_office", "polygon": [[0, 0], [10, 0], [8, 6], [0, 6]]},
+            ],
+            "equipment": [],
+        }
+    )
+    candidates, _ = search.generate(plan, "storage_rack")
+    angle = round(math.degrees(math.atan2(6, -2)) % 180.0, 1)
+    along = [c for c in candidates if c.rotation_deg in (angle, round((angle + 90) % 180, 1))]
+    assert along, "вдоль наклонной стены кандидатов нет"
+    wall = LineString([(10, 0), (8, 6)])
+    assert min(c.polygon.distance(wall) for c in along) < 0.01

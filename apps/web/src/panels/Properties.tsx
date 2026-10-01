@@ -30,7 +30,7 @@ import { round3, uniqueId, zoneAt } from '../lib/geometry';
 import type { Door, Equipment, EquipmentTypeInfo, Plan, WindowOpening, ZoneTypeInfo } from '../lib/plan';
 import { isNormFinding, plainFinding } from '../lib/plainFindings';
 import { fitsRoom, hostWall } from '../lib/room';
-import { MIN_WALL_M, openingPlacement, resizeOpening, wallAxis, wallLength } from '../lib/wallEdit';
+import { MIN_WALL_M, openingPlacement, resizeOpening, wallLength } from '../lib/wallEdit';
 import { formatNumber, planArea, plural, polygonArea } from '../lib/planFacts';
 import { useWorkspace } from '../state/store';
 import { glyphFor } from '../canvas/glyphs';
@@ -251,9 +251,8 @@ export function Properties({ book, types, zoneTypes }: PropertiesProps) {
           <ReadonlyField label="Направление" value={Math.abs(wall.from[0] - wall.to[0]) < 1e-6 ? 'вертикально' : Math.abs(wall.from[1] - wall.to[1]) < 1e-6 ? 'горизонтально' : 'под углом'} />
         </div>
         <p className="props__note">
-          {wallAxis(wall)
-            ? 'Чтобы сдвинуть стену, тяните синюю ручку на плане. Двойной щелчок по стене добавит дверь или окно.'
-            : 'Двойной щелчок по стене добавит дверь или окно.'}
+          Чтобы сдвинуть стену, тяните синюю ручку на плане: стена едет поперёк себя, соседние стены
+          сохраняют наклон. Двойной щелчок по стене добавит дверь или окно.
         </p>
         <div className="props__actions">
           <button type="button" className="action action--danger" onClick={removeSelection}>

@@ -30,7 +30,7 @@ import { equipmentCorners, planBounds } from '../lib/plan';
 import { formatNumber } from '../lib/planFacts';
 import { outlinePoints } from '../lib/planFacts';
 import { defaultOperatorPosition, transformInPlace } from '../lib/equipmentOps';
-import { MIN_WALL_M, addOpening, moveWall, replaceOutline, wallAxis, wallLength } from '../lib/wallEdit';
+import { MIN_WALL_M, addOpening, moveWall, replaceOutline, wallAxis, wallLength, wallNormal } from '../lib/wallEdit';
 import {
   OUTER_WALL_M,
   PARTITION_M,
@@ -41,6 +41,7 @@ import {
   offsetOutline,
   outwardNormal,
   placeInRoom,
+  snapToSlantedWall,
   type Guide,
 } from '../lib/room';
 import { zoneLabelPoints } from '../lib/zoneLabels';
@@ -91,7 +92,7 @@ type Gesture =
   // Рамка выделения: Shift + перетаскивание по пустому месту.
   | { kind: 'marquee'; start: Point }
   | { kind: 'rotate'; id: string }
-  | { kind: 'wall'; id: string; axis: 'x' | 'y'; startWorld: Point; base: Plan; delta: number };
+  | { kind: 'wall'; id: string; normal: Point; startWorld: Point; base: Plan; delta: number };
 
 interface WallMenu {
   wallId: string;
@@ -326,7 +327,7 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
 
   /** Ручка сдвига осевой стены — на середине стены, там, где стена нарисована. */
   const wallHandle = (wall: Wall): [number, number] | null => {
-    if (!doc || !wallAxis(wall)) return null;
+    if (!doc) return null;
     const outer = isOuter(wall);
     const [nx, ny] = outer ? outwardNormal(doc, wall, outlinePoints(doc)) : [0, 0];
     const shift = outer ? OUTER_WALL_M / 2 : 0;
@@ -457,10 +458,9 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
     if (selection?.kind === 'wall' && mode === 'design') {
       const wall = doc.walls?.find((w) => w.id === selection.id);
       const handle = wall ? wallHandle(wall) : null;
-      const axis = wall ? wallAxis(wall) : null;
-      if (wall && handle && axis && Math.hypot(handle[0] - sx, handle[1] - sy) < 13) {
+      if (wall && handle && Math.hypot(handle[0] - sx, handle[1] - sy) < 13) {
         beginTransient();
-        gesture.current = { kind: 'wall', id: wall.id, axis, startWorld: world, base: doc, delta: 0 };
+        gesture.current = { kind: 'wall', id: wall.id, normal: wallNormal(wall), startWorld: world, base: doc, delta: 0 };
         setWallShift(0);
         return;
       }
@@ -624,6 +624,16 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
         };
         // Ctrl отключает привязку к стенам и соседям, но не пускает сквозь стены.
         const floor = types.get(target.type)?.floor_object ?? true;
+        // У наклонной стены объект встаёт вдоль неё и вплотную — если там помещается.
+        const slanted = event.ctrlKey ? null : snapToSlantedWall(draft, probe);
+        if (slanted && (!floor || fitsRoom(draft, { ...probe, ...slanted }))) {
+          setGuides([]);
+          transformInPlace(target, slanted);
+          const zone = zoneAt(draft, target.position);
+          if (zone) target.zone = zone.id;
+          else delete target.zone;
+          return;
+        }
         let next = event.ctrlKey
           ? fitsRoom(draft, probe) || !floor
             ? probe.position
@@ -648,9 +658,11 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
     }
 
     if (current.kind === 'wall') {
-      const index = current.axis === 'x' ? 0 : 1;
       const step = event.shiftKey ? DRAFT_STEP : POSITION_STEP;
-      const delta = round3(snap(world[index] - current.startWorld[index], step));
+      // Стена едет только поперёк себя: берётся проекция движения на её нормаль.
+      const along =
+        (world[0] - current.startWorld[0]) * current.normal[0] + (world[1] - current.startWorld[1]) * current.normal[1];
+      const delta = round3(snap(along, step));
       if (delta === current.delta) return;
       const moved = moveWall(current.base, current.id, delta);
       // Стена, которая схлопнула бы соседнюю, останавливается на последнем допустимом месте.

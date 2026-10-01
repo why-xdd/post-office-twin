@@ -89,3 +89,35 @@ describe('замена контура', () => {
     expect(droppedOpenings).toBe(0);
   });
 });
+
+describe('наклонная стена', () => {
+  // Трапеция: правая стена наклонная, от (10, 0) к (8, 6).
+  const trapezoid = () =>
+    ({
+      ops: { id: 'ops', name: 'Трапеция', bbox: { width_m: 10, height_m: 6 } },
+      walls: [
+        { id: 'bottom', from: [0, 0], to: [10, 0], type: 'outer' },
+        { id: 'slant', from: [10, 0], to: [8, 6], type: 'outer' },
+        { id: 'top', from: [8, 6], to: [0, 6], type: 'outer' },
+        { id: 'left', from: [0, 6], to: [0, 0], type: 'outer' },
+      ],
+      zones: [],
+      equipment: [],
+    }) as unknown as ReturnType<typeof plan>;
+
+  it('сдвигается поперёк себя, соседние стены сохраняют направление', () => {
+    const moved = moveWall(trapezoid(), 'slant', 1)!;
+    const slant = moved.walls!.find((w) => w.id === 'slant')!;
+    const bottom = moved.walls!.find((w) => w.id === 'bottom')!;
+    const top = moved.walls!.find((w) => w.id === 'top')!;
+    // Нижняя и верхняя остались горизонтальными, наклон стены тот же.
+    expect(bottom.to[1]).toBeCloseTo(0);
+    expect(top.from[1]).toBeCloseTo(6);
+    const slope = (w: typeof slant) => (w.to[0] - w.from[0]) / (w.to[1] - w.from[1]);
+    expect(slope(slant)).toBeCloseTo(-2 / 6);
+    // Расстояние между старой и новой линией — ровно метр по нормали.
+    const length = Math.hypot(2, 6);
+    const distance = ((slant.from[0] - 10) * 6 + (slant.from[1] - 0) * 2) / length;
+    expect(Math.abs(distance)).toBeCloseTo(1);
+  });
+});

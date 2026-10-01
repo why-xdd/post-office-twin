@@ -114,7 +114,20 @@ export function Plan3D({ types }: Props) {
       // полупрозрачная фигура закрывала середину кадра.
       const door = scene.figures[0]?.centre ?? scene.centre;
       const away = new THREE.Vector3(centre.x - door[0], 0, centre.z + door[1]).normalize();
-      place = new THREE.Vector3(door[0] + away.x * 0.35, 1.65, -door[1] + away.z * 0.35);
+      // Камера не должна оказаться внутри оборудования у входа: берётся первое свободное место
+      // на линии взгляда — впереди фигуры, на ней или чуть позади.
+      const blocked = (x: number, y: number) =>
+        scene.prisms.some((prism) => {
+          if (prism.kind !== 'equipment' || prism.base > 1.6) return false;
+          const angle = (prism.rotationDeg * Math.PI) / 180;
+          const dx = x - prism.centre[0];
+          const dy = y - prism.centre[1];
+          const u = dx * Math.cos(angle) - dy * Math.sin(angle);
+          const v = dx * Math.sin(angle) + dy * Math.cos(angle);
+          return Math.abs(u) < prism.size[0] / 2 + 0.35 && Math.abs(v) < prism.size[1] / 2 + 0.35;
+        });
+      const step = [0.35, 0.8, 0, -0.6, 1.3].find((k) => !blocked(door[0] + away.x * k, door[1] - away.z * k)) ?? 0.35;
+      place = new THREE.Vector3(door[0] + away.x * step, 1.65, -door[1] + away.z * step);
       target = new THREE.Vector3(centre.x, 1.3, centre.z);
     } else {
       parts.camera.up.set(0, 1, 0);

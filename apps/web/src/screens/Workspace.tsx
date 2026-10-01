@@ -1055,7 +1055,7 @@ export function Workspace({ planId }: WorkspaceProps) {
               <button type="button" className="btn btn--label" onClick={() => void save().then(() => navigate({ name: 'rack' }))}>
                 Сохранить и выйти
               </button>
-              <button type="button" className="btn btn--steel" onClick={() => navigate({ name: 'rack' })}>
+              <button type="button" className="btn btn--steel ws-confirm__discard" onClick={() => navigate({ name: 'rack' })}>
                 Выйти без сохранения
               </button>
               <button type="button" className="btn btn--steel" onClick={() => setLeaving(false)}>

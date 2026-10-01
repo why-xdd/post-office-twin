@@ -1135,3 +1135,13 @@ button.ws-rail__version:hover {
   flex-wrap: wrap;
   gap: var(--s-2);
 }
+
+/* Потерять правки — действие другого рода, чем «Остаться»: оно и выглядит иначе */
+.ws-confirm .ws-confirm__discard {
+  color: #f6d9cf;
+  background: var(--signal);
+}
+
+.ws-confirm .ws-confirm__discard:hover:not(:disabled) {
+  background: #9c2f18;
+}

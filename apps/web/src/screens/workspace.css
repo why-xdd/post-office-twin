@@ -704,6 +704,30 @@
     background: var(--steel-500, rgba(255, 255, 255, 0.28));
   }
 
+  /* Предпросмотр исправления: лист — до сводки, план с пунктирными стрелками виден над ним. */
+  .workspace--previewing.workspace--drawer-panel .ws-column {
+    max-height: 42vh;
+  }
+
+  .workspace--previewing .ws-scrim {
+    display: none;
+  }
+
+  .workspace--previewing.workspace--drawer-panel .ws-sheet {
+    padding-bottom: 42vh;
+  }
+
+  /* «Применить» и «Отмена» всегда под пальцем, даже когда сводка прокручена. */
+  .workspace--previewing .proposal__actions {
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+    margin: 0 calc(-1 * var(--s-4));
+    padding: var(--s-2) var(--s-4) var(--s-3);
+    background: var(--label);
+    box-shadow: 0 -1px 0 var(--label-edge);
+  }
+
   /* Вкладки живут в нижней планке, в выдвинутом листе они лишние. */
   .ws-tabs {
     display: none;
@@ -1067,4 +1091,31 @@ button.ws-rail__version:hover {
 .ws-hotkeys dd {
   margin: 0;
   color: var(--ink-2);
+}
+
+/* Объёмный вид не открылся: сообщение на месте листа и выход к чертежу */
+.ws-fallback {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  max-width: 440px;
+  margin: 15vh auto 0;
+  padding: var(--s-6);
+  border-radius: var(--radius-plate);
+  color: var(--ink);
+  background: var(--label);
+  box-shadow: var(--lift-shadow);
+  font-size: var(--text-14);
+  line-height: 1.5;
+}
+
+.ws-fallback__title {
+  font-size: var(--text-16);
+  font-weight: 660;
+}
+
+.ws-fallback__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
 }

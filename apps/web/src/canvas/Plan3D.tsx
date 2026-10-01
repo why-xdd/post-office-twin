@@ -19,6 +19,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import type { EquipmentTypeInfo } from '../lib/plan';
 import { dressWithModels } from './models3d';
+import { plural } from '../lib/planFacts';
 import { buildScene } from '../lib/scene3d';
 import { useWorkspace } from '../state/store';
 import { build, lights, type Quality } from './scene3d-build';
@@ -435,12 +436,14 @@ export function Plan3D({ types }: Props) {
         <p>
           {scene.violations > 0 ? (
             <>
-              <TriangleAlert size={14} aria-hidden="true" /> Красным и меткой сверху — объекты в нарушениях: {scene.violations}
+              {/* Здесь считаются объекты, а не проблемы: одна проблема может касаться двух объектов. */}
+              <TriangleAlert size={14} aria-hidden="true" /> Красным с меткой сверху —{' '}
+              {scene.violations} {plural(scene.violations, 'объект', 'объекта', 'объектов')}, из-за которых есть проблемы
             </>
           ) : (
-            'Нарушений на плане нет'
+            'Проблем на плане нет'
           )}
-          {scene.cautions > 0 && ` · янтарным — в предупреждениях: ${scene.cautions}`}
+          {scene.cautions > 0 && ` · янтарным — ${scene.cautions} ${plural(scene.cautions, 'объект', 'объекта', 'объектов')} с замечаниями`}
         </p>
         <p>Синие полосы — типовые маршруты посетителей. Фигуры у входа: человек 1,7 м и кресло-коляска 0,9 м.</p>
       </div>

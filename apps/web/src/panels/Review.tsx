@@ -192,7 +192,7 @@ export function Review({ book, saving, onSave, onFocusObject, onFit, onNotice }:
               <p>
                 {/* Замечания после исправления остаются — сказать «всё в порядке» над ними нечестно. */}
                 {fixed
-                  ? `Исправлено ${fixed.before} ${plural(fixed.before, 'нарушение', 'нарушения', 'нарушений')}. `
+                  ? `Исправлено ${fixed.before} ${plural(fixed.before, 'проблема', 'проблемы', 'проблем')}. `
                   : `План проверен по ${report.checked_rules.length} ${plural(report.checked_rules.length, 'правилу', 'правилам', 'правилам')}. `}
                 {notes.length
                   ? `Ошибок по нормам нет; ${notes.length} ${plural(notes.length, 'замечание', 'замечания', 'замечаний')} — допустимо, но стоит посмотреть.`
@@ -203,7 +203,13 @@ export function Review({ book, saving, onSave, onFocusObject, onFit, onNotice }:
         ) : (
           <div>
             <h2>
-              {normErrors > 0 ? (
+              {/* Итог везде один: «проблемы» = нарушения норм + ошибки в данных; разбивка — строкой ниже. */}
+              {normErrors > 0 && dataErrors > 0 ? (
+                <>
+                  <span className="review__count">{normErrors + dataErrors}</span>{' '}
+                  {plural(normErrors + dataErrors, 'проблема', 'проблемы', 'проблем')}
+                </>
+              ) : normErrors > 0 ? (
                 <>
                   <span className="review__count">{normErrors}</span>{' '}
                   {plural(normErrors, 'нарушение', 'нарушения', 'нарушений')} норм
@@ -217,8 +223,9 @@ export function Review({ book, saving, onSave, onFocusObject, onFit, onNotice }:
             </h2>
             {normErrors > 0 && dataErrors > 0 && (
               <p className="review__data">
-                и {dataErrors} {plural(dataErrors, 'ошибка', 'ошибки', 'ошибок')} в данных плана: объекты
-                пересекаются или выходят за стены — это не норма, а неверная расстановка.
+                {normErrors} {plural(normErrors, 'нарушение', 'нарушения', 'нарушений')} норм и {dataErrors}{' '}
+                {plural(dataErrors, 'ошибка', 'ошибки', 'ошибок')} в данных плана: объекты пересекаются или
+                выходят за стены — это не норма, а неверная расстановка.
               </p>
             )}
             <p>Номера в списке совпадают с метками на плане. Нажмите на пункт, чтобы увидеть подробности.</p>
@@ -392,7 +399,7 @@ function ProposalCard({ proposal, onApply, onCancel }: { proposal: FixProposal; 
       </p>
       <p className="proposal__hint">Пунктирные стрелки на плане показывают, куда переедет каждый объект.</p>
       <dl className="proposal__shifts">
-        <ShiftRow label="Нарушений" shift={{ before: proposal.errorsBefore, after: proposal.errorsAfter }} better="down" />
+        <ShiftRow label="Проблем" shift={{ before: proposal.errorsBefore, after: proposal.errorsAfter }} better="down" />
         {proposal.entrance && <ShiftRow label="Проход от входа" shift={proposal.entrance} unit="м" better="up" />}
         {proposal.waiting && <ShiftRow label="Мест в зоне ожидания" shift={proposal.waiting} better="up" />}
         {proposal.warnings && <ShiftRow label="Замечаний" shift={proposal.warnings} better="down" />}

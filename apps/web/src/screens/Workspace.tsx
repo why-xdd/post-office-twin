@@ -47,6 +47,7 @@ import {
   type ReactNode,
 } from 'react';
 import { PlanCanvas, type Layers } from '../canvas/PlanCanvas';
+import { ErrorBoundary, isStaleChunk } from '../components/ErrorBoundary';
 import { Mark } from '../components/Mark';
 import { MoreMenu } from '../components/MoreMenu';
 import { ADDRESS_KIND_LABEL, ADDRESS_PREFIX, buildAddressBook, parseAddress, type AddressKind } from '../lib/addresses';
@@ -332,6 +333,13 @@ export function Workspace({ planId }: WorkspaceProps) {
   useEffect(() => {
     if (tool !== 'select' || placingType) setDrawer((open) => (open === 'library' ? null : open));
   }, [tool, placingType]);
+
+  // На телефоне предпросмотр сжимает лист, и план вписывается в видимую часть уже после этого.
+  useEffect(() => {
+    if (!window.matchMedia('(max-width: 767px)').matches) return;
+    const timer = window.setTimeout(() => setFitSignal((n) => n + 1), 80);
+    return () => window.clearTimeout(timer);
+  }, [previewing]);
 
   // Лист плана меняет ширину вместе с режимом: план вписывается заново, когда раскладка уже сменилась.
   useEffect(() => {
@@ -640,7 +648,7 @@ export function Workspace({ planId }: WorkspaceProps) {
   };
 
   return (
-    <div className={`workspace workspace--${mode}${drawer ? ` workspace--drawer-${drawer}` : ''}`}>
+    <div className={`workspace workspace--${mode}${drawer ? ` workspace--drawer-${drawer}` : ''}${previewing ? ' workspace--previewing' : ''}`}>
       <header className="ws-rail on-steel">
         <button
           type="button"
@@ -913,9 +921,30 @@ export function Workspace({ planId }: WorkspaceProps) {
 
       <main className="ws-sheet" aria-label="Лист плана">
         {viewKind === '3d' ? (
-          <Suspense fallback={<p className="ws-hint">Загружается объёмный вид…</p>}>
-            <Plan3D types={typeMap} />
-          </Suspense>
+          <ErrorBoundary
+            fallback={(error, retry) => (
+              <div className="ws-fallback" role="alert">
+                <p className="ws-fallback__title">Объёмный вид не открылся</p>
+                <p>
+                  {isStaleChunk(error)
+                    ? 'Сервис обновился, пока страница была открыта. Перезагрузите страницу — план сохранён.'
+                    : 'План при этом не пострадал: вернитесь к чертежу и продолжайте работу.'}
+                </p>
+                <div className="ws-fallback__actions">
+                  <button type="button" className="btn btn--label" onClick={() => setViewKind('2d')}>
+                    Вернуться к плану
+                  </button>
+                  <button type="button" className="btn btn--outline" onClick={isStaleChunk(error) ? () => window.location.reload() : retry}>
+                    {isStaleChunk(error) ? 'Перезагрузить страницу' : 'Попробовать снова'}
+                  </button>
+                </div>
+              </div>
+            )}
+          >
+            <Suspense fallback={<p className="ws-hint">Загружается объёмный вид…</p>}>
+              <Plan3D types={typeMap} />
+            </Suspense>
+          </ErrorBoundary>
         ) : (
           <PlanCanvas
             types={typeMap}

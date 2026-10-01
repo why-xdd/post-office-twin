@@ -202,7 +202,7 @@ export function Rack() {
               {sampleFacts && sampleFacts.errors !== null && sampleFacts.errors > 0 ? (
                 <>
                   В примере — отделение на {formatNumber(sampleFacts.area, 0)} м² с {sampleFacts.errors}{' '}
-                  {plural(sampleFacts.errors, 'нарушением', 'нарушениями', 'нарушениями')} норм.{' '}
+                  {plural(sampleFacts.errors, 'проблемой', 'проблемами', 'проблемами')} по нормам и данным плана.{' '}
                 </>
               ) : null}
               <a className="cabinet__link" href="#/new">
@@ -323,7 +323,7 @@ function DoorFacts({ facts }: { facts: Facts | null }) {
       ) : facts.errors > 0 ? (
         <span className="door__status door__status--error">
           <TriangleAlert size={14} aria-hidden="true" />
-          {facts.errors} {plural(facts.errors, 'нарушение', 'нарушения', 'нарушений')}
+          {facts.errors} {plural(facts.errors, 'проблема', 'проблемы', 'проблем')}
         </span>
       ) : (
         <span className="door__status door__status--ok">

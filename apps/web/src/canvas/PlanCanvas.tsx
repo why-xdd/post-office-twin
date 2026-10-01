@@ -718,7 +718,11 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
           const ys = corners.map((c) => c[1]);
           return Math.max(...xs) >= box.x0 && Math.min(...xs) <= box.x1 && Math.max(...ys) >= box.y0 && Math.min(...ys) <= box.y1;
         });
-        setGroup(inside.map((item) => item.id));
+        // Рамка с Shift добавляет к уже выделенному, а пустая рамка ничего не сбрасывает.
+        if (inside.length) {
+          const base = group.length > 1 ? group : selection?.kind === 'equipment' ? [selection.id] : [];
+          setGroup([...new Set([...base, ...inside.map((item) => item.id)])]);
+        }
       }
       setMarquee(null);
     }

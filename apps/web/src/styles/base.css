@@ -148,3 +148,30 @@ a {
   outline-offset: 2px;
 }
 
+
+/* Редактор упал: что случилось и как продолжить, без пустого экрана */
+.crash {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  max-width: 520px;
+  margin: 18vh auto 0;
+  padding: 0 var(--s-4);
+  color: var(--ink);
+  line-height: 1.5;
+}
+
+.crash h1 {
+  font-size: 1.5rem;
+  font-weight: 680;
+}
+
+.crash__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+
+.crash__actions a {
+  text-decoration: none;
+}

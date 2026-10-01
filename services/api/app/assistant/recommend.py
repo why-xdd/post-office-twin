@@ -198,12 +198,12 @@ def _effects(before: dict[str, Any], after: dict[str, Any], type_code: str | Non
         return Effect(key=key, label=label, before=b, after=a, unit=unit, improved=improved)
 
     effects = [
-        eff("errors", "Нарушений", "", True),
+        eff("errors", "Проблем", "", True),
         eff("warnings", "Замечаний", "", True),
         eff("free_area", "Свободная площадь", "м²", False),
         eff("occupied_area", "Занято оборудованием", "м²", True),
-        eff("entrance_route_width", "Ширина прохода от входа", "м", False),
-        eff("min_route_width", "Самое узкое место пути посетителя", "м", False),
+        eff("entrance_route_width", "Проход от входа по самому свободному пути", "м", False),
+        eff("min_route_width", "Самое узкое место на путях к окнам и терминалам", "м", False),
         eff("waiting_capacity", "Вместимость зоны ожидания", "чел.", False),
     ]
     # Площади сами по себе не хороши и не плохи: новый предмет всегда занимает место, и

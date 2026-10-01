@@ -46,6 +46,7 @@ import {
 } from '../lib/room';
 import { zoneLabelPoints } from '../lib/zoneLabels';
 import { inspectionState } from '../lib/inspections';
+import { narrowestGap, type Gap } from '../lib/gap';
 import { useWorkspace, type Selection } from '../state/store';
 import { glyphFor } from './glyphs';
 import './canvas.css';
@@ -767,6 +768,18 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
   // В обзоре коды-адреса не нужны: объекты узнаются по значкам, нарушения — по номерам меток.
   const review = mode === 'review';
   const addressesVisible = labelsVisible && !review;
+  const openFinding = activeFinding !== null && !preview ? report?.findings[activeFinding] : undefined;
+  const gapMark = (() => {
+    if (!openFinding || openFinding.unit !== 'м' || openFinding.measured == null || !GAP_RULES.has(openFinding.rule_id)) return null;
+    const gap = narrowestGap(doc, openFinding.objects, (item) => types.get(item.type)?.floor_object ?? true);
+    // Рисуется, только если найденный просвет и есть замер проверки: иначе число стояло бы не там.
+    if (!gap || Math.abs(gap.distance - openFinding.measured) > GAP_MATCH_M) return null;
+    return {
+      gap,
+      label: `${formatNumber(openFinding.measured)} м`,
+      tone: openFinding.severity === 'error' ? ('signal' as const) : ('caution' as const),
+    };
+  })();
   // Таблички адресов раскладываются так, чтобы не налезать друг на друга и на названия зон.
   const tags = placeTags(doc, view, book, {
     visible: (item) => addressesVisible || (highlightSet.has(item.id) && !review),
@@ -1066,6 +1079,9 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
           })}
 
         {/* Метки нарушений: номер совпадает с пунктом списка в обзоре и с адресом в «Проверке» */}
+        {/* Размер в самом узком месте открытого нарушения: число из проверки, место — по геометрии. */}
+        {gapMark && <GapMark view={view} gap={gapMark.gap} label={gapMark.label} tone={gapMark.tone} />}
+
         {pins.length > 0 && (
           <g className={`plan-pins${reportState === 'checking' ? ' plan-pins--stale' : ''}`}>
             {pins.map((pin) => (
@@ -1763,6 +1779,37 @@ function Rulers({ view, width, height, cursor }: { view: View; width: number; he
         </>
       )}
       <rect x={0} y={0} width={RULER_PX} height={RULER_PX} className="plan-ruler__corner" />
+    </g>
+  );
+}
+
+/** Правила, у которых замер — просвет между объектами: для них рисуется размер. */
+/** Насколько просвет на плане может отличаться от замера проверки, чтобы размер был честным. */
+const GAP_MATCH_M = 0.1;
+
+const GAP_RULES = new Set(['movement_path_width', 'passage_between_workplaces', 'clearance_from_wall', 'counter_front_width']);
+
+function GapMark({ view, gap, label, tone }: { view: View; gap: Gap; label: string; tone: 'signal' | 'caution' }) {
+  const [ax, ay] = toScreen(view, gap.a);
+  const [bx, by] = toScreen(view, gap.b);
+  const length = Math.hypot(bx - ax, by - ay) || 1;
+  // Засечки поперёк размера, подпись — сбоку от середины, чтобы не лечь на объекты.
+  const nx = (-(by - ay) / length) * 7;
+  const ny = ((bx - ax) / length) * 7;
+  const mx = (ax + bx) / 2 + nx * 2.4;
+  const my = (ay + by) / 2 + ny * 2.4;
+  const width = label.length * 7.4 + 12;
+  return (
+    <g className={`plan-gap plan-gap--${tone}`} pointerEvents="none" aria-hidden="true">
+      <line x1={ax} y1={ay} x2={bx} y2={by} className="plan-gap__line" />
+      <line x1={ax - nx} y1={ay - ny} x2={ax + nx} y2={ay + ny} className="plan-gap__tick" />
+      <line x1={bx - nx} y1={by - ny} x2={bx + nx} y2={by + ny} className="plan-gap__tick" />
+      <g transform={`translate(${mx} ${my})`}>
+        <rect x={-width / 2} y={-10} width={width} height={20} rx={3} className="plan-gap__plate" />
+        <text textAnchor="middle" dominantBaseline="central" className="plan-gap__label">
+          {label}
+        </text>
+      </g>
     </g>
   );
 }

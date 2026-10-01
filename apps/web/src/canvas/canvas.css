@@ -456,6 +456,36 @@
   stroke-dasharray: none;
 }
 
+/* Размер в самом узком месте нарушения */
+.plan-gap {
+  --gap-tone: var(--signal);
+}
+
+.plan-gap--caution {
+  --gap-tone: var(--caution);
+}
+
+.plan-gap__line,
+.plan-gap__tick {
+  stroke: var(--gap-tone);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.plan-gap__plate {
+  fill: var(--gap-tone);
+  filter: drop-shadow(0 1px 2px rgba(60, 20, 10, 0.3));
+}
+
+.plan-gap__label {
+  fill: #fff;
+  font-family: var(--font-plate);
+  font-stretch: 70%;
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Линейки по краям листа */
 .plan-ruler__band {
   fill: var(--sheet);

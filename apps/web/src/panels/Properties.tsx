@@ -104,13 +104,13 @@ export function Properties({ book, types, zoneTypes }: PropertiesProps) {
           />
           {SERVICE_TYPES.has(item.type) && (
             <NumberField
-              label="Высота низа окна"
+              label={item.type === 'cashier_window' ? 'Высота низа окна' : 'Высота стойки'}
               unit="м"
               min={0.3}
               max={1.5}
               allowEmpty
               value={item.counter_height_m}
-              hint="Для МГН — не выше 0,85 м"
+              hint="Для МГН — участок не выше 0,85 м"
               onCommit={(v) => updateEquipment(item.id, { counter_height_m: v ?? undefined })}
             />
           )}

@@ -733,7 +733,7 @@ export function Workspace({ planId }: WorkspaceProps) {
               id="address-input"
               ref={addressInput}
               value={addressText}
-              placeholder="О-07"
+              placeholder="О-…"
               autoComplete="off"
               spellCheck={false}
               aria-describedby={addressFocus && !addressError ? 'address-hint address-legend' : 'address-hint'}

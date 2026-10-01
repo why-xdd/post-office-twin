@@ -782,7 +782,15 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
   })();
   // Таблички адресов раскладываются так, чтобы не налезать друг на друга и на названия зон.
   const tags = placeTags(doc, view, book, {
-    visible: (item) => addressesVisible || (highlightSet.has(item.id) && !review),
+    // Таблички всех объектов — только при крупном масштабе: на обзорном виде их три десятка, и
+    // они спорят с метками нарушений. Под курсором, в выделении и в подсветке табличка есть всегда.
+    visible: (item) =>
+      (addressesVisible && view.scale >= ALL_TAGS_SCALE) ||
+      (!review &&
+        (highlightSet.has(item.id) ||
+          item.id === hoverId ||
+          group.includes(item.id) ||
+          (selection?.kind === 'equipment' && selection.id === item.id))),
     zones: layers.zones && labelsVisible ? labelPoints : null,
     zoneTags: addressesVisible,
   });
@@ -1242,6 +1250,8 @@ function rotationHandle(view: View, item: Equipment) {
 }
 
 const TAG_HEIGHT = 15;
+/** С какого масштаба (пикселей на метр) видны таблички всех объектов. */
+const ALL_TAGS_SCALE = 60;
 const tagWidth = (text: string) => 7 * text.length + 8;
 
 interface TagLayout {

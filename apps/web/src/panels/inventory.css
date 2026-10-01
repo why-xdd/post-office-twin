@@ -135,6 +135,7 @@
 
 /* Паспорт */
 .passport__prompt {
+  padding: var(--s-4);
   color: var(--ink-2);
   font-size: var(--text-13);
 }

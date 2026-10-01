@@ -116,8 +116,8 @@ export function Passport({ book, types }: PassportProps) {
             <TextField label="Серийный номер" wide value={item.inventory?.serial_number} onCommit={(v) => update((t) => { t.inventory = { ...(t.inventory ?? {}), serial_number: v || undefined }; })} />
             <TextField label="Производитель" value={item.inventory?.vendor} onCommit={(v) => update((t) => { t.inventory = { ...(t.inventory ?? {}), vendor: v || undefined }; })} />
             <TextField label="Модель" value={item.inventory?.model} onCommit={(v) => update((t) => { t.inventory = { ...(t.inventory ?? {}), model: v || undefined }; })} />
-            <TextField label="Последний осмотр" value={item.inventory?.last_inspection} placeholder="ГГГГ-ММ-ДД" onCommit={(v) => update((t) => { t.inventory = { ...(t.inventory ?? {}), last_inspection: v || undefined }; })} />
-            <TextField label="Следующий осмотр" value={item.inventory?.next_inspection} placeholder="ГГГГ-ММ-ДД" onCommit={(v) => update((t) => { t.inventory = { ...(t.inventory ?? {}), next_inspection: v || undefined }; })} />
+            <TextField label="Последний осмотр" type="date" value={item.inventory?.last_inspection} onCommit={(v) => update((t) => { t.inventory = { ...(t.inventory ?? {}), last_inspection: v || undefined }; })} />
+            <TextField label="Следующий осмотр" type="date" value={item.inventory?.next_inspection} onCommit={(v) => update((t) => { t.inventory = { ...(t.inventory ?? {}), next_inspection: v || undefined }; })} />
           </div>
         ) : item.inventory ? (
           <dl className="passport__facts">

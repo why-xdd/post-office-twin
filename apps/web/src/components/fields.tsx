@@ -136,10 +136,12 @@ interface TextFieldProps {
   wide?: boolean;
   error?: string;
   live?: boolean;
+  /** Дата — системный выбор даты вместо ввода «ГГГГ-ММ-ДД» руками; хранится в том же виде. */
+  type?: 'text' | 'date';
   onCommit: (value: string) => void;
 }
 
-export function TextField({ label, value, placeholder, hint, wide, error, live, onCommit }: TextFieldProps) {
+export function TextField({ label, value, placeholder, hint, wide, error, live, type = 'text', onCommit }: TextFieldProps) {
   const [text, setText] = useState(value ?? '');
   useEffect(() => setText(value ?? ''), [value]);
   const apply = () => {
@@ -151,6 +153,7 @@ export function TextField({ label, value, placeholder, hint, wide, error, live, 
         <span className={`field__control${error ? ' field__control--error' : ''}`}>
           <input
             id={id}
+            type={type}
             value={text}
             placeholder={placeholder}
             aria-invalid={error ? true : undefined}

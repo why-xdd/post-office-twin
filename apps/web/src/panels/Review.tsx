@@ -51,7 +51,7 @@ export function Review({ book, saving, onSave, onFocusObject, onFit, onNotice }:
   const dirty = useWorkspace((s) => s.doc !== null && JSON.stringify(s.doc) !== s.savedSnapshot);
 
   const [fix, setFix] = useState<FixState>({ kind: 'idle' });
-  const [fixed, setFixed] = useState<{ before: number } | null>(null);
+  const [fixed, setFixed] = useState<{ before: number; entrance: Shift | null } | null>(null);
   const [ready, setReady] = useState<FixProposal | null>(null);
   const requested = useRef(false);
   const listRef = useRef<HTMLOListElement>(null);
@@ -147,7 +147,7 @@ export function Review({ book, saving, onSave, onFocusObject, onFit, onNotice }:
     latch(proposal.movedObjects);
     setPreview(null);
     setFix({ kind: 'idle' });
-    setFixed({ before: proposal.errorsBefore });
+    setFixed({ before: proposal.errorsBefore, entrance: proposal.entrance });
     onNotice('Объекты переставлены. Отменить — Ctrl+Z');
   };
 
@@ -192,7 +192,11 @@ export function Review({ book, saving, onSave, onFocusObject, onFit, onNotice }:
               <p>
                 {/* Замечания после исправления остаются — сказать «всё в порядке» над ними нечестно. */}
                 {fixed
-                  ? `Исправлено ${fixed.before} ${plural(fixed.before, 'проблема', 'проблемы', 'проблем')}. `
+                  ? `Исправлено ${fixed.before} ${plural(fixed.before, 'проблема', 'проблемы', 'проблем')}. ` +
+                    // Финал показывает то, ради чего правили: метры прохода до и после.
+                    (fixed.entrance
+                      ? `Проход от входа ${formatNumber(fixed.entrance.before)} → ${formatNumber(fixed.entrance.after)} м. `
+                      : '')
                   : `План проверен по ${report.checked_rules.length} ${plural(report.checked_rules.length, 'правилу', 'правилам', 'правилам')}. `}
                 {notes.length
                   ? `Ошибок по нормам нет; ${notes.length} ${plural(notes.length, 'замечание', 'замечания', 'замечаний')} — допустимо, но стоит посмотреть.`

@@ -131,7 +131,7 @@ export function Properties({ book, types, zoneTypes }: PropertiesProps) {
               key={name}
               label={ATTRIBUTE_LABEL[name] ?? name}
               value={readAttribute(item, name)}
-              placeholder={kind === 'date' ? 'ГГГГ-ММ-ДД' : undefined}
+              type={kind === 'date' ? 'date' : 'text'}
               onCommit={(value) => writeAttribute(item.id, name, value)}
             />
           ))}

@@ -201,10 +201,7 @@
 
 @keyframes latch {
   0% {
-    transform: scale(1.06);
-  }
-  55% {
-    transform: scale(0.985);
+    transform: scale(1.04);
   }
   100% {
     transform: scale(1);

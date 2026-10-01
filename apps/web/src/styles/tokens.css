@@ -113,7 +113,7 @@
 
   /* Движение: выдвижение ящика и защёлкивание */
   --ease-drawer: cubic-bezier(0.16, 0.84, 0.12, 1);
-  --ease-latch: cubic-bezier(0.3, 1.35, 0.4, 1);
+  --ease-latch: cubic-bezier(0.22, 1, 0.36, 1);
   --dur-fast: 140ms;
   --dur-base: 220ms;
   --dur-drawer: 380ms;

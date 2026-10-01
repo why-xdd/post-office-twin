@@ -259,7 +259,8 @@ export function Assistant({ book, types, onFocusObject, onNotice }: AssistantPro
             {commandResult.understood.length > 0 && (
               <p>
                 <b>Понято:</b> {humanize(commandResult.understood.join('; '), doc, book)}{' '}
-                <span>({commandResult.source})</span>
+                {/* Свой разбор — обычный путь; называем источник, только если фразу разобрала языковая модель. */}
+                {commandResult.source !== 'разбор фразы' && <span>({commandResult.source})</span>}
               </p>
             )}
             {(commandResult.answers ?? []).map((answer) => (

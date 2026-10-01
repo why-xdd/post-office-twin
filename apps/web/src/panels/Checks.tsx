@@ -9,7 +9,7 @@ import { useEffect, useRef } from 'react';
 import type { AddressBook } from '../lib/addresses';
 import { formatAddress, key } from '../lib/addresses';
 import type { Finding, Severity } from '../lib/plan';
-import { isNormFinding } from '../lib/plainFindings';
+import { isNormFinding, plainFinding } from '../lib/plainFindings';
 import { formatNumber, plural } from '../lib/planFacts';
 import { humanize } from '../lib/humanize';
 import { useWorkspace } from '../state/store';
@@ -214,7 +214,8 @@ function FindingRow({
           <span className="finding__severity">
             <Icon size={14} aria-hidden="true" />
             <span className="visually-hidden">{severityLabel(finding)}: </span>
-            {finding.title}
+            {/* Название то же, что в «Обзоре» и «Свойствах»: одно нарушение — одно имя. */}
+            {plainFinding(finding, useWorkspace.getState().doc).title}
           </span>
         </button>
       </div>

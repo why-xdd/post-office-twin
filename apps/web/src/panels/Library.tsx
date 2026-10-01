@@ -32,14 +32,15 @@ const TOOLS: { tool: Tool; label: string; hotkey: string; icon: typeof MousePoin
   { tool: 'zone', label: 'Зона', hotkey: 'Z', icon: SquareDashed },
 ];
 
-const LAYER_LABELS: { key: keyof Layers; label: string; onlyWithHeatmap?: boolean; onlyInDesign?: boolean }[] = [
+// onlyOnPlan — слой рисуется только на чертеже; в объёме его переключатель ничего не меняет.
+const LAYER_LABELS: { key: keyof Layers; label: string; onlyWithHeatmap?: boolean; onlyInDesign?: boolean; onlyOnPlan?: boolean }[] = [
   // Метки нарушений нужны там, где план правят; в эксплуатации план — паспорт, а не чертёж.
-  { key: 'findings', label: 'Метки нарушений', onlyInDesign: true },
+  { key: 'findings', label: 'Метки нарушений', onlyInDesign: true, onlyOnPlan: true },
   { key: 'zones', label: 'Зоны' },
   { key: 'labels', label: 'Адреса и подписи' },
   { key: 'routes', label: 'Маршруты посетителей' },
-  { key: 'grid', label: 'Сетка 25 см' },
-  { key: 'rulers', label: 'Линейки' },
+  { key: 'grid', label: 'Сетка 25 см', onlyOnPlan: true },
+  { key: 'rulers', label: 'Линейки', onlyOnPlan: true },
   // Тепловая карта показывается в списке слоёв только после разбора записи с камеры.
   { key: 'heat', label: 'Тепловая карта камеры', onlyWithHeatmap: true },
 ];
@@ -49,6 +50,7 @@ export function Library({ book, types, zoneTypes, layers, onLayers, onNotice, on
   const heatmap = useWorkspace((s) => s.heatmap);
   const placingType = useWorkspace((s) => s.placingType);
   const mode = useWorkspace((s) => s.mode);
+  const view = useWorkspace((s) => s.view);
   const setTool = useWorkspace((s) => s.setTool);
   const doc = useWorkspace((s) => s.doc);
   const commit = useWorkspace((s) => s.commit);
@@ -195,7 +197,8 @@ export function Library({ book, types, zoneTypes, layers, onLayers, onNotice, on
       <fieldset className="library__layers">
         <legend>Слои</legend>
         {LAYER_LABELS.filter(
-          (layer) => (!layer.onlyWithHeatmap || heatmap) && (!layer.onlyInDesign || mode === 'design'),
+          (layer) =>
+            (!layer.onlyWithHeatmap || heatmap) && (!layer.onlyInDesign || mode === 'design') && (!layer.onlyOnPlan || view === '2d'),
         ).map(({ key: k, label }) => (
           <label key={k} className="layer">
             <input type="checkbox" checked={layers[k]} onChange={(event) => onLayers({ ...layers, [k]: event.target.checked })} />

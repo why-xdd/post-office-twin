@@ -80,7 +80,7 @@ export function Properties({ book, types, zoneTypes }: PropertiesProps) {
               {book.byId.get(key('equipment', item.id)) ?? ''}
             </Plate>
             <h2>{item.label || info?.label || item.type}</h2>
-            <p className="props__id">{item.id}</p>
+            <p className="props__id" title="Идентификатор объекта в файле плана">в файле: {item.id}</p>
           </div>
         </header>
 
@@ -170,7 +170,7 @@ export function Properties({ book, types, zoneTypes }: PropertiesProps) {
               {book.byId.get(key('zone', zone.id)) ?? ''}
             </Plate>
             <h2>{zone.label || 'Зона'}</h2>
-            <p className="props__id">{zone.id}</p>
+            <p className="props__id" title="Идентификатор объекта в файле плана">в файле: {zone.id}</p>
           </div>
         </header>
         <ObjectFindings id={zone.id} />
@@ -220,7 +220,7 @@ export function Properties({ book, types, zoneTypes }: PropertiesProps) {
               {book.byId.get(key('wall', wall.id)) ?? ''}
             </Plate>
             <h2>{wall.label || (wall.type === 'outer' ? 'Наружная стена' : 'Перегородка')}</h2>
-            <p className="props__id">{wall.id}</p>
+            <p className="props__id" title="Идентификатор объекта в файле плана">в файле: {wall.id}</p>
           </div>
         </header>
         <ObjectFindings id={wall.id} />

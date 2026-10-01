@@ -639,6 +639,12 @@
     grid-template-rows: auto minmax(0, 1fr) auto;
   }
 
+  /* Рейка выше затемнения: режим и вид переключаются и при выдвинутом листе. */
+  .ws-rail {
+    position: relative;
+    z-index: 7;
+  }
+
   /* Библиотеку открывает нижняя планка — отдельная кнопка в рейке не нужна. */
   .ws-rail__library {
     display: none;
@@ -725,7 +731,17 @@
     margin: 0 calc(-1 * var(--s-4));
     padding: var(--s-2) var(--s-4) var(--s-3);
     background: var(--label);
-    box-shadow: 0 -1px 0 var(--label-edge);
+    /* Вторая тень закрашивает полоску под кнопками: иначе в ней просвечивает прокрученный текст. */
+    box-shadow:
+      0 -1px 0 var(--label-edge),
+      0 40px 0 var(--label);
+  }
+
+  .ws-column .review__fix {
+    box-shadow:
+      0 -1px 0 var(--label-edge),
+      0 -10px 18px -8px rgba(40, 36, 26, 0.18),
+      0 40px 0 var(--label);
   }
 
   /* Вкладки живут в нижней планке, в выдвинутом листе они лишние. */

@@ -28,6 +28,8 @@ export interface FixProposal {
   errorsBefore: number;
   errorsAfter: number;
   entrance: Shift | null;
+  /** Самое узкое место на путях к окнам: это число стоит в нарушении «Узкое место на пути к окнам». */
+  narrowest: Shift | null;
   waiting: Shift | null;
   movedObjects: string[];
   rows: ProposalRow[];
@@ -98,6 +100,7 @@ function toProposal(report: ImprovementReport): FixProposal {
     errorsBefore: Number(report.initial.errors ?? 0),
     errorsAfter: Number(report.final.errors ?? 0),
     entrance: shift(report, 'entrance_route_width'),
+    narrowest: shift(report, 'min_route_width'),
     waiting: shift(report, 'waiting_capacity'),
     movedObjects: changes.map((c) => c.object_id),
   };

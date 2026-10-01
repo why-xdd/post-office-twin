@@ -95,7 +95,8 @@
   left: var(--s-4);
   bottom: var(--s-4);
   z-index: 2;
-  max-width: 30rem;
+  /* На узком экране легенда держит отступ 16 px с обеих сторон, а не прилипает к краю. */
+  max-width: min(30rem, calc(100% - 2 * var(--s-4)));
   margin: 0;
   padding: 8px var(--s-3);
   border-radius: var(--radius-plate);

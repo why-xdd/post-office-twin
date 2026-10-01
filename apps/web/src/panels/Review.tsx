@@ -51,7 +51,7 @@ export function Review({ book, saving, onSave, onFocusObject, onFit, onNotice }:
   const dirty = useWorkspace((s) => s.doc !== null && JSON.stringify(s.doc) !== s.savedSnapshot);
 
   const [fix, setFix] = useState<FixState>({ kind: 'idle' });
-  const [fixed, setFixed] = useState<{ before: number; entrance: Shift | null } | null>(null);
+  const [fixed, setFixed] = useState<{ before: number; after: number; entrance: Shift | null; narrowest: Shift | null } | null>(null);
   const [ready, setReady] = useState<FixProposal | null>(null);
   const requested = useRef(false);
   const listRef = useRef<HTMLOListElement>(null);
@@ -147,7 +147,7 @@ export function Review({ book, saving, onSave, onFocusObject, onFit, onNotice }:
     latch(proposal.movedObjects);
     setPreview(null);
     setFix({ kind: 'idle' });
-    setFixed({ before: proposal.errorsBefore, entrance: proposal.entrance });
+    setFixed({ before: proposal.errorsBefore, after: proposal.errorsAfter, entrance: proposal.entrance, narrowest: proposal.narrowest });
     onNotice('Объекты переставлены. Отменить — Ctrl+Z');
   };
 
@@ -195,7 +195,7 @@ export function Review({ book, saving, onSave, onFocusObject, onFit, onNotice }:
                   ? `Исправлено ${fixed.before} ${plural(fixed.before, 'проблема', 'проблемы', 'проблем')}. ` +
                     // Финал показывает то, ради чего правили: метры прохода до и после.
                     (fixed.entrance
-                      ? `Проход от входа ${formatNumber(fixed.entrance.before)} → ${formatNumber(fixed.entrance.after)} м. `
+                      ? `Свободный путь от входа ${formatNumber(fixed.entrance.before)} → ${formatNumber(fixed.entrance.after)} м. `
                       : '')
                   : `План проверен по ${report.checked_rules.length} ${plural(report.checked_rules.length, 'правилу', 'правилам', 'правилам')}. `}
                 {notes.length
@@ -238,8 +238,19 @@ export function Review({ book, saving, onSave, onFocusObject, onFit, onNotice }:
         {reportState === 'checking' && <LoaderCircle size={16} className="spin review__rechecking" aria-label="Перепроверка" />}
       </header>
 
-      {clean && (fixed || dirty) && (
+      {/* Итог и откат — и после частичного исправления: откатить его так же важно, как полное. */}
+      {((clean && dirty) || fixed) && (
         <div className="review__done">
+          {fixed && !clean && (
+            <p className="review__partial">
+              Исправлено {fixed.before - fixed.after} из {fixed.before}.
+              {fixed.entrance &&
+                ` Свободный путь от входа ${formatNumber(fixed.entrance.before)} → ${formatNumber(fixed.entrance.after)} м.`}
+              {fixed.narrowest &&
+                ` Узкое место на пути к окнам ${formatNumber(fixed.narrowest.before)} → ${formatNumber(fixed.narrowest.after)} м.`}{' '}
+              Оставшееся — в списке ниже.
+            </p>
+          )}
           <button type="button" className="btn btn--label" onClick={onSave} disabled={saving || !dirty}>
             {saving ? <LoaderCircle size={16} className="spin" aria-hidden="true" /> : <Save size={16} aria-hidden="true" />}
             {dirty ? 'Сохранить версию' : 'Сохранено'}
@@ -404,7 +415,9 @@ function ProposalCard({ proposal, onApply, onCancel }: { proposal: FixProposal; 
       <p className="proposal__hint">Пунктирные стрелки на плане показывают, куда переедет каждый объект.</p>
       <dl className="proposal__shifts">
         <ShiftRow label="Проблем" shift={{ before: proposal.errorsBefore, after: proposal.errorsAfter }} better="down" />
-        {proposal.entrance && <ShiftRow label="Проход от входа" shift={proposal.entrance} unit="м" better="up" />}
+        {/* Две разные меры прохода подписаны по-разному: иначе 1,85 м здесь и 0,69 м в списке выглядят противоречием. */}
+        {proposal.entrance && <ShiftRow label="Свободный путь от входа" shift={proposal.entrance} unit="м" better="up" />}
+        {proposal.narrowest && <ShiftRow label="Узкое место на пути к окнам" shift={proposal.narrowest} unit="м" better="up" />}
         {proposal.waiting && <ShiftRow label="Мест в зоне ожидания" shift={proposal.waiting} better="up" />}
         {proposal.warnings && <ShiftRow label="Замечаний" shift={proposal.warnings} better="down" />}
       </dl>

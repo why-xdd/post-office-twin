@@ -375,3 +375,11 @@
   color: var(--ink-3);
   font-size: var(--text-12);
 }
+
+/* Итог частичного исправления над кнопками сохранения и отката */
+.review__partial {
+  flex-basis: 100%;
+  color: var(--ink-2);
+  font-size: var(--text-13);
+  line-height: 1.45;
+}

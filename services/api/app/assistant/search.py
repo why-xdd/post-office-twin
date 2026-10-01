@@ -168,7 +168,8 @@ def _slanted_walls(plan: Plan) -> list[tuple[float, object]]:
         (ax, ay), (bx, by) = wall.from_, wall.to
         if abs(ax - bx) < 1e-3 or abs(ay - by) < 1e-3 or math.hypot(bx - ax, by - ay) < 1e-3:
             continue
-        angle = round(math.degrees(math.atan2(by - ay, bx - ax)) % 180.0, 1)
+        # rotation_deg на плане идёт по часовой стрелке, угол стены — против: знак меняется.
+        angle = round(-math.degrees(math.atan2(by - ay, bx - ax)) % 180.0, 1)
         line = LineString([(ax, ay), (bx, by)])
         result.append((angle, line if wall.type == "outer" else line.buffer(0.05, cap_style="flat")))
     return result

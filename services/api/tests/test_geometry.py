@@ -154,8 +154,16 @@ def test_search_places_along_a_slanted_wall() -> None:
         }
     )
     candidates, _ = search.generate(plan, "storage_rack")
-    angle = round(math.degrees(math.atan2(6, -2)) % 180.0, 1)
-    along = [c for c in candidates if c.rotation_deg in (angle, round((angle + 90) % 180, 1))]
-    assert along, "вдоль наклонной стены кандидатов нет"
     wall = LineString([(10, 0), (8, 6)])
-    assert min(c.polygon.distance(wall) for c in along) < 0.01
+    flush = [c for c in candidates if c.polygon.distance(wall) < 0.01]
+    assert flush, "вплотную к наклонной стене кандидатов нет"
+
+    def parallel(candidate) -> bool:
+        # Одна из сторон прямоугольника параллельна стене (векторное произведение ≈ 0).
+        (x0, y0), (x1, y1), (x2, y2) = list(candidate.polygon.exterior.coords)[:3]
+        for dx, dy in ((x1 - x0, y1 - y0), (x2 - x1, y2 - y1)):
+            if abs(dx * 6 - dy * -2) / (math.hypot(dx, dy) * math.hypot(2, 6)) < 0.01:
+                return True
+        return False
+
+    assert any(parallel(c) for c in flush), "у стены есть место, но не вдоль неё"

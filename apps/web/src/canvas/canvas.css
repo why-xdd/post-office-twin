@@ -626,3 +626,27 @@
   stroke-dasharray: 6 4;
   pointer-events: none;
 }
+
+/* Очередь в пик: люди в очереди — синим, не на своём месте — красным */
+.plan-queue__person {
+  fill: var(--notice);
+  stroke: #fff;
+  stroke-width: 1.5;
+  animation: queue-in var(--dur-drawer) var(--ease-drawer) both;
+}
+
+.plan-queue__person--outside {
+  fill: var(--signal);
+}
+
+@keyframes queue-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .plan-queue__person {
+    animation: none;
+  }
+}

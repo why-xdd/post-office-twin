@@ -32,6 +32,7 @@ import {
   SlidersHorizontal,
   Sparkles,
   Undo2,
+  Users,
   Video,
   Wand2,
   X,
@@ -69,6 +70,7 @@ import { Inventory } from '../panels/Inventory';
 import { Library } from '../panels/Library';
 import { Camera } from '../panels/Camera';
 import { Passport } from '../panels/Passport';
+import { Peak } from '../panels/Peak';
 import { Properties } from '../panels/Properties';
 import { Review } from '../panels/Review';
 import { isDirty, useWorkspace, type Mode, type SidePanel, type ViewKind } from '../state/store';
@@ -163,6 +165,7 @@ const DOCK_ICONS: Record<SidePanel, ReactNode> = {
   inventory: <ClipboardList size={18} aria-hidden="true" />,
   passport: <IdCard size={18} aria-hidden="true" />,
   camera: <Video size={18} aria-hidden="true" />,
+  peak: <Users size={18} aria-hidden="true" />,
 };
 
 const MODES: { id: Mode; label: string; hint: string }[] = [
@@ -706,6 +709,7 @@ export function Workspace({ planId }: WorkspaceProps) {
       : [
           { id: 'passport', label: 'Паспорт' },
           { id: 'inventory', label: 'Инвентарь' },
+          { id: 'peak', label: 'Пик' },
           { id: 'camera', label: 'Камера' },
         ];
 
@@ -1191,6 +1195,7 @@ export function Workspace({ planId }: WorkspaceProps) {
           {panel === 'inventory' && <Inventory book={book} types={typeMap} onFocusObject={focusObject} />}
           {panel === 'passport' && <Passport book={book} types={typeMap} />}
           {panel === 'camera' && <Camera />}
+          {panel === 'peak' && <Peak types={typeMap} />}
         </div>
       </aside>
 

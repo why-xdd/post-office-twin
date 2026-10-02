@@ -10,7 +10,7 @@ import { create } from 'zustand';
 import { transformInPlace } from '../lib/equipmentOps';
 import { zoneAt } from '../lib/geometry';
 import { removeWall } from '../lib/wallEdit';
-import type { Equipment, Finding, Plan, ValidationReport, VisionHeatmap, Zone } from '../lib/plan';
+import type { Equipment, Finding, PeakReport, Plan, ValidationReport, VisionHeatmap, Zone } from '../lib/plan';
 
 export type SelectionKind = 'equipment' | 'zone' | 'wall' | 'door' | 'window';
 
@@ -23,7 +23,7 @@ export type Tool = 'select' | 'zone' | 'wall' | 'outline' | 'equipment';
 /** Обзор — простой показ нарушений и исправления; редактор и эксплуатация — полные режимы. */
 export type Mode = 'review' | 'design' | 'operate';
 export type ViewKind = '2d' | '3d';
-export type SidePanel = 'review' | 'properties' | 'checks' | 'assistant' | 'inventory' | 'passport' | 'camera';
+export type SidePanel = 'review' | 'properties' | 'checks' | 'assistant' | 'inventory' | 'passport' | 'camera' | 'peak';
 
 export interface Change {
   op: 'add' | 'move' | 'remove';
@@ -87,6 +87,8 @@ interface WorkspaceState {
   activeFinding: number | null;
   /** Тепловая карта посещаемости по записи с камеры: рисуется слоем поверх плана. */
   heatmap: VisionHeatmap | null;
+  /** Очередь в пик по сценарию: люди рисуются на плане, пока открыта вкладка «Пик». */
+  peak: PeakReport | null;
 
   open: (planId: string | null, title: string, version: number, doc: Plan) => void;
   close: () => void;
@@ -112,6 +114,7 @@ interface WorkspaceState {
   setView: (view: ViewKind) => void;
   setPanel: (panel: SidePanel) => void;
   setHeatmap: (heatmap: VisionHeatmap | null) => void;
+  setPeak: (peak: PeakReport | null) => void;
   setReport: (report: ValidationReport | null, state: WorkspaceState['reportState']) => void;
   setPreview: (changes: Change[] | null) => void;
   latch: (ids: string[]) => void;
@@ -148,6 +151,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   latched: [],
   activeFinding: null,
   heatmap: null,
+  peak: null,
 
   open: (planId, title, version, doc) =>
     set({
@@ -171,6 +175,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       panel: 'review',
       activeFinding: null,
       heatmap: null,
+      peak: null,
     }),
 
   close: () => set({ doc: null, planId: null, title: '', past: [], future: [], preview: null }),
@@ -274,6 +279,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   setView: (view) => set({ view }),
   setPanel: (panel) => set({ panel }),
   setHeatmap: (heatmap) => set({ heatmap }),
+  setPeak: (peak) => set({ peak }),
   setReport: (report, reportState) =>
     set((state) => {
       const pinned = state.activeFinding === null ? undefined : state.report?.findings[state.activeFinding];

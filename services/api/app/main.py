@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field, ValidationError
 from app.assistant import capacity as capacity_model
 from app.cache import assistant_cache, fingerprint, validation_cache
 from app.concurrency import heavy_slot
-from app.assistant import conclusion, queue_log, recommend
+from app.assistant import conclusion, peak, queue_log, recommend
 from app.assistant.capacity import CapacityReport
 from app.assistant.recommend import AssistantReport, ImprovementReport, Recommendation
 from app import exchange
@@ -341,6 +341,16 @@ def get_dictionaries(payload: SaveVersionRequest | None = None) -> dict[str, Any
 @app.post("/api/capacity", response_model=CapacityReport, summary="Пропускная способность в час пик")
 def plan_capacity(payload: SaveVersionRequest) -> CapacityReport:
     return capacity_model.analyze(_parse_plan(payload.document))
+
+
+class PeakRequest(BaseModel):
+    document: dict[str, Any]
+    scenario: peak.PeakScenario = Field(default_factory=peak.PeakScenario)
+
+
+@app.post("/api/peak", response_model=peak.PeakReport, summary="Очередь в пик на плане по сценарию")
+def plan_peak(payload: PeakRequest) -> peak.PeakReport:
+    return peak.analyze(_parse_plan(payload.document), payload.scenario)
 
 
 MAX_VISION_FRAMES = 180

@@ -344,6 +344,54 @@ export interface QueueGroup {
   reserve_percent?: number | null;
 }
 
+/** Сценарий пика: что меняет начальник отделения или проектировщик. */
+export interface PeakScenario {
+  flow_factor: number;
+  self_service_share: number;
+  closed: string[];
+  out_of_service: string[];
+}
+
+export interface QueuePerson {
+  x: number;
+  y: number;
+  group: string;
+  /** Стоит не там, где положено: за накопителем, в тамбуре, на проходе. */
+  outside: boolean;
+}
+
+export interface PeakGroup {
+  name: string;
+  windows: string[];
+  working: string[];
+  arrivals_per_hour: number;
+  service_min: number;
+  /** null — очередь растёт без предела. */
+  mean_wait_min: number | null;
+  meets_target: boolean;
+  people: number;
+  windows_needed: number;
+  queue_length_m: number;
+}
+
+export interface PeakReport {
+  available: boolean;
+  reason?: string | null;
+  scenario: PeakScenario;
+  target_wait_min: number;
+  peak_arrivals_per_hour?: number | null;
+  groups: PeakGroup[];
+  people: QueuePerson[];
+  accumulator_slots?: number | null;
+  outside: number;
+  spills_into: string[];
+  beyond_entrance: number;
+  passage_without_queue_m?: number | null;
+  passage_with_queue_m?: number | null;
+  advice: string[];
+  assumptions: string[];
+}
+
 export interface CapacityReport {
   available: boolean;
   reason?: string | null;

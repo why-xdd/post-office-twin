@@ -21,6 +21,8 @@ import type {
   Recommendation,
   Rule,
   ValidationReport,
+  PeakReport,
+  PeakScenario,
 } from './plan';
 
 const BASE_URL = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/$/, '');
@@ -176,6 +178,9 @@ export const api = {
 
   capacity: (document: Plan) =>
     request<CapacityReport>('/api/capacity', { method: 'POST', body: JSON.stringify({ document }) }),
+
+  peak: (document: Plan, scenario: PeakScenario, signal?: AbortSignal) =>
+    request<PeakReport>('/api/peak', { method: 'POST', body: JSON.stringify({ document, scenario }), signal }),
 
   assistant: (document: Plan) =>
     request<AssistantReport>('/api/assistant', { method: 'POST', body: JSON.stringify({ document }) }),

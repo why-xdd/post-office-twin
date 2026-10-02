@@ -136,6 +136,7 @@ function heatColour(value: number): [number, number, number, number] {
 function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, onCursor, onNotice }: PlanCanvasProps) {
   const doc = useWorkspace((s) => s.doc);
   const heatmap = useWorkspace((s) => s.heatmap);
+  const peak = useWorkspace((s) => s.peak);
   const selection = useWorkspace((s) => s.selection);
   const group = useWorkspace((s) => s.group);
   const toggleGroup = useWorkspace((s) => s.toggleGroup);
@@ -924,6 +925,25 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
             </>
           );
         })()}
+
+        {/* Очередь в пик по сценарию: каждый человек — точка на полу */}
+        {peak && peak.people.length > 0 && (
+          <g className="plan-queue" aria-hidden="true">
+            {peak.people.map((person, index) => {
+              const [x, y] = toScreen(view, [person.x, person.y]);
+              return (
+                <circle
+                  key={index}
+                  cx={x}
+                  cy={y}
+                  r={Math.max(3, 0.16 * view.scale)}
+                  className={`plan-queue__person${person.outside ? ' plan-queue__person--outside' : ''}`}
+                  style={{ animationDelay: `${Math.min(index, 40) * 18}ms` }}
+                />
+              );
+            })}
+          </g>
+        )}
 
         {/* Маршруты посетителей */}
         {layers.routes &&

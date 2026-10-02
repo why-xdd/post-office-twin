@@ -324,3 +324,23 @@
     min-height: 44px;
   }
 }
+
+.peak__label svg {
+  vertical-align: -2px;
+}
+
+.peak__storage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  font-size: var(--text-13);
+}
+
+.peak__storage small {
+  color: var(--ink-3);
+  font-size: var(--text-11);
+}
+
+.peak__storage--short b:last-of-type {
+  color: var(--signal);
+}

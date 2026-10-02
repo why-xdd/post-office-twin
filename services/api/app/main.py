@@ -20,6 +20,7 @@ from app.assistant import capacity as capacity_model
 from app.cache import assistant_cache, fingerprint, validation_cache
 from app.concurrency import heavy_slot
 from app.assistant import conclusion, peak, queue_log, recommend
+from app.assistant import storage as parcel_storage
 from app.assistant.capacity import CapacityReport
 from app.assistant.recommend import AssistantReport, ImprovementReport, Recommendation
 from app import exchange
@@ -30,6 +31,9 @@ from app.models import Plan, duplicate_ids
 from app.rules.catalog import DEFAULT_RULES, Rule, rules_by_id
 from app.vision import counter as vision
 from app.rules.engine import ValidationReport, validate
+from app import compare as compare_model
+from app import network, operations
+from app.accounts import ROLES, SESSION_HOURS, Accounts, User, allowed, demo_enabled
 from app.storage import open_store
 
 DB_PATH = os.environ.get("OPS_TWIN_DB", "storage/plans.sqlite")
@@ -50,14 +54,26 @@ def _sample_plan_path() -> Path:
 
 SAMPLE_PLAN = _sample_plan_path()
 
+
+def _network_sample_dir() -> Path:
+    """Условные отделения для экрана «Сеть»: в контейнере — /app/samples/network."""
+    packaged = Path("/app/samples/network")
+    if packaged.exists():
+        return packaged
+    return Path(__file__).resolve().parents[3] / "data" / "network"
+
 app = FastAPI(
     title="Цифровой двойник отделения Почты России",
     description="Хранение и проверка цифровых планов отделения.",
     version="0.1.0",
 )
+# Вход хранится в cookie, поэтому запросы с другого адреса принимаются только от своих:
+# локальной разработки и адресов из OPS_TWIN_ORIGINS. В поставке интерфейс и API на одном адресе.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[o.strip() for o in os.environ.get("OPS_TWIN_ORIGINS", "").split(",") if o.strip()],
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -95,6 +111,84 @@ async def trace_and_limit(request: Request, call_next):
 
 
 store = open_store(os.environ.get("DATABASE_URL"), DB_PATH)
+accounts = Accounts(store)
+accounts.ensure_demo_users()
+SESSION_COOKIE = "ops_session"
+
+
+def current_user(request: Request) -> User | None:
+    return accounts.user_by_token(request.cookies.get(SESSION_COOKIE))
+
+
+def require(request: Request, permission: str | None = None) -> User:
+    user = current_user(request)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Войдите, чтобы выполнить это действие.")
+    if permission and not allowed(user, permission):
+        raise HTTPException(status_code=403, detail="Это действие доступно начальнику отделения и инженеру.")
+    return user
+
+
+def _set_session(request: Request, response: Response, token: str) -> None:
+    secure = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
+    response.set_cookie(
+        SESSION_COOKIE,
+        token,
+        max_age=SESSION_HOURS * 3600,
+        httponly=True,
+        samesite="lax",
+        secure=secure,
+        path="/",
+    )
+
+
+class LoginRequest(BaseModel):
+    login: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=1, max_length=256)
+
+
+class DemoLoginRequest(BaseModel):
+    role: str
+
+
+@app.get("/api/auth/me", summary="Кто вошёл")
+def auth_me(request: Request) -> dict[str, Any]:
+    user = current_user(request)
+    return {
+        "user": user.model_dump() if user else None,
+        "demo": demo_enabled(),
+        "roles": [{"role": role, "label": label} for role, label in ROLES.items()],
+    }
+
+
+@app.post("/api/auth/login", summary="Вход по логину и паролю")
+def auth_login(payload: LoginRequest, request: Request, response: Response) -> dict[str, Any]:
+    try:
+        session = accounts.login(payload.login, payload.password)
+    except RuntimeError as error:
+        raise HTTPException(status_code=429, detail=str(error)) from error
+    except PermissionError as error:
+        raise HTTPException(status_code=401, detail=str(error)) from error
+    _set_session(request, response, session.token)
+    return {"user": session.user.model_dump()}
+
+
+@app.post("/api/auth/demo", summary="Вход демо-сотрудником")
+def auth_demo(payload: DemoLoginRequest, request: Request, response: Response) -> dict[str, Any]:
+    try:
+        session = accounts.demo_login(payload.role)
+    except PermissionError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
+    _set_session(request, response, session.token)
+    return {"user": session.user.model_dump()}
+
+
+@app.post("/api/auth/logout", status_code=204, summary="Выход")
+def auth_logout(request: Request) -> Response:
+    accounts.logout(request.cookies.get(SESSION_COOKIE))
+    response = Response(status_code=204)
+    response.delete_cookie(SESSION_COOKIE, path="/")
+    return response
 
 
 class CreatePlanRequest(BaseModel):
@@ -205,6 +299,111 @@ def save_plan(plan_id: str, payload: SaveVersionRequest) -> PlanRef:
     return PlanRef(id=plan_id, version=version)
 
 
+def _latest(plan_id: str) -> tuple[dict[str, Any], Plan]:
+    try:
+        document = store.get(plan_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"План {plan_id} не найден") from None
+    return document, _parse_plan(document)
+
+
+@app.get("/api/plans/{plan_id}/incidents", response_model=list[operations.Incident], summary="Обращения по плану")
+def plan_incidents(plan_id: str) -> list[operations.Incident]:
+    _latest(plan_id)
+    return operations.list_incidents(store, plan_id)
+
+
+@app.post(
+    "/api/plans/{plan_id}/incidents",
+    response_model=operations.Incident,
+    status_code=201,
+    summary="Сообщить о неисправности",
+)
+def report_incident(plan_id: str, payload: operations.IncidentIn, request: Request) -> operations.Incident:
+    """Доступно и без входа: сотрудник сканирует QR-бирку на объекте и пишет, что сломалось."""
+    _, plan = _latest(plan_id)
+    try:
+        return operations.report(store, plan_id, plan, payload, current_user(request))
+    except KeyError:
+        raise HTTPException(status_code=404, detail="На плане нет такого объекта") from None
+
+
+@app.patch(
+    "/api/plans/{plan_id}/incidents/{incident_id}",
+    response_model=operations.Incident,
+    summary="Взять обращение в работу или закрыть",
+)
+def update_incident(
+    plan_id: str, incident_id: str, payload: operations.StatusChange, request: Request
+) -> operations.Incident:
+    user = require(request, "incident.manage")
+    try:
+        return operations.change_status(store, plan_id, incident_id, payload, user)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Обращение не найдено") from None
+
+
+@app.post("/api/plans/{plan_id}/inspections", response_model=PlanRef, summary="Отметить осмотр выполненным")
+def inspection_done(plan_id: str, payload: operations.InspectionDone, request: Request) -> PlanRef:
+    """Записывает дату осмотра в паспорт объекта новой версией плана — с именем сотрудника."""
+    user = require(request, "inspection.done")
+    document, plan = _latest(plan_id)
+    try:
+        document, following = operations.mark_inspected(document, payload)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="На плане нет такого объекта") from None
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    label = operations.object_label(plan, payload.object_id)
+    note = f"Осмотр «{label}» выполнен, следующий {following} — {user.name}"
+    version = store.save_version(plan_id, document, note)
+    return PlanRef(id=plan_id, version=version)
+
+
+@app.get("/api/plans/{plan_id}/today", response_model=operations.Today, summary="Сводка на сегодня")
+def plan_today(plan_id: str, request: Request) -> operations.Today:
+    """Что сломано, какие осмотры подошли, сколько окон нужно в пик с учётом неисправных."""
+    _, plan = _latest(plan_id)
+    incidents = operations.list_incidents(store, plan_id)
+    return operations.today_summary(plan, incidents, current_user(request))
+
+
+@app.get("/api/network", response_model=network.NetworkReport, summary="Сеть отделений: очередь на ремонт")
+def network_priorities() -> network.NetworkReport:
+    """Все сохранённые планы — в одну очередь на ремонт с прозрачным баллом."""
+    plans = store.list_plans()
+
+    def load(plan_id: str) -> tuple[Plan, ValidationReport]:
+        document = store.get(plan_id)
+        plan = _parse_plan(document)
+        key = fingerprint("validate", document, None)
+        return plan, validation_cache.get_or_compute(key, lambda: validate(plan, None))
+
+    def incidents(plan_id: str) -> list[operations.Incident]:
+        return operations.list_incidents(store, plan_id)
+
+    return network.build(plans, load, incidents)
+
+
+@app.post("/api/network/demo", summary="Загрузить демонстрационную сеть")
+def network_demo() -> dict[str, Any]:
+    """Добавляет условные отделения, которых ещё нет среди сохранённых планов (по названию)."""
+    folder = _network_sample_dir()
+    if not folder.exists():
+        raise HTTPException(status_code=404, detail="Демонстрационная сеть не входит в эту поставку")
+    present = {p["title"] for p in store.list_plans()}
+    added = 0
+    for path in sorted(folder.glob("*.json")):
+        document = json.loads(path.read_text(encoding="utf-8"))
+        title = document["ops"]["name"]
+        if title in present:
+            continue
+        _parse_plan(document)
+        store.create(title, document, "Демонстрационная сеть")
+        added += 1
+    return {"added": added}
+
+
 @app.get("/api/plans/{plan_id}/versions", summary="Версии плана")
 def plan_versions(plan_id: str) -> list[dict[str, Any]]:
     try:
@@ -293,6 +492,21 @@ def plan_metrics(payload: SaveVersionRequest) -> dict[str, Any]:
     }
 
 
+class CompareRequest(BaseModel):
+    before: dict[str, Any]
+    after: dict[str, Any]
+    prices: compare_model.Prices = Field(default_factory=compare_model.Prices)
+
+
+@app.post("/api/compare", response_model=compare_model.Comparison, summary="Сравнить два варианта и посчитать смету")
+def compare_variants(payload: CompareRequest) -> compare_model.Comparison:
+    before, after = _parse_plan(payload.before), _parse_plan(payload.after)
+    key = fingerprint("compare", payload.before, payload.after, payload.prices.model_dump())
+    return assistant_cache.get_or_compute(
+        key, lambda: _with_slot("сравнение вариантов", lambda: compare_model.compare(before, after, payload.prices))
+    )
+
+
 class PlaceRequest(BaseModel):
     document: dict[str, Any]
     equipment_type: str = Field(min_length=1, description="Код типа оборудования из справочника")
@@ -341,6 +555,16 @@ def get_dictionaries(payload: SaveVersionRequest | None = None) -> dict[str, Any
 @app.post("/api/capacity", response_model=CapacityReport, summary="Пропускная способность в час пик")
 def plan_capacity(payload: SaveVersionRequest) -> CapacityReport:
     return capacity_model.analyze(_parse_plan(payload.document))
+
+
+class StorageRequest(BaseModel):
+    document: dict[str, Any]
+    factor: float = Field(default=1.0, ge=0.3, le=5.0)
+
+
+@app.post("/api/storage", response_model=parcel_storage.StorageReport, summary="Ёмкость хранения посылок")
+def plan_storage(payload: StorageRequest) -> parcel_storage.StorageReport:
+    return parcel_storage.analyze(_parse_plan(payload.document), payload.factor)
 
 
 class PeakRequest(BaseModel):
@@ -452,6 +676,7 @@ def assistant_improve(payload: SaveVersionRequest, fixes_only: bool = False) -> 
 
 class CommandRequest(BaseModel):
     document: dict[str, Any]
+    plan_id: str | None = Field(default=None, description="Сохранённый план — чтобы учесть обращения о неисправностях")
     text: str = Field(min_length=1, max_length=500, description="Команда словами, например «поставь две кассы у перегородки»")
 
 
@@ -459,9 +684,12 @@ class CommandRequest(BaseModel):
 def assistant_command(payload: CommandRequest) -> recommend.CommandResult:
     """Разбирает фразу и готовит рекомендации: план меняется только после согласия человека."""
     plan = _parse_plan(payload.document)
-    key = fingerprint("command", payload.document, payload.text)
+    incidents = None
+    if payload.plan_id:
+        incidents = [i.model_dump() for i in operations.list_incidents(store, payload.plan_id)]
+    key = fingerprint("command", payload.document, payload.text, incidents)
     return assistant_cache.get_or_compute(
-        key, lambda: _with_slot("разбор команды", lambda: recommend.run_command(plan, payload.text))
+        key, lambda: _with_slot("разбор команды", lambda: recommend.run_command(plan, payload.text, incidents))
     )
 
 

@@ -28,6 +28,15 @@ CREATE TABLE IF NOT EXISTS versions (
     created_at  TEXT NOT NULL,
     PRIMARY KEY (plan_id, version)
 );
+CREATE TABLE IF NOT EXISTS records (
+    kind        TEXT NOT NULL,
+    id          TEXT NOT NULL,
+    scope       TEXT NOT NULL DEFAULT '',
+    data        TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    PRIMARY KEY (kind, id)
+);
+CREATE INDEX IF NOT EXISTS records_scope ON records (kind, scope);
 """
 
 
@@ -38,7 +47,43 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-class PlanStore:
+class _SqliteRecords:
+    """Записи сервиса рядом с планами: пользователи, сеансы, обращения сотрудников.
+
+    Каждая запись — документ JSON с видом (kind) и областью (scope, например план отделения).
+    Планы и их версии здесь не хранятся: у них своя схема.
+    """
+
+    def put_record(self, kind: str, record_id: str, data: dict[str, Any], scope: str = "") -> None:
+        with self._write_lock, self._connect() as conn:  # type: ignore[attr-defined]
+            conn.execute(
+                "INSERT INTO records (kind, id, scope, data, updated_at) VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(kind, id) DO UPDATE SET scope = excluded.scope, data = excluded.data, "
+                "updated_at = excluded.updated_at",
+                (kind, record_id, scope, json.dumps(data, ensure_ascii=False), _now()),
+            )
+
+    def get_record(self, kind: str, record_id: str) -> dict[str, Any] | None:
+        with self._connect() as conn:  # type: ignore[attr-defined]
+            row = conn.execute("SELECT data FROM records WHERE kind = ? AND id = ?", (kind, record_id)).fetchone()
+        return json.loads(row["data"]) if row else None
+
+    def list_records(self, kind: str, scope: str | None = None) -> list[dict[str, Any]]:
+        with self._connect() as conn:  # type: ignore[attr-defined]
+            if scope is None:
+                rows = conn.execute("SELECT data FROM records WHERE kind = ? ORDER BY updated_at DESC", (kind,)).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT data FROM records WHERE kind = ? AND scope = ? ORDER BY updated_at DESC", (kind, scope)
+                ).fetchall()
+        return [json.loads(row["data"]) for row in rows]
+
+    def delete_record(self, kind: str, record_id: str) -> None:
+        with self._write_lock, self._connect() as conn:  # type: ignore[attr-defined]
+            conn.execute("DELETE FROM records WHERE kind = ? AND id = ?", (kind, record_id))
+
+
+class PlanStore(_SqliteRecords):
     """Хранилище планов в SQLite.
 
     Обработчики FastAPI выполняются в пуле потоков, поэтому две записи могут прийти
@@ -159,6 +204,17 @@ PG_SCHEMA = (
         PRIMARY KEY (plan_id, version)
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS records (
+        kind        TEXT NOT NULL,
+        id          TEXT NOT NULL,
+        scope       TEXT NOT NULL DEFAULT '',
+        data        TEXT NOT NULL,
+        updated_at  TEXT NOT NULL,
+        PRIMARY KEY (kind, id)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS records_scope ON records (kind, scope)",
 )
 
 
@@ -321,6 +377,62 @@ class PostgresPlanStore:
 
         with self._write_lock:
             self._transaction(work)
+
+
+def _pg_records(cls):
+    """Те же методы записей для PostgreSQL."""
+
+    def put_record(self, kind: str, record_id: str, data: dict[str, Any], scope: str = "") -> None:
+        def work(conn) -> None:
+            conn.run(
+                "INSERT INTO records (kind, id, scope, data, updated_at) VALUES (:kind, :id, :scope, :data, :at) "
+                "ON CONFLICT (kind, id) DO UPDATE SET scope = EXCLUDED.scope, data = EXCLUDED.data, "
+                "updated_at = EXCLUDED.updated_at",
+                kind=kind, id=record_id, scope=scope, data=json.dumps(data, ensure_ascii=False), at=_now(),
+            )
+
+        with self._write_lock:
+            self._transaction(work)
+
+    def get_record(self, kind: str, record_id: str) -> dict[str, Any] | None:
+        conn = self._connect()
+        try:
+            rows = self._rows(conn, "SELECT data FROM records WHERE kind = :kind AND id = :id", kind=kind, id=record_id)
+        finally:
+            conn.close()
+        return json.loads(rows[0]["data"]) if rows else None
+
+    def list_records(self, kind: str, scope: str | None = None) -> list[dict[str, Any]]:
+        conn = self._connect()
+        try:
+            if scope is None:
+                rows = self._rows(conn, "SELECT data FROM records WHERE kind = :kind ORDER BY updated_at DESC", kind=kind)
+            else:
+                rows = self._rows(
+                    conn,
+                    "SELECT data FROM records WHERE kind = :kind AND scope = :scope ORDER BY updated_at DESC",
+                    kind=kind,
+                    scope=scope,
+                )
+        finally:
+            conn.close()
+        return [json.loads(row["data"]) for row in rows]
+
+    def delete_record(self, kind: str, record_id: str) -> None:
+        def work(conn) -> None:
+            conn.run("DELETE FROM records WHERE kind = :kind AND id = :id", kind=kind, id=record_id)
+
+        with self._write_lock:
+            self._transaction(work)
+
+    cls.put_record = put_record
+    cls.get_record = get_record
+    cls.list_records = list_records
+    cls.delete_record = delete_record
+    return cls
+
+
+_pg_records(PostgresPlanStore)
 
 
 def open_store(database_url: str | None, sqlite_path: str | Path) -> PlanStore | PostgresPlanStore:

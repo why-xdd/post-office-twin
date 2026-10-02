@@ -67,6 +67,7 @@ HEIGHTS: dict[str, tuple[float, float]] = {
     "label_printer": (0.25, 0.9),
     "camera": (0.15, 2.6),
     "fire_alarm": (0.1, 2.85),
+    "fire_extinguisher": (0.6, 0.9),
     "security_alarm": (0.15, 2.2),
     "storage_rack": (2.0, 0.0),
     "goods_rack": (1.8, 0.0),
@@ -210,6 +211,15 @@ DEFAULT_EQUIPMENT_TYPES: list[EquipmentType] = [
         default_size_m=(0.2, 0.2),
         floor_object=False,
         allowed_zones=[*PUBLIC, *SERVICE],
+        attribute_schema=INVENTORY,
+    ),
+    EquipmentType(
+        code="fire_extinguisher",
+        label="Огнетушитель",
+        group="Безопасность и коммуникации",
+        default_size_m=(0.2, 0.2),
+        floor_object=False,
+        allowed_zones=[*PUBLIC, *SERVICE, "vestibule"],
         attribute_schema=INVENTORY,
     ),
     EquipmentType(

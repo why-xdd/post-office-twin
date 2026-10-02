@@ -530,3 +530,23 @@
     display: none;
   }
 }
+
+.maintenance__tags {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: var(--s-2);
+  color: var(--on-steel);
+  font-size: var(--text-13);
+  text-underline-offset: 3px;
+}
+
+.maintenance__calendar {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--text-13);
+  text-decoration: underline;
+  cursor: pointer;
+}

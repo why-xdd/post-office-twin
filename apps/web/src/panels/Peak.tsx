@@ -4,10 +4,12 @@
  * встанет очередь, выйдет ли она за накопитель и насколько сузит проход от входа к окнам.
  */
 
-import { ChevronDown, CircleCheck, LoaderCircle, OctagonAlert, TriangleAlert, Users } from 'lucide-react';
+import { ChevronDown, CircleCheck, LoaderCircle, OctagonAlert, Package, TriangleAlert, Users } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, api } from '../lib/api';
-import type { Equipment, EquipmentTypeInfo, PeakReport, PeakScenario } from '../lib/plan';
+import type { Equipment, EquipmentTypeInfo, PeakReport, PeakScenario, StorageReport } from '../lib/plan';
+import { QueueLog } from './QueueLog';
+import './assistant.css';
 import { formatNumber, plural } from '../lib/planFacts';
 import { useWorkspace } from '../state/store';
 import './peak.css';
@@ -248,6 +250,12 @@ export function Peak({ types, reportedBroken = [] }: PeakProps) {
                 {passageFell && <> → <b>{formatNumber(report.passage_with_queue_m)} м</b> с очередью</>}
               </p>
             )}
+            {report.evacuation_with_queue_m != null && report.evacuation_required_m != null && (
+              <p className="peak__passage peak__passage--bad">
+                Путь эвакуации из зоны «{report.evacuation_zone}»: <b>{formatNumber(report.evacuation_with_queue_m)} м</b> с
+                очередью при норме {formatNumber(report.evacuation_required_m)} м
+              </p>
+            )}
             <ul className="peak__advice">
               {report.advice.map((line) => (
                 <li key={line}>
@@ -274,6 +282,95 @@ export function Peak({ types, reportedBroken = [] }: PeakProps) {
           </>
         )}
       </section>
+
+      <ParcelStorage />
+
+      {doc && <QueueLog doc={doc} />}
     </div>
+  );
+}
+
+/** Посылки: хватит ли мест на стеллажах, в ПВЗ и в почтомате при обычном и усиленном завозе. */
+function ParcelStorage() {
+  const doc = useWorkspace((s) => s.doc);
+  const [factor, setFactor] = useState(1);
+  const [report, setReport] = useState<StorageReport | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!doc) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      api
+        .storage(doc, factor, controller.signal)
+        .then((result) => {
+          setReport(result);
+          setError(null);
+        })
+        .catch((reason) => {
+          if (reason instanceof DOMException && reason.name === 'AbortError') return;
+          setError(reason instanceof ApiError ? reason.message : 'Сервер не ответил.');
+        });
+    }, RECALC_DELAY_MS);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [doc, factor]);
+
+  return (
+    <section className="peak__block" aria-label="Хранение посылок">
+      <div className="peak__row">
+        <label htmlFor="peak-parcels" className="peak__label">
+          <Package size={13} aria-hidden="true" /> Завоз посылок
+        </label>
+        <b className="peak__value">×{formatNumber(factor, 1)}</b>
+      </div>
+      <input
+        id="peak-parcels"
+        type="range"
+        min={1}
+        max={3}
+        step={0.1}
+        value={factor}
+        onChange={(event) => setFactor(Number(event.target.value))}
+        className="peak__range"
+      />
+      {error && <p className="peak__error">{error}</p>}
+      {report && !report.available && <p className="peak__note">{report.reason}</p>}
+      {report?.available && report.required != null && (
+        <div className={`peak__storage${report.enough ? '' : ' peak__storage--short'}`}>
+          <p>
+            Мест для посылок <b>{report.places}</b> при норме <b>{report.required}</b>
+            <small> · {report.source}</small>
+          </p>
+          <ul className="peak__advice">
+            {report.advice.map((line) => (
+              <li key={line}>
+                {report.enough ? <CircleCheck size={14} aria-hidden="true" /> : <TriangleAlert size={14} aria-hidden="true" />}
+                <span>{line}</span>
+              </li>
+            ))}
+          </ul>
+          <details className="peak__assumptions">
+            <summary>
+              Где хранятся: {report.items.length}
+              <ChevronDown size={14} aria-hidden="true" />
+            </summary>
+            <ul>
+              {report.items.map((item) => (
+                <li key={item.id}>
+                  {item.label} — {item.places} {plural(item.places, 'место', 'места', 'мест')}
+                  {item.estimated ? ' (оценка по габариту)' : ''}
+                </li>
+              ))}
+              {report.assumptions.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          </details>
+        </div>
+      )}
+    </section>
   );
 }

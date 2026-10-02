@@ -231,7 +231,7 @@ def test_conclusion_is_built_from_computed_numbers(plan: Plan) -> None:
     assert "нарушени" in result.text
     # Внутренние идентификаторы в текст для заказчика не попадают.
     assert "eq_" not in result.text
-    assert result.facts["нарушений"] == 7
+    assert result.facts["нарушений"] == 8  # 7 по ВНТП и СП 59 плюс путь эвакуации по СП 1.13130
     # Два нарушения держатся на окнах кассы: их движок не двигает и прямо об этом пишет.
     assert result.facts["после_исправления"]["нарушений"] < result.facts["нарушений"]
     assert "окнами кассы" in result.text

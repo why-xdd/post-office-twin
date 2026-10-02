@@ -23,6 +23,15 @@ import type {
   ValidationReport,
   PeakReport,
   PeakScenario,
+  StorageReport,
+  AuthState,
+  Incident,
+  IncidentStatus,
+  TodayReport,
+  User,
+  NetworkReport,
+  Comparison,
+  Prices,
 } from './plan';
 
 const BASE_URL = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/$/, '');
@@ -94,6 +103,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const isForm = init?.body instanceof FormData;
     response = await fetch(`${BASE_URL}${path}`, {
       ...init,
+      credentials: 'include',
       headers: isForm ? init?.headers : { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
     });
   } catch {
@@ -179,6 +189,9 @@ export const api = {
   capacity: (document: Plan) =>
     request<CapacityReport>('/api/capacity', { method: 'POST', body: JSON.stringify({ document }) }),
 
+  storage: (document: Plan, factor: number, signal?: AbortSignal) =>
+    request<StorageReport>('/api/storage', { method: 'POST', body: JSON.stringify({ document, factor }), signal }),
+
   peak: (document: Plan, scenario: PeakScenario, signal?: AbortSignal) =>
     request<PeakReport>('/api/peak', { method: 'POST', body: JSON.stringify({ document, scenario }), signal }),
 
@@ -248,11 +261,48 @@ export const api = {
     return request<ImportResult>('/api/import/drawing', { method: 'POST', body: form });
   },
 
-  command: (document: Plan, text: string) =>
+  command: (document: Plan, text: string, planId?: string | null) =>
     request<CommandResult>('/api/assistant/command', {
       method: 'POST',
-      body: JSON.stringify({ document, text }),
+      body: JSON.stringify({ document, text, plan_id: planId ?? null }),
     }),
+
+  me: () => request<AuthState>('/api/auth/me'),
+
+  login: (login: string, password: string) =>
+    request<{ user: User }>('/api/auth/login', { method: 'POST', body: JSON.stringify({ login, password }) }),
+
+  demoLogin: (role: string) =>
+    request<{ user: User }>('/api/auth/demo', { method: 'POST', body: JSON.stringify({ role }) }),
+
+  logout: () => request<void>('/api/auth/logout', { method: 'POST' }),
+
+  incidents: (planId: string, signal?: AbortSignal) =>
+    request<Incident[]>(`/api/plans/${planId}/incidents`, { signal }),
+
+  reportIncident: (planId: string, body: { object_id: string; text: string; out_of_service: boolean; reporter?: string }) =>
+    request<Incident>(`/api/plans/${planId}/incidents`, { method: 'POST', body: JSON.stringify(body) }),
+
+  setIncidentStatus: (planId: string, id: string, status: IncidentStatus, note?: string) =>
+    request<Incident>(`/api/plans/${planId}/incidents/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status, note: note || null }),
+    }),
+
+  inspectionDone: (planId: string, objectId: string, nextInspection?: string) =>
+    request<PlanRef>(`/api/plans/${planId}/inspections`, {
+      method: 'POST',
+      body: JSON.stringify({ object_id: objectId, next_inspection: nextInspection || null }),
+    }),
+
+  compare: (before: Plan, after: Plan, prices: Prices, signal?: AbortSignal) =>
+    request<Comparison>('/api/compare', { method: 'POST', body: JSON.stringify({ before, after, prices }), signal }),
+
+  network: () => request<NetworkReport>('/api/network'),
+
+  networkDemo: () => request<{ added: number }>('/api/network/demo', { method: 'POST' }),
+
+  today: (planId: string, signal?: AbortSignal) => request<TodayReport>(`/api/plans/${planId}/today`, { signal }),
 
   conclusion: (document: Plan) =>
     request<Conclusion>('/api/assistant/conclusion', {

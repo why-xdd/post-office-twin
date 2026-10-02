@@ -398,3 +398,23 @@
   padding: 0 var(--s-3);
   font-size: var(--text-13);
 }
+
+.rail__end {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  margin-left: auto;
+}
+
+.rail__link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  color: var(--on-steel);
+  font-size: var(--text-13);
+  text-underline-offset: 3px;
+}
+
+.rail__link:hover {
+  color: var(--brass-hi);
+}

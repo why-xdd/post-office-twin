@@ -3,6 +3,10 @@ import { useRoute } from './lib/router';
 import { ImportDrawing } from './screens/ImportDrawing';
 import { NewPlan } from './screens/NewPlan';
 import { Rack } from './screens/Rack';
+import { Tag } from './screens/Tag';
+import { Tags } from './screens/Tags';
+import { Network } from './screens/Network';
+import { Report } from './screens/Report';
 import { Workspace } from './screens/Workspace';
 
 export function App() {
@@ -13,6 +17,10 @@ export function App() {
         <Workspace key={route.id} planId={route.id} />
       </ErrorBoundary>
     );
+  if (route.name === 'tag') return <Tag key={`${route.id}/${route.object}`} planId={route.id} objectId={route.object} />;
+  if (route.name === 'report') return <Report key={route.id} planId={route.id} />;
+  if (route.name === 'tags') return <Tags key={route.id} planId={route.id} />;
+  if (route.name === 'network') return <Network />;
   if (route.name === 'new') return <NewPlan />;
   if (route.name === 'import') return <ImportDrawing />;
   return <Rack />;

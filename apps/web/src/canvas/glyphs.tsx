@@ -25,6 +25,7 @@ import {
   Tv,
   Vault,
   type LucideIcon,
+  FireExtinguisher,
 } from 'lucide-react';
 
 /** Значок типа оборудования — один на тип, в интерфейсе и на плане. */
@@ -44,6 +45,7 @@ export const EQUIPMENT_GLYPH: Record<string, LucideIcon> = {
   label_printer: Tag,
   camera: Cctv,
   fire_alarm: AlarmSmoke,
+  fire_extinguisher: FireExtinguisher,
   security_alarm: ShieldAlert,
   storage_rack: Archive,
   goods_rack: ShoppingBasket,

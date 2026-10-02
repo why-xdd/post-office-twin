@@ -3,10 +3,11 @@
  * посетителей. По каждой группе окон — поток по часам и часы, в которые окон на плане не хватает.
  */
 
-import { ChevronDown, FileClock, Upload } from 'lucide-react';
+import { ChevronDown, FileClock, FileSpreadsheet, Upload } from 'lucide-react';
 import { useRef, useState } from 'react';
 import { ApiError, api } from '../lib/api';
 import type { Plan, QueueGroupHours, QueueHour, QueueLogReport } from '../lib/plan';
+import { downloadCsv } from '../lib/download';
 import { formatNumber, plural } from '../lib/planFacts';
 
 interface LogState {
@@ -199,9 +200,14 @@ export function QueueLog({ doc }: { doc: Plan }) {
                 <li key={index}>{line}</li>
               ))}
             </ul>
+            <button type="button" className="btn btn--outline" onClick={() => exportShifts(report, doc)}>
+              <FileSpreadsheet size={15} aria-hidden="true" />
+              Потребность в окнах для графика смен
+            </button>
             {report.groups.map((group) => (
               <GroupBlock key={group.name} group={group} />
             ))}
+            {report.weekdays && report.weekdays.length > 0 && <Weekdays report={report} />}
             {report.assumptions.length > 0 && (
               <details className="rec__assumptions">
                 <summary>
@@ -220,4 +226,68 @@ export function QueueLog({ doc }: { doc: Plan }) {
       </div>
     </section>
   );
+}
+
+const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+
+/** Окно-часы по дням недели: какие дни тяжелее и где нужен лишний человек. */
+function Weekdays({ report }: { report: QueueLogReport }) {
+  const weekdays = report.weekdays ?? [];
+  const days = [...new Map(weekdays.map((w) => [w.weekday, w.label])).entries()].sort((a, b) => a[0] - b[0]);
+  const groups = [...new Set(weekdays.map((w) => w.group))];
+  const cell = (weekday: number, group: string) => weekdays.find((w) => w.weekday === weekday && w.group === group);
+  const peakOf = (weekday: number, group: string) => {
+    const need = cell(weekday, group);
+    return need ? Math.max(...need.hours.map((h) => h.windows_needed)) : null;
+  };
+  return (
+    <div className="qlog__group">
+      <h4>
+        По дням недели
+        <span>окно-часов в день и сколько окон нужно в самый загруженный час</span>
+      </h4>
+      <table className="capacity">
+        <thead>
+          <tr>
+            <th scope="col">День</th>
+            {groups.map((group) => (
+              <th key={group} scope="col">
+                {group}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {days.map(([weekday, label]) => (
+            <tr key={weekday}>
+              <th scope="row">{capital(label)}</th>
+              {groups.map((group) => {
+                const need = cell(weekday, group);
+                return <td key={group}>{need ? `${need.window_hours} · до ${peakOf(weekday, group)}` : '—'}</td>;
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/**
+ * Выгрузка для системы планирования смен (WFM): день недели, час, группа окон, поток и сколько
+ * окон держать открытыми, чтобы ожидание не превышало цели. Без дат в данных — один средний день.
+ */
+function exportShifts(report: QueueLogReport, doc: Plan) {
+  const header = ['День недели', 'Час', 'Группа окон', 'Посетителей в час', 'Нужно окон'];
+  const rows: (string | number)[][] = [];
+  if (report.weekdays && report.weekdays.length > 0) {
+    for (const need of [...report.weekdays].sort((a, b) => a.weekday - b.weekday || a.group.localeCompare(b.group))) {
+      for (const hour of need.hours) rows.push([capital(need.label), hourLabel(hour.hour), need.group, hour.arrivals_per_hour, hour.windows_needed]);
+    }
+  } else {
+    for (const group of report.groups) {
+      for (const hour of group.hours) rows.push(['Средний день', hourLabel(hour.hour), group.name, hour.arrivals_per_hour, hour.windows_needed]);
+    }
+  }
+  downloadCsv(`Окна по часам — ${doc.ops.name ?? doc.ops.id}`, [header, ...rows]);
 }

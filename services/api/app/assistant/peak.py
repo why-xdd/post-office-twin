@@ -25,6 +25,7 @@ from shapely.ops import unary_union
 from app.assistant import capacity
 from app.geometry import core, passability
 from app.models import Plan
+from app.rules import evacuation
 
 # Шаг между людьми в очереди и между рядами «змейки». Нормы на это нет: 0,6 м — плечом к спине
 # с небольшим зазором, 0,8 м между рядами — проход ограждения. Это допущения, они выводятся.
@@ -89,6 +90,11 @@ class PeakReport(BaseModel):
     beyond_entrance: int = Field(default=0, description="Сколько людей не помещается в помещении")
     passage_without_queue_m: float | None = None
     passage_with_queue_m: float | None = None
+    evacuation_required_m: float | None = None
+    evacuation_with_queue_m: float | None = Field(
+        default=None, description="Самый узкий путь эвакуации с людьми очереди, если очередь его сузила"
+    )
+    evacuation_zone: str | None = None
     advice: list[str] = Field(default_factory=list)
     assumptions: list[str] = Field(default_factory=list)
 
@@ -467,6 +473,23 @@ def _passage(plan: Plan, report: PeakReport) -> None:
         crowded = space.difference(unary_union(bodies)) if bodies else space
         widths.append(passability.ErosionCache(crowded).width(Point(entrance), Point(goal))[0])
     report.passage_with_queue_m = min(widths)
+    # Эвакуация: все люди очереди — препятствия. Сужение, которое есть и без очереди, — это
+    # нарушение плана, его показывает проверка; здесь — только то, что добавляет пик.
+    bodies = [Point(p.x, p.y).buffer(PERSON_RADIUS_M, quad_segs=6) for p in report.people]
+    crowded = space.difference(unary_union(bodies))
+    before: dict[str, float] = {}
+    for neck in evacuation.bottlenecks(plan):
+        before[neck.zone_id] = min(before.get(neck.zone_id, neck.measured_m), neck.measured_m)
+    worst = None
+    for neck in evacuation.bottlenecks(plan, crowded):
+        if neck.zone_id in before and neck.measured_m >= before[neck.zone_id] - 0.05:
+            continue
+        if worst is None or neck.measured_m < worst.measured_m:
+            worst = neck
+    if worst is not None:
+        report.evacuation_required_m = worst.required_m
+        report.evacuation_with_queue_m = worst.measured_m
+        report.evacuation_zone = worst.zone_label
 
 
 # ---------- советы ----------
@@ -532,6 +555,13 @@ def _advice(plan: Plan, report: PeakReport, scenario: PeakScenario) -> list[str]
                     else "меньше 1,2 м: с коляской не разъехаться."
                 )
             )
+    if report.evacuation_with_queue_m is not None and report.evacuation_required_m is not None:
+        width = report.evacuation_with_queue_m
+        words = "перекрывает его" if width < 0.05 else f"сужает его до {width:.2f} м".replace(".", ",")
+        advice.append(
+            f"Очередь стоит на пути эвакуации из зоны «{report.evacuation_zone}» и {words} при норме "
+            f"{report.evacuation_required_m:g} м (СП 1.13130.2020, п. 4.3.3).".replace(".0 м", " м")
+        )
     if not advice:
         advice.append(f"Все группы окон держат цель {target:g} мин, очередь помещается в накопитель.")
     return advice

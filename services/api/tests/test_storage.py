@@ -87,3 +87,14 @@ def test_parallel_saves_get_distinct_versions(store) -> None:
         thread.join()
     assert not errors
     assert [v["version"] for v in store.list_versions(plan_id)] == list(range(1, 10))
+
+
+def test_records_are_upserted_and_scoped(store) -> None:
+    store.put_record("incident", "a", {"n": 1}, "plan-1")
+    store.put_record("incident", "b", {"n": 2}, "plan-2")
+    store.put_record("incident", "a", {"n": 3}, "plan-1")
+    assert store.get_record("incident", "a") == {"n": 3}
+    assert store.list_records("incident", "plan-1") == [{"n": 3}]
+    assert len(store.list_records("incident")) == 2
+    store.delete_record("incident", "a")
+    assert store.get_record("incident", "a") is None

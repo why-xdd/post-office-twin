@@ -64,6 +64,12 @@ class OpsMeta(Base):
     service_time_min: float | None = Field(
         default=None, gt=0, description="Среднее время обслуживания у окна, если нет в карточках"
     )
+    parcels_in_per_day: float | None = Field(
+        default=None, ge=0, description="Входящих посылок к выдаче в среднем за день — для ёмкости кладовой"
+    )
+    parcels_out_per_day: float | None = Field(
+        default=None, ge=0, description="Исходящих посылок в среднем за день — для ёмкости кладовой"
+    )
 
 
 class Wall(Base):

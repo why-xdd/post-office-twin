@@ -650,3 +650,21 @@
     animation: none;
   }
 }
+
+/* Открытое обращение о неисправности: знак на углу объекта */
+.plan-incident circle {
+  fill: var(--caution);
+  stroke: var(--sheet);
+  stroke-width: 1.5;
+}
+
+.plan-incident--down circle {
+  fill: var(--signal);
+}
+
+.plan-incident text {
+  fill: #fff;
+  font-size: 10px;
+  font-weight: 760;
+  pointer-events: none;
+}

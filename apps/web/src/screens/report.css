@@ -1,0 +1,215 @@
+/* Отчёт: на экране — лист на подложке, на бумаге — только лист A4 */
+.report {
+  min-height: 100dvh;
+  padding: 0 var(--s-4) var(--s-10);
+  color: var(--ink);
+  background: var(--steel-850);
+}
+
+.report__bar {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  max-width: 820px;
+  margin: 0 auto;
+  padding: var(--s-4) 0;
+}
+
+.report__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  color: var(--on-steel);
+  font-size: var(--text-13);
+  text-decoration: none;
+}
+
+.report__note,
+.report__error {
+  max-width: 820px;
+  margin: 0 auto;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--on-steel-2);
+}
+
+.report__error {
+  color: var(--signal-on-steel);
+}
+
+.report__sheet {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-6);
+  max-width: 820px;
+  margin: 0 auto;
+  padding: var(--s-10) var(--s-10) var(--s-8);
+  background: #fff;
+  box-shadow: var(--lift-shadow);
+  font-size: var(--text-14);
+  line-height: 1.5;
+}
+
+.report__title p {
+  color: var(--ink-3);
+  font-size: var(--text-12);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.report__title h1 {
+  margin-top: 4px;
+  font-size: var(--text-26);
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+.report__title dl {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--s-3);
+  margin: var(--s-4) 0 0;
+}
+
+.report__title dl > div {
+  display: flex;
+  flex-direction: column-reverse;
+  justify-content: flex-end;
+  padding-top: var(--s-2);
+  border-top: 2px solid var(--ink);
+}
+
+.report__title dt {
+  color: var(--ink-3);
+  font-size: var(--text-12);
+}
+
+.report__title dd {
+  margin: 0;
+  font-size: var(--text-20);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.report__title dd.is-bad {
+  color: var(--signal);
+}
+
+.report__title dd.is-ok {
+  color: var(--ok);
+}
+
+.report__drawing {
+  width: 100%;
+  max-height: 420px;
+  object-fit: contain;
+  border: 1px solid var(--label-edge);
+}
+
+.report__sheet h2 {
+  margin-bottom: var(--s-2);
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--ink);
+  font-size: var(--text-16);
+  font-weight: 700;
+}
+
+.report__sheet h3 {
+  margin: var(--s-2) 0 4px;
+  font-size: var(--text-14);
+  font-weight: 640;
+}
+
+.report__sheet ul {
+  margin: 0;
+  padding-left: 1.2em;
+}
+
+.report__text {
+  white-space: pre-line;
+}
+
+.report__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-13);
+}
+
+.report__table th,
+.report__table td {
+  padding: 6px 6px 6px 0;
+  border-bottom: 1px solid var(--label-edge);
+  text-align: left;
+  vertical-align: top;
+}
+
+.report__table thead th {
+  color: var(--ink-3);
+  font-size: var(--text-11);
+  font-weight: 640;
+}
+
+.report__table small {
+  display: block;
+  color: var(--ink-3);
+}
+
+.report__table tr.is-error b,
+.report__table tr.is-error td:nth-child(2) {
+  color: var(--signal);
+}
+
+.report__small,
+.report__foot {
+  color: var(--ink-3);
+  font-size: var(--text-12);
+}
+
+.report__foot {
+  padding-top: var(--s-3);
+  border-top: 1px solid var(--label-edge);
+}
+
+@media (max-width: 640px) {
+  .report__sheet {
+    padding: var(--s-5) var(--s-4);
+  }
+
+  .report__title dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media print {
+  @page {
+    size: A4;
+    margin: 14mm;
+  }
+
+  .report {
+    padding: 0;
+    background: #fff;
+  }
+
+  .report__bar {
+    display: none;
+  }
+
+  .report__sheet {
+    max-width: none;
+    padding: 0;
+    box-shadow: none;
+  }
+
+  .report__sheet section {
+    break-inside: avoid-page;
+  }
+
+  .report__table tr {
+    break-inside: avoid;
+  }
+}

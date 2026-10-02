@@ -4,7 +4,7 @@
  * что человек видит по щелчку.
  */
 
-import { ExternalLink, IdCard, MapPin, Wrench } from 'lucide-react';
+import { CalendarCheck, ExternalLink, IdCard, LoaderCircle, MapPin, OctagonAlert, QrCode, Wrench } from 'lucide-react';
 import { useState } from 'react';
 import { TextField } from '../components/fields';
 import { Plate } from '../components/Plate';
@@ -13,7 +13,13 @@ import { key } from '../lib/addresses';
 import type { Equipment, EquipmentTypeInfo } from '../lib/plan';
 import { formatNumber } from '../lib/planFacts';
 import { formatDate, inspectionState } from '../lib/inspections';
-import { useWorkspace } from '../state/store';
+import { isDirty, useWorkspace } from '../state/store';
+import { ApiError, api } from '../lib/api';
+import { hashOf, tagUrl } from '../lib/router';
+import { Qr } from '../components/Qr';
+import { IncidentCard, ReportForm } from './Incidents';
+import { isOpen, useIncidents } from '../state/incidents';
+import { canManage, useSession } from '../state/session';
 import { glyphFor } from '../canvas/glyphs';
 import './inventory.css';
 
@@ -67,6 +73,8 @@ export function Passport({ book, types }: PassportProps) {
       </header>
 
       {synthetic && <p className="passport__synthetic">Демонстрационные данные: сотрудники и учётные номера придуманы.</p>}
+
+      <ObjectIncidents objectId={item.id} />
 
       <section className="passport__section">
         <h3>
@@ -138,6 +146,7 @@ export function Passport({ book, types }: PassportProps) {
         <button type="button" className="btn btn--outline passport__edit" onClick={() => setEditing((v) => !v)}>
           {editing ? 'Готово' : 'Изменить учётные данные'}
         </button>
+        {!editing && <InspectionDone objectId={item.id} />}
       </section>
 
       {item.attributes && (item.attributes.status !== undefined || item.attributes.ip_address !== undefined) && (
@@ -206,6 +215,108 @@ export function Passport({ book, types }: PassportProps) {
           </dd>
         </dl>
       </section>
+
+      <TagSection objectId={item.id} address={book.byId.get(key('equipment', item.id)) ?? ''} />
     </div>
+  );
+}
+
+/** Открытые обращения по объекту и кнопка «Сообщить о неисправности». */
+function ObjectIncidents({ objectId }: { objectId: string }) {
+  const planId = useWorkspace((s) => s.planId);
+  const items = useIncidents((s) => s.items).filter((i) => i.object_id === objectId && isOpen(i));
+  const [reporting, setReporting] = useState(false);
+  if (!planId) return null;
+  return (
+    <section className="passport__section">
+      <h3>
+        <OctagonAlert size={15} aria-hidden="true" /> Неисправности
+      </h3>
+      {items.length === 0 && !reporting && <p className="passport__none">Открытых обращений нет.</p>}
+      {items.map((incident) => (
+        <IncidentCard key={incident.id} incident={incident} />
+      ))}
+      {reporting ? (
+        <ReportForm planId={planId} objectId={objectId} compact />
+      ) : (
+        <button type="button" className="btn btn--outline passport__edit" onClick={() => setReporting(true)}>
+          Сообщить о неисправности
+        </button>
+      )}
+    </section>
+  );
+}
+
+/** «Осмотр выполнен»: дата уходит в паспорт новой версией плана с именем сотрудника. */
+function InspectionDone({ objectId }: { objectId: string }) {
+  const planId = useWorkspace((s) => s.planId);
+  const dirty = useWorkspace(isDirty);
+  const adoptSaved = useWorkspace((s) => s.adoptSaved);
+  const user = useSession((s) => s.user);
+  const [asking, setAsking] = useState(false);
+  const [next, setNext] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  if (!planId || !canManage(user)) return null;
+
+  const submit = async () => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const ref = await api.inspectionDone(planId, objectId, next || undefined);
+      const document = await api.getPlan(planId);
+      adoptSaved(ref.version, document);
+      setAsking(false);
+      setNext('');
+    } catch (reason) {
+      setMessage(reason instanceof ApiError ? reason.message : 'Сервер не ответил.');
+      // Без прежнего интервала сервер просит дату — показываем поле.
+      setAsking(true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (dirty) return <p className="passport__none">Отметить осмотр можно после сохранения плана.</p>;
+
+  return (
+    <div className="passport__inspect">
+      {asking && (
+        <label className="passport__inspect-date">
+          <span>Следующий осмотр</span>
+          <input type="date" value={next} onChange={(event) => setNext(event.target.value)} />
+        </label>
+      )}
+      {message && <p className="report__error">{message}</p>}
+      <button type="button" className="btn btn--label" onClick={() => void submit()} disabled={busy}>
+        {busy ? <LoaderCircle size={15} className="spin" aria-hidden="true" /> : <CalendarCheck size={15} aria-hidden="true" />}
+        Осмотр выполнен сегодня
+      </button>
+      {!asking && (
+        <button type="button" className="passport__inspect-more" onClick={() => setAsking(true)}>
+          указать срок следующего
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** QR-бирка объекта: печатается и клеится на оборудование. */
+function TagSection({ objectId, address }: { objectId: string; address: string }) {
+  const planId = useWorkspace((s) => s.planId);
+  if (!planId) return null;
+  return (
+    <section className="passport__section">
+      <h3>
+        <QrCode size={15} aria-hidden="true" /> QR-бирка
+      </h3>
+      <div className="passport__tag">
+        <Qr text={tagUrl(planId, objectId)} size={92} label={`QR-код объекта ${address}`} />
+        <p>
+          Наклейте бирку на объект: по ней сотрудник с телефона сообщит о неисправности.{' '}
+          <a href={hashOf({ name: 'tags', id: planId })}>Лист бирок для печати</a>
+        </p>
+      </div>
+    </section>
   );
 }

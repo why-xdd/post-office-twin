@@ -118,3 +118,27 @@ def test_counter_reads_thousands_with_non_breaking_space(plan: Plan) -> None:
 
 def test_peak_never_runs_past_midnight() -> None:
     assert queue_log._peaks({23: 10.0}) == ["23:00-24:00"]
+
+
+def test_weekdays_give_hourly_need_for_shift_planning() -> None:
+    from pathlib import Path as _Path
+
+    from app.assistant import queue_log as _ql
+
+    data = _Path(__file__).resolve().parents[3] / "data"
+    plan = Plan.model_validate(json.loads((data / "demo_plan.json").read_text(encoding="utf-8")))
+    source, records, skipped = _ql.read((data / "queue_log_sample.csv").read_text(encoding="utf-8"))
+    report = _ql.analyze(plan, source, records, skipped)
+    assert report.weekdays
+    for need in report.weekdays:
+        assert need.window_hours == sum(h.windows_needed for h in need.hours)
+        assert all(0 <= h.hour <= 23 for h in need.hours)
+    assert any("По дням недели" in line for line in report.summary)
+
+
+def test_undated_log_has_no_weekdays() -> None:
+    from app.assistant import queue_log as _ql
+
+    plan = Plan.model_validate(json.loads((Path(__file__).resolve().parents[3] / "data" / "demo_plan.json").read_text(encoding="utf-8")))
+    source, records, skipped = _ql.read("Час;Посетителей\n10;40\n11;55\n")
+    assert _ql.analyze(plan, source, records, skipped).weekdays == []

@@ -27,6 +27,11 @@ export interface OpsMeta {
   ceiling_height_m?: number;
   /** Население населённого пункта, тыс. человек — для проверки охвата по Приказу № 538. */
   settlement_population?: number;
+  /** Целевое среднее ожидание в час пик, мин; по умолчанию 10 — цель Почты России. */
+  target_wait_min?: number;
+  /** Посылок в день — для ёмкости кладовой по ВНТП 311-98 п. 3.10. */
+  parcels_in_per_day?: number;
+  parcels_out_per_day?: number;
 }
 
 export type WallType = 'outer' | 'partition' | 'internal';
@@ -152,7 +157,7 @@ export interface Plan {
 }
 
 export type Severity = 'error' | 'warning' | 'info';
-export type RuleCategory = 'geometry' | 'accessibility' | 'technology' | 'capacity';
+export type RuleCategory = 'geometry' | 'accessibility' | 'technology' | 'capacity' | 'fire';
 
 export interface Rule {
   id: string;
@@ -388,6 +393,32 @@ export interface PeakReport {
   beyond_entrance: number;
   passage_without_queue_m?: number | null;
   passage_with_queue_m?: number | null;
+  evacuation_required_m?: number | null;
+  evacuation_with_queue_m?: number | null;
+  evacuation_zone?: string | null;
+  advice: string[];
+  assumptions: string[];
+}
+
+export interface StorageItem {
+  id: string;
+  label: string;
+  places: number;
+  estimated: boolean;
+}
+
+export interface StorageReport {
+  available: boolean;
+  reason?: string | null;
+  factor: number;
+  items: StorageItem[];
+  places: number;
+  incoming_per_day?: number | null;
+  outgoing_per_day?: number | null;
+  required?: number | null;
+  enough?: boolean | null;
+  deficit: number;
+  source: string;
   advice: string[];
   assumptions: string[];
 }
@@ -522,6 +553,16 @@ export interface QueueLogReport {
   declared_peak_hours: string[];
   summary: string[];
   assumptions: string[];
+  weekdays?: QueueWeekday[];
+}
+
+export interface QueueWeekday {
+  weekday: number;
+  label: string;
+  days: number;
+  group: string;
+  hours: { hour: number; arrivals_per_hour: number; windows_needed: number }[];
+  window_hours: number;
 }
 
 /** Разбор записи с камеры зала: сколько людей, где стоят, хватает ли мест. */
@@ -557,4 +598,113 @@ export interface VisionReport {
   heatmap: VisionHeatmap;
   summary: string[];
   assumptions: string[];
+}
+
+export interface User {
+  login: string;
+  name: string;
+  role: 'head' | 'operator' | 'engineer' | 'designer' | string;
+  role_label: string;
+}
+
+export interface AuthState {
+  user: User | null;
+  demo: boolean;
+  roles: { role: string; label: string }[];
+}
+
+export type IncidentStatus = 'new' | 'in_progress' | 'resolved';
+
+export interface Incident {
+  id: string;
+  plan_id: string;
+  object_id: string;
+  object_label: string;
+  text: string;
+  out_of_service: boolean;
+  status: IncidentStatus;
+  status_label: string;
+  created_at: string;
+  created_by: string;
+  history: { at: string; status: IncidentStatus; by: string; note?: string | null }[];
+}
+
+export interface TodayAction {
+  text: string;
+  kind: 'incident' | 'inspection' | 'windows' | 'check' | 'storage';
+  object_id?: string | null;
+}
+
+export interface TodayReport {
+  date: string;
+  weekday: string;
+  plan_title: string;
+  user: User | null;
+  incidents: Incident[];
+  out_of_service: string[];
+  inspections: { object_id: string; label: string; due: string; days: number }[];
+  windows: {
+    name: string;
+    total: number;
+    working: number;
+    needed: number;
+    mean_wait_min: number | null;
+    meets_target: boolean;
+  }[];
+  windows_note?: string | null;
+  target_wait_min?: number | null;
+  errors: number;
+  warnings: number;
+  storage_short?: number | null;
+  actions: TodayAction[];
+}
+
+export interface NetworkFactor {
+  key: 'fire' | 'accessibility' | 'windows' | 'other' | 'out_of_service' | 'overdue' | string;
+  count: number;
+  points: number;
+  text: string;
+}
+
+export interface NetworkOffice {
+  plan_id: string;
+  title: string;
+  area_sqm: number | null;
+  daily_visitors: number | null;
+  score: number;
+  rank: number;
+  factors: NetworkFactor[];
+  errors: number;
+  worst_wait_min: number | null;
+  queue_unbounded: boolean;
+  failed: string | null;
+}
+
+export interface NetworkReport {
+  offices: NetworkOffice[];
+  weights: { key: string; weight: number; label: string }[];
+  total_errors: number;
+  offices_with_fire: number;
+  offices_with_accessibility: number;
+  windows_short: number;
+}
+
+export interface Prices {
+  move?: number | null;
+  remove?: number | null;
+  install?: number | null;
+  wall_per_m?: number | null;
+  equipment: Record<string, number>;
+}
+
+export interface Comparison {
+  added: { id: string; label: string; type: string }[];
+  removed: { id: string; label: string; type: string }[];
+  moved: { id: string; label: string; type: string }[];
+  walls_changed_m: number;
+  metrics: { key: string; label: string; before: number | null; after: number | null; unit: string; better: boolean | null }[];
+  lines: { text: string; quantity: number; unit: string; price: number | null; total: number | null; key: string }[];
+  total: number;
+  complete: boolean;
+  missing: string[];
 }

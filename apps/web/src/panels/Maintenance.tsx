@@ -3,7 +3,10 @@
  * строке показывает объект на плане и открывает его паспорт.
  */
 
+import { CalendarPlus, QrCode } from 'lucide-react';
+import { buildCalendar, downloadCalendar, inspectionEvents } from '../lib/ics';
 import { Plate } from '../components/Plate';
+import { hashOf } from '../lib/router';
 import type { AddressBook } from '../lib/addresses';
 import { key } from '../lib/addresses';
 import { inspectionState, SOON_DAYS } from '../lib/inspections';
@@ -19,6 +22,7 @@ interface MaintenanceProps {
 export function Maintenance({ book, types, onPick }: MaintenanceProps) {
   const doc = useWorkspace((s) => s.doc);
   const selection = useWorkspace((s) => s.selection);
+  const planId = useWorkspace((s) => s.planId);
   const equipment = doc?.equipment ?? [];
   const rows = equipment
     .map((item) => ({ item, state: inspectionState(item.inventory?.next_inspection) }))
@@ -78,6 +82,24 @@ export function Maintenance({ book, types, onPick }: MaintenanceProps) {
         </ul>
       )}
       <p className="maintenance__hint">Паспорт любого объекта — по щелчку на плане.</p>
+      {planId && (
+        <a className="maintenance__tags" href={hashOf({ name: 'tags', id: planId })}>
+          <QrCode size={15} aria-hidden="true" /> QR-бирки для печати
+        </a>
+      )}
+      {dated > 0 && (
+        <button
+          type="button"
+          className="maintenance__tags maintenance__calendar"
+          onClick={() => {
+            if (!doc) return;
+            const events = inspectionEvents(doc, planId ?? doc.ops.id, (id) => book.byId.get(key('equipment', id)) ?? '', label);
+            downloadCalendar(`Осмотры — ${doc.ops.name ?? doc.ops.id}`, buildCalendar(`Осмотры: ${doc.ops.name ?? doc.ops.id}`, events));
+          }}
+        >
+          <CalendarPlus size={15} aria-hidden="true" /> Сроки осмотров в календарь (.ics)
+        </button>
+      )}
     </section>
   );
 }

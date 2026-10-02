@@ -10,7 +10,9 @@
       "height_m": 9.0
     },
     "scale": "1 unit = 1 meter",
-    "ceiling_height_m": 3.2
+    "ceiling_height_m": 3.2,
+    "parcels_in_per_day": 90,
+    "parcels_out_per_day": 50
   },
   "walls": [
     {

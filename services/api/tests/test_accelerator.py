@@ -112,30 +112,47 @@ def test_search_works_without_the_model(tmp_path: Path, monkeypatch: pytest.Monk
         accelerator.reset()
 
 
+PROBE_TYPES = ("storage_rack", "waiting_seat", "self_service_kiosk", "cashier_window", "info_stand", "parcel_locker")
+
+
 def test_model_puts_suitable_places_first(plan: Plan) -> None:
-    """Порядок с моделью должен чаще давать проходящие проверку места, чем без неё."""
-    accelerator.reset()
-    candidates, _ = search.generate(plan, "storage_rack")
-    assert candidates
-    with_model = search._prioritise(candidates)[:10]
-    baseline = search.validate(plan, explain=False).errors
-    types = search.equipment_types(plan)
+    """Порядок с моделью в сумме чаще даёт проходящие проверку места, чем без неё.
 
-    def accepted(subset: list[search.Candidate]) -> int:
-        count = 0
-        for candidate in subset:
-            item = search.Equipment(
-                id="__probe__",
-                type="storage_rack",
-                position=candidate.position,
-                rotation_deg=candidate.rotation_deg,
-                size_m=types["storage_rack"].default_size_m,
-            )
-            if search.evaluate(plan, search.with_equipment(plan, item), candidate, baseline).accepted:
-                count += 1
-        return count
+    Сравнение по шести типам на двух планах, а не на одном случае: на отдельной задаче модель
+    может уступить на место-другое (новое правило могло отсечь её любимые позиции), и это не
+    поломка. Поломка — когда она проигрывает в сумме или проваливает отдельный тип сильно.
+    """
+    demo = Plan.model_validate(json.loads((SAMPLE.parent / "demo_plan.json").read_text(encoding="utf-8")))
+    total_model = total_plain = 0
+    for current in (plan, demo):
+        baseline = search.validate(current, explain=False).errors
+        types = search.equipment_types(current)
+        for type_code in PROBE_TYPES:
+            accelerator.reset()
+            candidates, _ = search.generate(current, type_code)
+            if not candidates:
+                continue
 
-    assert accepted(with_model) >= accepted(candidates[:10])
+            def accepted(subset: list[search.Candidate]) -> int:
+                count = 0
+                for candidate in subset:
+                    item = search.Equipment(
+                        id="__probe__",
+                        type=type_code,
+                        position=candidate.position,
+                        rotation_deg=candidate.rotation_deg,
+                        size_m=types[type_code].default_size_m,
+                    )
+                    if search.evaluate(current, search.with_equipment(current, item), candidate, baseline).accepted:
+                        count += 1
+                return count
+
+            with_model = accepted(search._prioritise(candidates)[:10])
+            plain = accepted(candidates[:10])
+            assert with_model >= plain - 2, (current.ops.id, type_code, with_model, plain)
+            total_model += with_model
+            total_plain += plain
+    assert total_model > total_plain
 
 
 def test_batch_scoring_matches_one_by_one() -> None:

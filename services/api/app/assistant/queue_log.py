@@ -73,6 +73,26 @@ class GroupHours(BaseModel):
     staff_hours_open: float | None = Field(default=None, description="Окно-часов в день по журналу")
 
 
+class WeekdayHour(BaseModel):
+    hour: int
+    arrivals_per_hour: float
+    windows_needed: int
+
+
+class WeekdayNeed(BaseModel):
+    """Сколько окон нужно по часам в конкретный день недели — вход для графика смен (WFM)."""
+
+    weekday: int = Field(description="0 — понедельник")
+    label: str
+    days: int = Field(description="Сколько таких дней в данных")
+    group: str
+    hours: list[WeekdayHour]
+    window_hours: int
+
+
+WEEKDAY_NAMES = ("понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье")
+
+
 class QueueLogReport(BaseModel):
     source: str
     days: int
@@ -83,6 +103,7 @@ class QueueLogReport(BaseModel):
     declared_peak_hours: list[str]
     summary: list[str]
     assumptions: list[str]
+    weekdays: list[WeekdayNeed] = Field(default_factory=list)
 
 
 def _norm(text: str) -> str:
@@ -274,6 +295,7 @@ def analyze(plan: Plan, source: str, records: list[dict], skipped: int = 0) -> Q
             by_group[record["group"]].append(record)
 
     groups: list[GroupHours] = []
+    services: dict[str, float] = {}
     totals: dict[int, float] = defaultdict(float)
     for name, types in capacity.GROUPS.items():
         items = by_group.get(name)
@@ -298,6 +320,7 @@ def analyze(plan: Plan, source: str, records: list[dict], skipped: int = 0) -> Q
                 service_source = f"допущение {service:g} мин"
             assumptions.extend(notes)
 
+        services[name] = service
         per_hour: dict[int, list[dict]] = defaultdict(list)
         for record in items:
             per_hour[record["hour"]].append(record)
@@ -397,7 +420,26 @@ def analyze(plan: Plan, source: str, records: list[dict], skipped: int = 0) -> Q
     if declared and peaks and set(peaks) != set(declared):
         summary.append(f"Часы пик по данным — {', '.join(peaks)}; в плане указаны {', '.join(declared)}.")
 
+    weekdays = _weekdays(by_group, services, days, source, limit)
+    if len({w.weekday for w in weekdays}) > 1:
+        load: dict[int, int] = defaultdict(int)
+        for need in weekdays:
+            load[need.weekday] += need.window_hours
+        busiest = max(load, key=load.get)
+        quietest = min(load, key=load.get)
+        spread = (load[busiest] - load[quietest]) / max(load[busiest], 1)
+        if spread >= 0.1:
+            summary.append(
+                f"По дням недели больше всего окно-часов нужно {_on(busiest)} ({load[busiest]}), меньше всего — "
+                f"{_on(quietest)} ({load[quietest]}): график смен стоит строить по дням, а не один на всю неделю."
+            )
+        else:
+            summary.append(
+                f"По дням недели нагрузка почти одинаковая: от {load[quietest]} до {load[busiest]} окно-часов в день."
+            )
+
     return QueueLogReport(
+        weekdays=weekdays,
         source=source,
         days=len(days),
         records=len(records),
@@ -408,3 +450,51 @@ def analyze(plan: Plan, source: str, records: list[dict], skipped: int = 0) -> Q
         summary=summary,
         assumptions=list(dict.fromkeys(assumptions)),
     )
+
+
+def _on(weekday: int) -> str:
+    """«в понедельник», «во вторник» — день недели с предлогом."""
+    return ("в понедельник", "во вторник", "в среду", "в четверг", "в пятницу", "в субботу", "в воскресенье")[weekday]
+
+
+def _weekdays(
+    by_group: dict[str, list[dict]], services: dict[str, float], days: list[str], source: str, limit: float
+) -> list[WeekdayNeed]:
+    """Потребность в окнах по дням недели и часам. Только для данных с датами."""
+    # Журнал хранит дату ISO, счётчик — как она записана в файле («15.09.2026»): разбираются обе.
+    parsed = {d: _day(d) for d in days if d != UNDATED}
+    dated = {d: moment.weekday() for d, moment in parsed.items() if moment is not None}
+    if not dated:
+        return []
+    count: dict[int, int] = defaultdict(int)
+    for weekday in dated.values():
+        count[weekday] += 1
+    needs: list[WeekdayNeed] = []
+    for name, items in by_group.items():
+        service = services.get(name)
+        if service is None:
+            continue
+        buckets: dict[tuple[int, int], float] = defaultdict(float)
+        for record in items:
+            weekday = dated.get(record["day"])
+            if weekday is None:
+                continue
+            buckets[(weekday, record["hour"])] += record["count"] if source == "счётчик посетителей" else 1
+        for weekday in sorted(count):
+            hours = []
+            for hour in sorted({h for (w, h) in buckets if w == weekday}):
+                arrivals = buckets[(weekday, hour)] / count[weekday]
+                needed = capacity.windows_needed(arrivals, service, limit) if arrivals > 0 else 0
+                hours.append(WeekdayHour(hour=hour, arrivals_per_hour=round(arrivals, 1), windows_needed=needed))
+            if hours:
+                needs.append(
+                    WeekdayNeed(
+                        weekday=weekday,
+                        label=WEEKDAY_NAMES[weekday],
+                        days=count[weekday],
+                        group=name,
+                        hours=hours,
+                        window_hours=sum(h.windows_needed for h in hours),
+                    )
+                )
+    return needs

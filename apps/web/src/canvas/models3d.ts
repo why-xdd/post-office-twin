@@ -34,6 +34,7 @@ const MODEL_TYPES = new Set([
   'potted_plant',
   'fitting_room',
   'camera',
+  'fire_extinguisher',
 ]);
 
 interface Template {

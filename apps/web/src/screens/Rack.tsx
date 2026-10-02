@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Mark } from '../components/Mark';
 import { PlanThumb } from '../components/PlanThumb';
 import { ServerBadge } from '../components/ServerBadge';
+import { Account } from '../components/Account';
 import { ApiError, api, type PlanSummary } from '../lib/api';
 import type { Plan, ValidationReport } from '../lib/plan';
 import { formatNumber, planArea, plural } from '../lib/planFacts';
@@ -154,7 +155,13 @@ export function Rack() {
           <Mark />
           <span>План ОПС</span>
         </a>
-        <ServerBadge state={server.state} onRetry={server.retry} />
+        <span className="rail__end">
+          <a className="rail__link" href="#/network">
+            Сеть отделений
+          </a>
+          <ServerBadge state={server.state} onRetry={server.retry} />
+          <Account />
+        </span>
       </header>
 
       <main className="cabinet on-steel">

@@ -23,7 +23,17 @@ export type Tool = 'select' | 'zone' | 'wall' | 'outline' | 'equipment';
 /** Обзор — простой показ нарушений и исправления; редактор и эксплуатация — полные режимы. */
 export type Mode = 'review' | 'design' | 'operate';
 export type ViewKind = '2d' | '3d';
-export type SidePanel = 'review' | 'properties' | 'checks' | 'assistant' | 'inventory' | 'passport' | 'camera' | 'peak';
+export type SidePanel =
+  | 'review'
+  | 'properties'
+  | 'checks'
+  | 'assistant'
+  | 'inventory'
+  | 'passport'
+  | 'camera'
+  | 'peak'
+  | 'today'
+  | 'incidents';
 
 export interface Change {
   op: 'add' | 'move' | 'remove';
@@ -100,6 +110,8 @@ interface WorkspaceState {
   undo: () => void;
   redo: () => void;
   markSaved: (planId: string, version: number) => void;
+  /** Версия, сохранённая сервером (например, отметка осмотра): режим и выбор не меняются. */
+  adoptSaved: (version: number, doc: Plan) => void;
   /** Открыть прежнюю версию как правку текущей: её можно отменить и сохранить как новую. */
   restoreVersion: (doc: Plan) => void;
 
@@ -125,6 +137,9 @@ interface WorkspaceState {
   removeSelection: () => void;
   applyChanges: (changes: Change[]) => void;
 }
+
+/** Вкладки, которых нет в «Редакторе»: при переходе туда открывается «Проверка». */
+const OPERATE_ONLY: SidePanel[] = ['passport', 'review', 'today', 'incidents', 'peak', 'camera'];
 
 export const useWorkspace = create<WorkspaceState>((set, get) => ({
   planId: null,
@@ -177,6 +192,9 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       heatmap: null,
       peak: null,
     }),
+
+  adoptSaved: (version, doc) =>
+    set({ version, doc: clone(doc), savedSnapshot: JSON.stringify(doc), past: [], future: [], transientBase: null, report: null, reportState: 'idle' }),
 
   close: () => set({ doc: null, planId: null, title: '', past: [], future: [], preview: null }),
 
@@ -271,8 +289,8 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
         mode === 'review'
           ? 'review'
           : mode === 'operate'
-            ? 'passport'
-            : state.panel === 'passport' || state.panel === 'review'
+            ? 'today'
+            : OPERATE_ONLY.includes(state.panel)
               ? 'checks'
               : state.panel,
     })),

@@ -42,7 +42,6 @@ import type {
 } from '../lib/plan';
 import { formatNumber, plural } from '../lib/planFacts';
 import { useWorkspace } from '../state/store';
-import { QueueLog } from './QueueLog';
 import './assistant.css';
 
 interface AssistantProps {
@@ -139,7 +138,7 @@ export function Assistant({ book, types, onFocusObject, onNotice }: AssistantPro
   const runCommand = () => {
     const text = command.trim();
     if (!text) return;
-    void run('command', () => api.command(doc!, text), (result) => {
+    void run('command', () => api.command(doc!, text, useWorkspace.getState().planId), (result) => {
       setCommandResult(result);
       // Рекомендации команды показываются тем же списком: у них та же карточка и то же «Принять».
       // Если фраза была вопросом, списка нет вовсе: пустой список читался бы как «всё в порядке».
@@ -407,8 +406,6 @@ export function Assistant({ book, types, onFocusObject, onNotice }: AssistantPro
             </div>
           )}
         </section>
-
-        {doc && <QueueLog doc={doc} />}
 
         <section className="assistant__section">
           <header className="assistant__section-head">

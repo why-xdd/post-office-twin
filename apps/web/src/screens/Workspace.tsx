@@ -20,6 +20,7 @@ import {
   CircleHelp,
   Ellipsis,
   FileJson,
+  FileText,
   IdCard,
   ImageDown,
   Keyboard,
@@ -32,6 +33,8 @@ import {
   SlidersHorizontal,
   Sparkles,
   Undo2,
+  OctagonAlert,
+  Sun,
   Users,
   Video,
   Wand2,
@@ -55,7 +58,7 @@ import { MoreMenu } from '../components/MoreMenu';
 import { ADDRESS_KIND_LABEL, ADDRESS_PREFIX, buildAddressBook, parseAddress, type AddressKind } from '../lib/addresses';
 import { ApiError, api, type PlanVersion } from '../lib/api';
 import type { View } from '../lib/geometry';
-import type { EquipmentTypeInfo, Point, Rule, ZoneTypeInfo } from '../lib/plan';
+import type { EquipmentTypeInfo, Plan, Point, Rule, ZoneTypeInfo } from '../lib/plan';
 import { formatNumber, planArea, plural } from '../lib/planFacts';
 import { plainFinding, sortFindings } from '../lib/plainFindings';
 import { transformInPlace, withTransform } from '../lib/equipmentOps';
@@ -71,6 +74,11 @@ import { Library } from '../panels/Library';
 import { Camera } from '../panels/Camera';
 import { Passport } from '../panels/Passport';
 import { Peak } from '../panels/Peak';
+import { Incidents } from '../panels/Incidents';
+import { Today } from '../panels/Today';
+import { Compare } from '../panels/Compare';
+import { Account } from '../components/Account';
+import { outOfService, isOpen, useIncidents, useIncidentsFeed } from '../state/incidents';
 import { Properties } from '../panels/Properties';
 import { Review } from '../panels/Review';
 import { isDirty, useWorkspace, type Mode, type SidePanel, type ViewKind } from '../state/store';
@@ -166,6 +174,8 @@ const DOCK_ICONS: Record<SidePanel, ReactNode> = {
   passport: <IdCard size={18} aria-hidden="true" />,
   camera: <Video size={18} aria-hidden="true" />,
   peak: <Users size={18} aria-hidden="true" />,
+  today: <Sun size={18} aria-hidden="true" />,
+  incidents: <OctagonAlert size={18} aria-hidden="true" />,
 };
 
 const MODES: { id: Mode; label: string; hint: string }[] = [
@@ -183,6 +193,9 @@ export function Workspace({ planId }: WorkspaceProps) {
   const panel = useWorkspace((s) => s.panel);
   const report = useWorkspace((s) => s.report);
   const selection = useWorkspace((s) => s.selection);
+  const incidentItems = useIncidents((s) => s.items);
+  const [comparing, setComparing] = useState<{ doc: Plan; label: string } | null>(null);
+  useIncidentsFeed(planId);
   const past = useWorkspace((s) => s.past);
   const future = useWorkspace((s) => s.future);
   const dirty = useWorkspace(isDirty);
@@ -649,7 +662,8 @@ export function Workspace({ planId }: WorkspaceProps) {
     // Выбор на плане открывает свойства: иначе щелчок по объекту ничего не показывает.
     // Ассистент и инвентаризация остаются: там выбор — часть их собственного сценария.
     if (selection && mode === 'design' && panel !== 'assistant' && panel !== 'inventory') setPanel('properties');
-    if (selection?.kind === 'equipment' && mode === 'operate') setPanel('passport');
+    // «Сегодня» и «Обращения» сами показывают объект на плане — паспорт их не подменяет.
+    if (selection?.kind === 'equipment' && mode === 'operate' && panel !== 'today' && panel !== 'incidents') setPanel('passport');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selection?.id]);
 
@@ -696,6 +710,8 @@ export function Workspace({ planId }: WorkspaceProps) {
             : selection?.kind === 'wall'
               ? 'Тяните синюю ручку, чтобы сдвинуть стену. Двойной щелчок по стене — дверь или окно'
               : null;
+  const openIncidents = incidentItems.filter(isOpen).length;
+  const brokenIds = outOfService(incidentItems);
   const tabs: { id: SidePanel; label: string; count?: number; tone?: 'signal' }[] =
     review
       ? []
@@ -707,13 +723,19 @@ export function Workspace({ planId }: WorkspaceProps) {
           { id: 'inventory', label: 'Инвентарь' },
         ]
       : [
+          { id: 'today', label: 'Сегодня' },
+          { id: 'incidents', label: 'Обращения', count: openIncidents || undefined, tone: openIncidents ? 'signal' : undefined },
           { id: 'passport', label: 'Паспорт' },
           { id: 'inventory', label: 'Инвентарь' },
-          { id: 'peak', label: 'Пик' },
+          { id: 'peak', label: 'Очередь' },
           { id: 'camera', label: 'Камера' },
         ];
 
   const area = planArea(doc);
+  const pickObject = (id: string) => {
+    select({ kind: 'equipment', id });
+    focusObject(id);
+  };
 
   const peek = review && activeFinding !== null ? report?.findings[activeFinding] : undefined;
 
@@ -764,6 +786,23 @@ export function Workspace({ planId }: WorkspaceProps) {
                       {new Date(item.created_at).toLocaleString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}
                       {item.note ? ` · ${item.note}` : ''}
                     </span>
+                    <button
+                      type="button"
+                      className="versions__compare"
+                      onClick={async () => {
+                        if (!planId) return;
+                        try {
+                          const document = await api.getPlan(planId, item.version);
+                          setComparing({ doc: document, label: `Версия ${item.version}` });
+                          setVersionsOpen(false);
+                        } catch {
+                          setNotice('Не удалось открыть версию: сервер не ответил');
+                        }
+                      }}
+                      title="Сравнить с тем, что на плане сейчас, и посчитать смету"
+                    >
+                      Сравнить
+                    </button>
                     {item.version === version ? (
                       <span className="versions__current">открыта</span>
                     ) : (
@@ -940,6 +979,19 @@ export function Workspace({ planId }: WorkspaceProps) {
                           setNotice('Чертёж сохранён файлом SVG в загрузки');
                         },
                       },
+                      ...(planId
+                        ? [
+                            {
+                              icon: <FileText size={16} aria-hidden="true" />,
+                              label: 'Отчёт для печати',
+                              note: 'A4',
+                              run: () => {
+                                if (dirty) setNotice('В отчёт попадёт последняя сохранённая версия');
+                                navigate({ name: 'report', id: planId });
+                              },
+                            },
+                          ]
+                        : []),
                       {
                         icon: <CircleHelp size={16} aria-hidden="true" />,
                         label: 'Как пользоваться',
@@ -962,6 +1014,7 @@ export function Workspace({ planId }: WorkspaceProps) {
               </div>
             </>
           )}
+          <Account />
           {/* Сохранённое состояние — тихая строка, а не кнопка: действие появляется, когда есть что сохранять. */}
           <button
             type="button"
@@ -1142,6 +1195,9 @@ export function Workspace({ planId }: WorkspaceProps) {
             </button>
           </div>
         )}
+        {comparing && doc && (
+          <Compare before={comparing.doc} after={doc} beforeLabel={comparing.label} onClose={() => setComparing(null)} />
+        )}
         {leaving && (
           <div className="ws-confirm" role="alertdialog" aria-label="Несохранённые изменения">
             <p>Изменения не сохранены. Уйти к списку планов?</p>
@@ -1195,7 +1251,11 @@ export function Workspace({ planId }: WorkspaceProps) {
           {panel === 'inventory' && <Inventory book={book} types={typeMap} onFocusObject={focusObject} />}
           {panel === 'passport' && <Passport book={book} types={typeMap} />}
           {panel === 'camera' && <Camera />}
-          {panel === 'peak' && <Peak types={typeMap} />}
+          {panel === 'peak' && <Peak types={typeMap} reportedBroken={brokenIds} />}
+          {panel === 'today' && (
+            <Today onFocusObject={pickObject} onOpenPanel={setPanel} onReview={() => setMode('review')} />
+          )}
+          {panel === 'incidents' && <Incidents onFocusObject={pickObject} />}
         </div>
       </aside>
 

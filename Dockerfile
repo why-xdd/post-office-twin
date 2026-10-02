@@ -28,6 +28,7 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY services/api/app ./app
 COPY --from=web /web/dist ./web
 COPY data/demo_plan.json ./samples/demo_plan.json
+COPY data/network ./samples/network
 
 ENV PATH="/app/.venv/bin:$PATH" \
     OPS_TWIN_DB=/app/storage/plans.sqlite \

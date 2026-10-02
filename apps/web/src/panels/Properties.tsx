@@ -409,6 +409,36 @@ function PlanProperties({ doc }: { doc: Plan }) {
           value={doc.flow_hints?.typical_visit_duration_min}
           onCommit={(v) => setFlow({ typical_visit_duration_min: v ?? undefined })}
         />
+        <NumberField
+          label="Цель ожидания"
+          unit="мин"
+          step={1}
+          min={1}
+          max={60}
+          allowEmpty
+          value={doc.ops.target_wait_min}
+          hint="По умолчанию 10 — цель Почты для загруженных отделений"
+          onCommit={(v) => setOps({ target_wait_min: v ?? undefined })}
+        />
+        <NumberField
+          label="Входящих посылок в день"
+          unit="шт."
+          step={10}
+          min={0}
+          allowEmpty
+          value={doc.ops.parcels_in_per_day}
+          hint="Для ёмкости кладовой по ВНТП 311-98 п. 3.10"
+          onCommit={(v) => setOps({ parcels_in_per_day: v ?? undefined })}
+        />
+        <NumberField
+          label="Исходящих посылок в день"
+          unit="шт."
+          step={10}
+          min={0}
+          allowEmpty
+          value={doc.ops.parcels_out_per_day}
+          onCommit={(v) => setOps({ parcels_out_per_day: v ?? undefined })}
+        />
       </div>
     </div>
   );

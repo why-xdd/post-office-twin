@@ -53,6 +53,28 @@ const WORDING: Record<string, Wording> = {
     title: 'Тесный проход между объектами',
     impact: 'Двоим не разойтись, а при эвакуации здесь образуется затор.',
   },
+  parcel_storage_capacity: {
+    title: 'Посылкам не хватает места',
+    impact: 'Посылки будут лежать в проходах и на полу — это и неудобно, и нарушение путей эвакуации.',
+    measure: (m, r) => `${m} мест при норме ${r}`,
+  },
+  evacuation_path_width: {
+    title: 'Узкий путь эвакуации',
+    impact: 'При пожаре людям из этой части зала не выйти наружу быстро и без давки.',
+  },
+  vestibule_storage: {
+    title: 'Хранение в тамбуре выхода',
+    impact: 'Тамбур — путь эвакуации; стеллаж в нём запрещён правилами противопожарного режима.',
+  },
+  fire_extinguishers: {
+    title: 'Огнетушители',
+    impact: (severity) =>
+      severity === 'error'
+        ? 'До огнетушителя слишком далеко: начальный пожар не успеть потушить.'
+        : 'Огнетушители не отмечены на плане — проверить их число и расстояние нельзя.',
+    measure: (m, r, unit, severity) =>
+      severity === 'error' ? `${m} ${unit} пути при норме не более ${r} ${unit}` : `${m} при норме не менее ${r}`,
+  },
   no_overlaps: {
     title: 'Объекты стоят друг на друге',
     impact: 'Так расставить оборудование в зале невозможно.',
@@ -179,6 +201,8 @@ const RULE_ORDER = [
   'wheelchair_turning_circle',
   'door_maneuver_space',
   'doors_not_blocked',
+  'evacuation_path_width',
+  'vestibule_storage',
   'counter_front_width',
   'counter_height',
   'ramp_width',
@@ -188,6 +212,8 @@ const RULE_ORDER = [
   'client_area_per_workplace',
   'queue_terminal_near_entrance',
   'coverage_per_service_window',
+  'fire_extinguishers',
+  'parcel_storage_capacity',
   'no_overlaps',
   'objects_inside_outline',
   'unique_ids',

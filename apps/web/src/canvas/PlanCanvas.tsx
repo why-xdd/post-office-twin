@@ -46,6 +46,7 @@ import {
 } from '../lib/room';
 import { zoneLabelPoints } from '../lib/zoneLabels';
 import { inspectionState } from '../lib/inspections';
+import { isOpen, useIncidents } from '../state/incidents';
 import { narrowestGap, type Gap } from '../lib/gap';
 import { useWorkspace, type Selection } from '../state/store';
 import { glyphFor } from './glyphs';
@@ -147,6 +148,15 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
   const preview = useWorkspace((s) => s.preview);
   const latched = useWorkspace((s) => s.latched);
   const mode = useWorkspace((s) => s.mode);
+  const incidents = useIncidents((s) => s.items);
+  // Объект с открытым обращением: true — отмечен «не работает».
+  const troubled = useMemo(() => {
+    const map = new Map<string, boolean>();
+    for (const incident of incidents) {
+      if (isOpen(incident)) map.set(incident.object_id, (map.get(incident.object_id) ?? false) || incident.out_of_service);
+    }
+    return map;
+  }, [incidents]);
   const report = useWorkspace((s) => s.report);
   const reportState = useWorkspace((s) => s.reportState);
   const setPanel = useWorkspace((s) => s.setPanel);
@@ -1073,6 +1083,15 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
                   className="plan-equipment__glyph"
                   aria-hidden="true"
                 />
+              )}
+              {mode === 'operate' && troubled.has(item.id) && (
+                <g className={`plan-incident${troubled.get(item.id) ? ' plan-incident--down' : ''}`}>
+                  <circle cx={Math.min(...xs)} cy={Math.min(...ys)} r={7} />
+                  <text x={Math.min(...xs)} y={Math.min(...ys)} dy="0.35em" textAnchor="middle">
+                    !
+                  </text>
+                  <title>{troubled.get(item.id) ? 'Не работает — есть обращение' : 'Есть открытое обращение'}</title>
+                </g>
               )}
               {due && (due.tone === 'overdue' || due.tone === 'soon') && (
                 <circle cx={Math.max(...xs)} cy={Math.max(...ys)} r={5} className={`plan-due plan-due--${due.tone}`}>

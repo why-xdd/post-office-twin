@@ -1,0 +1,183 @@
+/* Вход сотрудника: кнопка на рейке и лист под ней — тот же бланк, что у «Клавиш» */
+.account {
+  position: relative;
+}
+
+.account__button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  max-width: 190px;
+  padding: 0 var(--s-2);
+  border: 0;
+  border-radius: var(--radius-plate);
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  font-size: var(--text-13);
+  cursor: pointer;
+}
+
+.account--steel .account__button {
+  color: var(--on-steel);
+  box-shadow: inset 0 0 0 1px rgba(236, 232, 220, 0.22);
+}
+
+.account--steel .account__button:hover {
+  background: rgba(236, 232, 220, 0.08);
+}
+
+.account--label .account__button {
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--label-edge);
+}
+
+.account--label .account__button:hover {
+  background: var(--label-strong);
+}
+
+.account__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account__sheet {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  width: min(330px, calc(100vw - 32px));
+  padding: var(--s-4);
+  border-radius: var(--radius-plate);
+  color: var(--ink);
+  background: var(--label);
+  box-shadow: var(--lift-shadow);
+  animation: notice-in var(--dur-base) var(--ease-drawer) both;
+}
+
+.account__title {
+  font-size: var(--text-14);
+  font-weight: 660;
+}
+
+.account__role {
+  margin-top: -6px;
+  color: var(--ink-2);
+  font-size: var(--text-13);
+}
+
+.account__note {
+  color: var(--ink-3);
+  font-size: var(--text-12);
+  line-height: 1.45;
+}
+
+.account__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+
+.account__form label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: var(--text-12);
+  color: var(--ink-2);
+}
+
+.account__form input {
+  min-height: 34px;
+  padding: 0 var(--s-2);
+  border: 0;
+  border-radius: var(--radius-plate);
+  color: var(--ink);
+  background: var(--sheet);
+  box-shadow: inset 0 0 0 1px var(--label-edge);
+  font: inherit;
+  font-size: var(--text-14);
+}
+
+.account__form input:focus-visible {
+  outline: 2px solid var(--notice);
+  outline-offset: 1px;
+}
+
+.account__wide {
+  justify-content: center;
+  width: 100%;
+}
+
+.account__error {
+  color: var(--signal);
+  font-size: var(--text-12);
+}
+
+.account__demo {
+  padding-top: var(--s-2);
+  border-top: 1px dashed var(--label-edge);
+}
+
+.account__demo-title {
+  margin-bottom: 6px;
+  color: var(--ink-2);
+  font-size: var(--text-12);
+  font-weight: 640;
+}
+
+.account__demo ul {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.account__demo button {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  width: 100%;
+  padding: 6px var(--s-2);
+  border: 0;
+  border-radius: var(--radius-plate);
+  color: var(--ink);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--label-edge);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.account__demo button:hover {
+  background: var(--label-strong);
+}
+
+.account__demo b {
+  font-size: var(--text-13);
+  font-weight: 640;
+}
+
+.account__demo span {
+  grid-column: 1;
+  color: var(--ink-3);
+  font-size: var(--text-12);
+}
+
+.account__demo button svg {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  align-self: center;
+}
+
+@media (pointer: coarse) {
+  .account__button,
+  .account__demo button {
+    min-height: 44px;
+  }
+}

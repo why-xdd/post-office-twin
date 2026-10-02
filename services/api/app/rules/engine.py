@@ -13,6 +13,8 @@ from shapely.geometry import box
 
 from app.dictionaries import equipment_types, zone_types
 from app.geometry import core, passability
+from app.assistant import storage as parcel_storage
+from app.rules import evacuation
 from app.models import Plan
 from app.rules.catalog import (
     CORRESPONDENCE_WORKPLACE_SQM,
@@ -414,6 +416,99 @@ def _check_workplace_area(plan: Plan, rule: Rule) -> list[Finding]:
     ]
 
 
+def _check_evacuation(plan: Plan, rule: Rule) -> list[Finding]:
+    """Ширина путей эвакуации по СП 1.13130.2020 п. 4.3.3."""
+    findings = []
+    for neck in evacuation.bottlenecks(plan):
+        if neck.measured_m <= 0.01:
+            how = "пути к выходу нет совсем: проход перекрыт оборудованием"
+        else:
+            how = f"путь к выходу сужается до {neck.measured_m:g} м"
+        cause = f" Сужение создают: {', '.join(f'«{c}»' for c in neck.culprits)}." if neck.culprits else ""
+        message = (
+            f"Из зоны «{neck.zone_label}» {how} при норме {neck.required_m:g} м.{cause}"
+        )
+        findings.append(_finding(rule, message, neck.culprits or [neck.zone_id], neck.measured_m, required=neck.required_m))
+    return findings
+
+
+STORAGE_TYPES = ("storage_rack", "goods_rack")
+
+
+def _check_vestibule_storage(plan: Plan, rule: Rule) -> list[Finding]:
+    """Стеллажи и шкафы в тамбуре выхода (ППР п. 27 «в»)."""
+    vestibules = core.zone_by_type(plan, "vestibule")
+    if not vestibules:
+        return []
+    findings = []
+    for item in plan.equipment:
+        if item.type not in STORAGE_TYPES:
+            continue
+        shape = core.equipment_polygon(item)
+        zone = next((z for z in vestibules if core.zone_polygon(z).intersection(shape).area > 0.05), None)
+        if zone is not None:
+            findings.append(
+                _finding(
+                    rule,
+                    f"«{item.label or item.id}» стоит в тамбуре «{zone.label or zone.id}»: хранить там "
+                    f"инвентарь и материалы запрещено.",
+                    [item.id],
+                    None,
+                )
+            )
+    return findings
+
+
+def _check_extinguishers(plan: Plan, rule: Rule) -> list[Finding]:
+    """Число огнетушителей (ППР п. 400) и путь до ближайшего (п. 406)."""
+    placed = [e for e in plan.equipment if e.type == evacuation.EXTINGUISHER_TYPE]
+    findings = []
+    if len(placed) < evacuation.EXTINGUISHER_MIN_COUNT:
+        findings.append(
+            _finding(
+                rule,
+                f"На плане {len(placed)} огнетушител{'ь' if len(placed) == 1 else 'ей'}, а в общественном здании "
+                f"на этаже нужно не менее {evacuation.EXTINGUISHER_MIN_COUNT} (п. 400). Если они есть в "
+                f"отделении, отметьте их на плане — тогда сервис проверит и расстояние до них.",
+                [e.id for e in placed],
+                float(len(placed)),
+                required=float(evacuation.EXTINGUISHER_MIN_COUNT),
+            )
+        )
+    reach = evacuation.extinguisher_reach(plan)
+    if reach is not None and reach[0] > (rule.value or evacuation.EXTINGUISHER_REACH_M):
+        findings.append(
+            _finding(
+                rule,
+                f"От точки X {reach[1][0]:g} · Y {reach[1][1]:g} м до ближайшего огнетушителя {reach[0]:g} м "
+                f"пути при норме не более {rule.value:g} м (п. 406).",
+                [e.id for e in placed],
+                reach[0],
+                severity=Severity.ERROR,
+            )
+        )
+    return findings
+
+
+def _check_parcel_storage(plan: Plan, rule: Rule) -> list[Finding]:
+    """Хватит ли мест для посылок (ВНТП 311-98 п. 3.10). Без объёмов в паспорте не применяется."""
+    report = parcel_storage.analyze(plan)
+    if not report.available or report.enough or report.required is None:
+        return []
+    return [
+        _finding(
+            rule,
+            f"Мест для посылок {report.places} при норме {report.required}: 200 % от "
+            f"{report.incoming_per_day:g} входящих в день"
+            + (f" и 60 % от {report.outgoing_per_day:g} исходящих" if report.outgoing_per_day else "")
+            + ".",
+            [i.id for i in report.items],
+            float(report.places),
+            required=float(report.required),
+        )
+    ]
+
+
 CHECKS = {
     "passage_between_workplaces": _check_passages,
     "clearance_from_wall": _check_wall_clearance,
@@ -426,6 +521,10 @@ CHECKS = {
     "counter_front_width": _check_counter_front,
     "door_maneuver_space": _check_door_maneuver,
     "workplace_area": _check_workplace_area,
+    "evacuation_path_width": _check_evacuation,
+    "vestibule_storage": _check_vestibule_storage,
+    "fire_extinguishers": _check_extinguishers,
+    "parcel_storage_capacity": _check_parcel_storage,
 }
 
 SKIP_REASONS = {

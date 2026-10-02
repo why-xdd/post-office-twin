@@ -54,6 +54,13 @@ class OpsMeta(Base):
     peak_to_average: float | None = Field(
         default=None, ge=1, description="Во сколько раз поток в час пик выше среднего за день"
     )
+    target_wait_min: float | None = Field(
+        default=None,
+        gt=0,
+        le=60,
+        description="Целевое среднее ожидание в час пик, мин. По умолчанию 10 — цель Почты России "
+        "для загруженных отделений",
+    )
     service_time_min: float | None = Field(
         default=None, gt=0, description="Среднее время обслуживания у окна, если нет в карточках"
     )

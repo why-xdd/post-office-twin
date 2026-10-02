@@ -26,7 +26,10 @@ DEFAULT_SERVICE_SOURCE = (
     "карточка оператора АРМ OPS115534-W01 в демо-плане заказчика «ОПС_115534_демо_плана»: "
     "«Ср. время обслуживания 2,5 мин»"
 )
-MAX_ACCEPTABLE_WAIT_MIN = 5.0
+# Цель Почты России — ожидание не больше 10 минут в загруженных отделениях. Отделение может
+# задать свою цель в паспорте (ops.target_wait_min).
+MAX_ACCEPTABLE_WAIT_MIN = 10.0
+TARGET_WAIT_SOURCE = "цель Почты России для загруженных отделений (заявление руководства, 2019)"
 SENSITIVITY_MINUTES = (1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0, 6.0, 7.0, 8.0)
 STANDING_SQM_PER_PERSON = 0.5
 QUEUE_QUANTILE = 0.95
@@ -48,11 +51,11 @@ class QueueGroup(BaseModel):
     mean_wait_min: float | None = None
     mean_queue: float | None = None
     queue_p95: int | None = Field(default=None, description="Длина очереди, не превышаемая в 95% времени")
-    windows_needed: int = Field(description="Минимум окон, при котором среднее ожидание ≤ 5 мин")
+    windows_needed: int = Field(description="Минимум окон, при котором среднее ожидание не выше целевого")
     service_threshold_min: float | None = Field(
         default=None,
         description="Наибольшее среднее время обслуживания, при котором текущие окна держат "
-        "ожидание в пределах 5 мин",
+        "ожидание в пределах целевого",
     )
     reserve_percent: float | None = Field(
         default=None, description="Запас по времени обслуживания относительно текущего, %"
@@ -71,6 +74,7 @@ class CapacityReport(BaseModel):
     waiting_capacity_persons: int | None = None
     peak_queue_persons: int | None = None
     fits_waiting_area: bool | None = None
+    target_wait_min: float = MAX_ACCEPTABLE_WAIT_MIN
     assumptions: list[str] = Field(default_factory=list)
 
 
@@ -217,13 +221,15 @@ def analyze(plan: Plan) -> CapacityReport:
 
     hours = plan.ops.working_hours or DEFAULT_WORKING_HOURS
     peak_factor = plan.ops.peak_to_average or PEAK_TO_AVERAGE
+    target = plan.ops.target_wait_min or MAX_ACCEPTABLE_WAIT_MIN
     assumptions: list[str] = [
         f"Отделение работает {hours:g} ч в день"
         + ("." if plan.ops.working_hours else " (допущение, задаётся в паспорте отделения)."),
         f"Поток в часы пик в {peak_factor:g} раза выше среднего за день"
         + ("." if plan.ops.peak_to_average else " (допущение, задаётся в паспорте отделения)."),
         "Посетители приходят независимо, время обслуживания случайно (модель M/M/c, формула "
-        "Эрланга C). Допустимым считается среднее ожидание не более 5 мин.",
+        f"Эрланга C). Цель — среднее ожидание не более {target:g} мин"
+        + (" (задана в паспорте отделения)." if plan.ops.target_wait_min else f": {TARGET_WAIT_SOURCE}."),
     ]
     average = hints.avg_daily_visitors / hours
     peak = average * peak_factor
@@ -241,7 +247,7 @@ def analyze(plan: Plan) -> CapacityReport:
         arrivals = peak * share
         service = _service_minutes(plan, types, assumptions)
         result = _queue(len(windows), arrivals, service)
-        threshold = service_threshold(len(windows), arrivals)
+        threshold = service_threshold(len(windows), arrivals, target)
         series = []
         for minutes in SENSITIVITY_MINUTES:
             point = _queue(len(windows), arrivals, minutes)
@@ -265,7 +271,7 @@ def analyze(plan: Plan) -> CapacityReport:
                 mean_wait_min=_round(result.get("mean_wait_min"), 1),
                 mean_queue=_round(result.get("mean_queue"), 1),
                 queue_p95=result.get("queue_p95"),  # type: ignore[arg-type]
-                windows_needed=windows_needed(arrivals, service),
+                windows_needed=windows_needed(arrivals, service, target),
                 service_threshold_min=threshold,
                 reserve_percent=None
                 if threshold is None
@@ -287,6 +293,7 @@ def analyze(plan: Plan) -> CapacityReport:
         waiting_capacity_persons=capacity,
         peak_queue_persons=peak_queue,
         fits_waiting_area=None if capacity is None or peak_queue is None else peak_queue <= capacity,
+        target_wait_min=target,
         assumptions=list(dict.fromkeys(assumptions)),
     )
 

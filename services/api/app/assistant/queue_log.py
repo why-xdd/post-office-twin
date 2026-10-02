@@ -9,7 +9,7 @@
   ожидание тогда считается моделью M/M/c.
 
 Для каждого часа сравнивается фактическое ожидание с тем, что даёт модель при окнах с плана, и
-считается, сколько окон нужно, чтобы среднее ожидание не превышало 5 минут. Из этого получается
+считается, сколько окон нужно, чтобы среднее ожидание не превышало целевого (10 минут). Из этого получается
 расписание: в какие часы окон не хватает, а в какие можно открыть меньше.
 """
 
@@ -67,7 +67,7 @@ class GroupHours(BaseModel):
     service_source: str
     hours: list[HourStat]
     share_waited_over_limit: float | None = Field(
-        default=None, description="Доля посетителей, ждавших дольше 5 минут (только по журналу)"
+        default=None, description="Доля посетителей, ждавших дольше целевого ожидания (только по журналу)"
     )
     staff_hours_needed: int = Field(description="Окно-часов в день по расчёту")
     staff_hours_open: float | None = Field(default=None, description="Окно-часов в день по журналу")
@@ -241,12 +241,14 @@ def _peaks(totals: dict[int, float]) -> list[str]:
 
 
 def analyze(plan: Plan, source: str, records: list[dict], skipped: int = 0) -> QueueLogReport:
+    # Цель ожидания — из паспорта отделения, иначе цель Почты (10 мин).
+    limit = plan.ops.target_wait_min or MAX_WAIT_MIN
     days = sorted({r["day"] for r in records})
     day_count = max(len(days), 1)
     assumptions = [
         f"Поток за час усреднён по {day_count} {'дню' if day_count == 1 else 'дням'} данных.",
         "Модель M/M/c: посетители приходят независимо, обслуживание случайной длительности, "
-        f"допустимым считается среднее ожидание не более {MAX_WAIT_MIN:g} мин.",
+        f"допустимым считается среднее ожидание не более {limit:g} мин.",
     ]
     if UNDATED in days:
         assumptions.append("В файле нет дат: записи без даты считаются одним днём.")
@@ -312,7 +314,7 @@ def analyze(plan: Plan, source: str, records: list[dict], skipped: int = 0) -> Q
             totals[hour] += arrivals
             waits = [r["wait"] for r in bucket if "wait" in r]
             model = capacity._queue(windows, arrivals, service) if arrivals > 0 else {"stable": True, "mean_wait_min": 0.0}
-            needed = capacity.windows_needed(arrivals, service) if arrivals > 0 else 0
+            needed = capacity.windows_needed(arrivals, service, limit) if arrivals > 0 else 0
             needed_total += needed
             windows_open = None
             if has_windows:
@@ -348,7 +350,7 @@ def analyze(plan: Plan, source: str, records: list[dict], skipped: int = 0) -> Q
                 service_min=round(service, 2),
                 service_source=service_source,
                 hours=hours,
-                share_waited_over_limit=round(sum(w > MAX_WAIT_MIN for w in all_waits) / len(all_waits), 3)
+                share_waited_over_limit=round(sum(w > limit for w in all_waits) / len(all_waits), 3)
                 if all_waits
                 else None,
                 staff_hours_needed=needed_total,
@@ -368,15 +370,15 @@ def analyze(plan: Plan, source: str, records: list[dict], skipped: int = 0) -> Q
             summary.append(
                 f"{group.name}: {when} нужно {_windows(worst.windows_needed)}, на плане "
                 f"{group.windows_on_plan} — без дополнительного окна ожидание в эти часы превышает "
-                f"{MAX_WAIT_MIN:g} мин."
+                f"{limit:g} мин."
             )
         else:
             summary.append(f"{group.name}: {_windows(group.windows_on_plan)} на плане хватает в каждый час данных.")
         if group.share_waited_over_limit == 0:
-            summary.append(f"{group.name}: по журналу никто не ждал дольше {MAX_WAIT_MIN:g} мин.")
+            summary.append(f"{group.name}: по журналу никто не ждал дольше {limit:g} мин.")
         elif group.share_waited_over_limit is not None:
             summary.append(
-                f"{group.name}: по журналу дольше {MAX_WAIT_MIN:g} мин ждали "
+                f"{group.name}: по журналу дольше {limit:g} мин ждали "
                 f"{group.share_waited_over_limit:.0%} посетителей."
             )
         if group.staff_hours_open is not None:

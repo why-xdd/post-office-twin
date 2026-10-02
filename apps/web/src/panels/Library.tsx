@@ -148,7 +148,12 @@ export function Library({ book, types, zoneTypes, layers, onLayers, onNotice, on
           )}
 
           <div className="library__groups">
-            {groups.length === 0 && <p className="library__empty">Ничего не найдено. Проверьте написание.</p>}
+            {groups.length === 0 && (
+              <p className="library__empty">
+                В перечне такого нет. Проверьте написание или добавьте его кнопкой «Свой предмет» — он
+                появится в библиотеке этого плана.
+              </p>
+            )}
             {groups.map(([group, list]) => (
               <section key={group} className="library__group">
                 <h3>

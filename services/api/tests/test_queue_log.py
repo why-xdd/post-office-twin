@@ -51,7 +51,16 @@ def test_model_agrees_with_measured_wait(report: queue_log.QueueLogReport) -> No
                 assert abs(hour.model_wait_min - hour.measured_wait_min) < 4.5
 
 
-def test_parcel_desk_is_short_in_the_evening_peak(report: queue_log.QueueLogReport) -> None:
+def test_parcel_desk_meets_the_post_target_of_ten_minutes(report: queue_log.QueueLogReport) -> None:
+    """При цели Почты в 10 минут одного окна выдачи в журнале-примере хватает."""
+    parcels = next(g for g in report.groups if g.name == "Выдача посылок")
+    assert not any(h.short for h in parcels.hours)
+
+
+def test_parcel_desk_is_short_in_the_evening_peak(plan: Plan) -> None:
+    """Отделение со строгой целью 5 минут: вечером окну выдачи нужен напарник."""
+    strict = plan.model_copy(update={"ops": plan.ops.model_copy(update={"target_wait_min": 5.0})})
+    report = queue_log.analyze(strict, *queue_log.read(LOG.read_text(encoding="utf-8")))
     parcels = next(g for g in report.groups if g.name == "Выдача посылок")
     assert parcels.windows_on_plan == 1
     assert any(h.short and h.windows_needed == 2 for h in parcels.hours)

@@ -74,15 +74,22 @@ def facts(plan: Plan, fixes_only: bool = True) -> dict[str, Any]:
             "нарушений": after.errors,
             "предупреждений": after.warnings,
             "проход_от_входа_м": after.entrance_width_m,
+            "узкое_место_м": after.narrowest_route_m,
             "путь_до_окон_м": after.walk_m,
             "мест_ожидания": after.waiting_capacity,
         },
         "до_исправления": {
             "проход_от_входа_м": before.entrance_width_m,
+            "узкое_место_м": before.narrowest_route_m,
             "путь_до_окон_м": before.walk_m,
             "мест_ожидания": before.waiting_capacity,
         },
     }
+
+
+def _num(value: float) -> str:
+    """Число для текста: до двух знаков, запятая, без хвостовых нулей."""
+    return f"{value:.2f}".rstrip("0").rstrip(".").replace(".", ",")
 
 
 def from_template(data: dict[str, Any]) -> str:
@@ -91,8 +98,11 @@ def from_template(data: dict[str, Any]) -> str:
     after = data["после_исправления"]
     before = data["до_исправления"]
     lines: list[str] = []
+    # Название часто уже начинается словом «Отделение»: тогда второй раз его не пишем.
+    name = str(data["отделение"])
+    title = name if name.lower().startswith(("отделение", "опс", "почтовое")) else f"Отделение «{name}»"
     lines.append(
-        f"Отделение «{data['отделение']}»: площадь {data['площадь_м2']} м², "
+        f"{title}: площадь {data['площадь_м2']} м², "
         f"{data['объектов']} {_plural(data['объектов'], 'объект', 'объекта', 'объектов')} "
         f"в {data['зон']} {_plural(data['зон'], 'зоне', 'зонах', 'зонах')}. "
         f"Планировка проверена по {data['проверено_правил']} "
@@ -114,12 +124,18 @@ def from_template(data: dict[str, Any]) -> str:
             + "."
         )
         gains: list[str] = []
-        if before.get("проход_от_входа_м") is not None and after.get("проход_от_входа_м") is not None:
-            gains.append(f"проход от входа {before['проход_от_входа_м']} → {after['проход_от_входа_м']} м")
-        if before.get("путь_до_окон_м") is not None and after.get("путь_до_окон_м") is not None:
-            gains.append(f"путь посетителя до окон {before['путь_до_окон_м']} → {after['путь_до_окон_м']} м")
-        if before.get("мест_ожидания") is not None and after.get("мест_ожидания") is not None:
-            gains.append(f"мест ожидания {before['мест_ожидания']} → {after['мест_ожидания']}")
+
+        def shift(key: str, label: str, unit: str = "") -> None:
+            # Показатель попадает в текст, только если он изменился: «2,04 → 2,04 м» ничего не говорит.
+            was, now = before.get(key), after.get(key)
+            if was is None or now is None or round(was, 2) == round(now, 2):
+                return
+            gains.append(f"{label} {_num(was)} → {_num(now)}{unit}")
+
+        shift("узкое_место_м", "узкое место на пути к окнам", " м")
+        shift("проход_от_входа_м", "свободный путь от входа", " м")
+        shift("путь_до_окон_м", "путь посетителя до окон", " м")
+        shift("мест_ожидания", "мест ожидания")
         lines.append(
             f"После изменений нарушений {after['нарушений']}, предупреждений {after['предупреждений']}"
             + ("; " + ", ".join(gains) if gains else "")

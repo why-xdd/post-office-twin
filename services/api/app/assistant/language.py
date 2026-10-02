@@ -83,6 +83,15 @@ LAYOUT_WORDS = ("расставь", "расставить", "размести", 
 CHECK_WORDS = ("проверь", "что не так", "какие нарушения", "проверка", "всё ли в порядке")
 
 # Вопросительные слова: с них начинается не команда, а вопрос о плане.
+# «Кто работает в окне 3?» — вопрос о сотруднике, а не просьба поставить три окна.
+WHO_QUESTIONS = ("кто ", "ответственн", "закреплен", "кто,")
+# «Хватит ли окон в пятницу?» — вопрос о пропускной способности.
+ENOUGH_QUESTIONS = ("хватит ли", "хватает ли", "достаточно ли", "справимся ли", "сколько нужно окон", "сколько надо окон")
+COST_QUESTIONS = ("сколько стоит", "стоимост", "цена", "смет", "бюджет", "во сколько обойд")
+OVERDUE_QUESTIONS = ("просроч", "осмотр", "поверк", "техобслуж", "сроки обслуж")
+BROKEN_QUESTIONS = ("сломан", "сломал", "неисправ", "не работает", "поломк", "что сломано")
+# Начало вопроса: если с него начинается фраза, предмет в ней не просят поставить.
+QUESTION_STARTS = ("кто", "что", "где", "когда", "почему", "зачем", "какой", "какая", "какое", "какие", "как ", "сколько", "есть ли", "хватит", "можно ли", "нужно ли")
 COUNT_QUESTIONS = ("сколько",)
 WHERE_QUESTIONS = ("где", "куда поставили", "в какой зоне", "покажи", "найди", "подсвети", "выдели")
 AREA_QUESTIONS = ("какая площадь", "сколько площади", "свободная площадь", "сколько места")
@@ -102,6 +111,9 @@ UNITS = (
 )
 # Слова о нарушениях: спрашивают о состоянии плана, а не о предмете.
 TROUBLE_WORDS = ("нарушени", "ошибк", "замечани", "не в порядке")
+# Вместимость: «на 300 посылок», «на 20 мест» — это параметр, а не число предметов.
+CAPACITY_NOUNS = ("посыл", "отправлен", "мест", "человек", "посетител", "клиент", "ячеек", "ячейк", "рпо")
+CAPACITY = re.compile(r"\bна\s+(\d+)\s+(%s)[а-я]*" % "|".join(CAPACITY_NOUNS))
 
 
 @dataclass
@@ -116,7 +128,7 @@ class Action:
     near_entrance: bool = False
     near_partition: bool = False
     near_wall: bool = False
-    # Для вопроса: о чём спросили — count | where | area | state.
+    # Для вопроса: о чём спросили — count | where | area | state | who | enough | cost | overdue | broken.
     question: str | None = None
     # Для разворота: на сколько градусов по часовой стрелке.
     angle: float = 90.0
@@ -129,6 +141,8 @@ class Understanding:
 
     actions: list[Action] = field(default_factory=list)
     unknown: list[str] = field(default_factory=list)
+    # Части фразы, которые поняты, но пока не учитываются: о них нужно сказать, а не промолчать.
+    ignored: list[str] = field(default_factory=list)
     source: str = "разбор фразы"
 
     @property
@@ -341,6 +355,24 @@ def _find_object(fragment: str, plan: Plan) -> str | None:
     return None
 
 
+def _numbered_object(fragment: str, type_code: str | None, plan: Plan) -> str | None:
+    """«Окно 3», «в окне 3» — объект этого типа с номером 3 в подписи или в атрибутах."""
+    if type_code is None:
+        return None
+    number = re.search(r"(?:№\s*|\b)(\d{1,2})\b", CAPACITY.sub(" ", ADDRESS.sub(" ", fragment)))
+    if number is None:
+        return None
+    wanted = int(number.group(1))
+    for item in plan.equipment:
+        if item.type != type_code:
+            continue
+        label_number = re.search(r"№\s*(\d+)", item.label or "")
+        attribute = (item.attributes or {}).get("window_number")
+        if (label_number and int(label_number.group(1)) == wanted) or attribute == wanted:
+            return item.id
+    return None
+
+
 def _count(fragment: str) -> int:
     """Сколько предметов просят.
 
@@ -349,6 +381,7 @@ def _count(fragment: str) -> int:
     почтовых ящиков там, где просили один.
     """
     clean = ADDRESS.sub(" ", fragment)
+    clean = CAPACITY.sub(" ", clean)
     clean = re.sub(r"\b\d{1,3}[\s-]?(?:%s)\b" % "|".join(UNITS), " ", clean)
     digits = re.search(r"\b(\d{1,2})\b", clean)
     if digits:
@@ -374,6 +407,18 @@ def _angle(part: str) -> float:
 
 def _question(part: str) -> str | None:
     """О чём спрашивают, если это вопрос, а не команда."""
+    # Узкие вопросы — раньше общих: «сколько стоит» — не «сколько штук», «покажи просроченные
+    # осмотры» — не «где стоит».
+    if any(hint in part for hint in COST_QUESTIONS):
+        return "cost"
+    if any(hint in part for hint in ENOUGH_QUESTIONS):
+        return "enough"
+    if any(hint in part for hint in BROKEN_QUESTIONS):
+        return "broken"
+    if any(hint in part for hint in OVERDUE_QUESTIONS):
+        return "overdue"
+    if part.startswith("кто") or any(hint in part for hint in WHO_QUESTIONS):
+        return "who"
     # «Покажи нарушения» и «почему тут ошибка» — вопрос о состоянии плана, а не о предмете.
     if any(hint in part for hint in TROUBLE_WORDS):
         return "state"
@@ -408,16 +453,21 @@ def understand(text: str, plan: Plan) -> Understanding:
         )
         if p.strip(" ?!")
     ]
+    # Знак вопроса или вопросительное начало: названный предмет — тема вопроса, а не просьба
+    # его поставить.
+    asking = "?" in text or normalised.startswith(QUESTION_STARTS)
     for part in parts:
-        actions = _understand_part(part, plan)
+        actions = _understand_part(part, plan, asking)
         if not actions:
             result.unknown.append(part)
-        else:
-            result.actions.extend(actions)
+            continue
+        result.actions.extend(actions)
+        for match in CAPACITY.finditer(part):
+            result.ignored.append(match.group(0))
     return result
 
 
-def _understand_part(part: str, plan: Plan) -> list[Action]:
+def _understand_part(part: str, plan: Plan, asking: bool = False) -> list[Action]:
     near_entrance = any(hint in part for hint in NEAR_ENTRANCE_WORDS)
     near_partition = any(hint in part for hint in NEAR_PARTITION_WORDS)
     near_wall = any(hint in part for hint in NEAR_WALL_WORDS)
@@ -427,12 +477,16 @@ def _understand_part(part: str, plan: Plan) -> list[Action]:
     # Зона ищется во фразе без тех частей, которыми опознаны типы оборудования: иначе «скамью в
     # зону ожидания» теряет зону, потому что «ожидание» есть и в названии скамьи.
     zone_id = _find_zone(_without(part, named), plan)
-    object_id = _find_object(part, plan)
+    object_id = _find_object(part, plan) or _numbered_object(part, type_code, plan)
 
     # Вопрос разбирается раньше команд: «сколько у нас окон» — это не «поставить окно».
     asked = _question(part)
-    if asked is not None and not any(
-        word in part for word in ADD_WORDS + REMOVE_WORDS + MOVE_WORDS + ROTATE_WORDS + LAYOUT_WORDS
+    # Вопросы о людях, сроках, деньгах и пропускной способности — вопросы, даже если в них есть
+    # «нужно»: «сколько нужно окон» не просит поставить окно.
+    pure_question = asked in ("who", "enough", "cost", "overdue", "broken")
+    if asked is not None and (
+        pure_question
+        or not any(word in part for word in ADD_WORDS + REMOVE_WORDS + MOVE_WORDS + ROTATE_WORDS + LAYOUT_WORDS)
     ):
         return [
             Action(
@@ -482,7 +536,9 @@ def _understand_part(part: str, plan: Plan) -> list[Action]:
                 )
             ]
         return []
-    if any(word in part for word in ADD_WORDS + LAYOUT_WORDS) or named:
+    # Без глагола предмет ставится, только если фраза не вопрос: «почтомат у входа» — просьба,
+    # «кто работает в окне 3?» — нет.
+    if any(word in part for word in ADD_WORDS + LAYOUT_WORDS) or (named and not asking):
         # Перечисление предметов даёт по действию на каждый: «расставь телевизор, окно выдачи
         # и шкаф» — три поиска места, а не один.
         return [

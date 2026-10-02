@@ -197,3 +197,35 @@ def test_address_in_a_phrase_is_not_a_quantity(plan: Plan) -> None:
     """«Поставь почтовый ящик О-12» — один ящик, а не двенадцать."""
     result = recommend.run_command(plan, "поставь почтовый ящик О-12")
     assert len(result.recommendations) == 1
+
+
+def test_questions_about_people_and_capacity_never_place_equipment(plan: Plan) -> None:
+    """Вопрос с названием предмета — не просьба его поставить."""
+    for phrase in ("кто работает в окне 3?", "хватит ли окон в пятницу?", "кто отвечает за банкомат?", "сколько нужно окон?"):
+        result = recommend.run_command(plan, phrase)
+        assert result.recommendations == [], phrase
+        assert result.answers, phrase
+
+
+def test_who_question_reads_the_passport() -> None:
+    from pathlib import Path
+    import json
+
+    demo = Plan.model_validate(
+        json.loads((Path(__file__).resolve().parents[3] / "data" / "demo_plan.json").read_text(encoding="utf-8"))
+    )
+    result = recommend.run_command(demo, "кто работает в окне 3?")
+    assert "Лаптева" in result.answers[0]
+
+
+def test_capacity_parameter_is_reported_not_dropped(plan: Plan) -> None:
+    """«На 300 посылок» не теряется молча и не становится числом предметов."""
+    result = recommend.run_command(plan, "поставь стеллаж для посылок на 30 посылок")
+    assert len(result.recommendations) == 1
+    assert any("на 30 посылок" in answer for answer in result.answers)
+
+
+def test_cost_question_is_answered_honestly(plan: Plan) -> None:
+    result = recommend.run_command(plan, "сколько стоит перепланировка?")
+    assert result.recommendations == []
+    assert "цен" in result.answers[0]

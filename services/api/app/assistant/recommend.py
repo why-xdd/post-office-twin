@@ -720,9 +720,18 @@ def recommend_capacity(
         reasons = [
             Reason(
                 text=(
-                    f"{group.name}: в час пик {group.arrivals_per_hour} посетителей в час на "
-                    f"{len(group.windows)} окн., загрузка {round(group.utilization * 100)}%, "
-                    f"среднее ожидание {group.mean_wait_min if group.stable else 'растёт без предела'} мин."
+                    f"{group.name}: в час пик {_metres(group.arrivals_per_hour).rstrip('0').rstrip(',')} посетителей в час"
+                    + (
+                        f" на {len(group.windows)} {_windows_word(len(group.windows))}, загрузка "
+                        f"{round(group.utilization * 100)}%, "
+                        + (
+                            f"среднее ожидание {_minutes(group.mean_wait_min)} мин."
+                            if group.stable
+                            else "очередь растёт без предела."
+                        )
+                        if group.windows
+                        else ", а окон этого вида на плане нет."
+                    )
                 ),
                 source="Расчёт пропускной способности (модель M/M/c)",
             )
@@ -760,12 +769,7 @@ def recommend_capacity(
                 scenario="capacity",
                 priority=1 if short else 3,
                 title=f"Добавить окно: {group.name.lower()}",
-                summary=(
-                    f"С дополнительным окном ожидание в час пик "
-                    f"{before['waits'].get(group.name)} → {after['waits'].get(group.name)} мин, "
-                    f"запас по времени обслуживания {before['reserve'].get(group.name)}% → "
-                    f"{after['reserve'].get(group.name)}%."
-                ),
+                summary=_capacity_summary(group.name, before, after),
                 changes=[_change_from(plan, best, "add", new_id, type_code)],
                 reasons=reasons,
                 assumptions=capacity.assumptions,
@@ -777,6 +781,27 @@ def recommend_capacity(
             )
         )
     return results
+
+
+def _windows_word(count: int) -> str:
+    tail = count % 100
+    if 11 <= tail <= 14 or count % 10 in (0, 5, 6, 7, 8, 9):
+        return "окон"
+    return "окно" if count % 10 == 1 else "окна"
+
+
+def _wait_words(value: float | None) -> str:
+    """Ожидание словами: без «None мин», когда очередь растёт без предела или окон нет."""
+    return "без предела" if value is None else f"{_minutes(value)} мин"
+
+
+def _capacity_summary(name: str, before: dict[str, Any], after: dict[str, Any]) -> str:
+    wait_before, wait_after = before["waits"].get(name), after["waits"].get(name)
+    text = f"С дополнительным окном ожидание в час пик {_wait_words(wait_before)} → {_wait_words(wait_after)}"
+    reserve_before, reserve_after = before["reserve"].get(name), after["reserve"].get(name)
+    if reserve_before is not None and reserve_after is not None:
+        text += f", запас по времени обслуживания {reserve_before:g}% → {reserve_after:g}%"
+    return text + "."
 
 
 def _metres(value: float | None) -> str:
@@ -1240,7 +1265,7 @@ def _address(plan: Plan, object_id: str) -> str:
     return f"О-{index + 1:02d}" if index is not None else object_id
 
 
-def _answer(action: language.Action, plan: Plan) -> str:
+def _answer(action: language.Action, plan: Plan, incidents: "list[dict] | None" = None) -> str:
     """Ответ на вопрос о плане. Считается по плану, ничего в нём не меняя."""
     if action.question == "area":
         state = summarize(plan)
@@ -1289,7 +1314,148 @@ def _answer(action: language.Action, plan: Plan) -> str:
             listing = f" — {names}{tail}" if same else ""
             return f"{_label(plan, action.equipment_type)}{where}: {len(same)}{listing}."
         return f"Объектов на плане: {len(plan.equipment)}, зон: {len(plan.zones)}."
+    if action.question == "who":
+        return _who(action, plan)
+    if action.question == "enough":
+        return _enough(action, plan)
+    if action.question == "overdue":
+        return _overdue(plan)
+    if action.question == "broken":
+        return _broken(plan, incidents)
+    if action.question == "cost":
+        return _cost(plan)
     return "Вопрос понят, но ответить на него сервис пока не умеет."
+
+
+def _who(action: language.Action, plan: Plan) -> str:
+    """Кто закреплён за объектом — из паспорта объекта."""
+    items = (
+        [e for e in plan.equipment if e.id == action.object_id]
+        if action.object_id
+        else [e for e in plan.equipment if e.type == action.equipment_type]
+        if action.equipment_type
+        else []
+    )
+    if not items:
+        return "Не понял, о каком объекте вопрос: назовите его, например «окно 2» или адрес О-07."
+    lines = []
+    for item in items[:4]:
+        staff = item.staff
+        name = staff.full_name if staff else None
+        title = item.label or _label(plan, item.type)
+        if not name:
+            lines.append(f"{title}: в паспорте объекта сотрудник не указан")
+            continue
+        details = ", ".join(v for v in (staff.position, staff.schedule) if v)
+        lines.append(f"{title}: {name}" + (f" ({details})" if details else ""))
+    more = f"; и ещё {len(items) - 4}" if len(items) > 4 else ""
+    return "; ".join(lines) + more + "."
+
+
+def _minutes(value: float | None) -> str:
+    return f"{value or 0:.1f}".replace(".", ",")
+
+
+def _days(count: int) -> str:
+    tail = count % 100
+    if 11 <= tail <= 14:
+        word = "дней"
+    elif count % 10 == 1:
+        word = "день"
+    elif 2 <= count % 10 <= 4:
+        word = "дня"
+    else:
+        word = "дней"
+    return f"{count} {word}"
+
+
+WEEKDAY_WORDS = ("понедельн", "вторник", "сред", "четверг", "пятниц", "суббот", "воскресен", "выходн")
+
+
+def _enough(action: language.Action, plan: Plan) -> str:
+    """Хватит ли окон в час пик — по модели очереди M/M/c."""
+    report = capacity_model.analyze(plan)
+    if not report.available:
+        return f"Посчитать не из чего: {report.reason} Заполните поток посетителей в свойствах плана."
+    target = report.target_wait_min
+    parts = []
+    for group in report.groups:
+        have = len(group.windows)
+        if not group.stable:
+            parts.append(
+                f"{group.name}: {have} — мало, очередь в час пик растёт без предела; нужно не меньше {group.windows_needed}"
+            )
+        elif have >= group.windows_needed:
+            parts.append(
+                f"{group.name}: {have} — хватает, ожидание в час пик около {_minutes(group.mean_wait_min)} мин при цели {target:g}"
+            )
+        else:
+            parts.append(
+                f"{group.name}: {have} — не хватает, ожидание около {_minutes(group.mean_wait_min)} мин при цели {target:g}; нужно {group.windows_needed}"
+            )
+    answer = "В час пик. " + "; ".join(parts) + "."
+    if any(word in action.text for word in WEEKDAY_WORDS):
+        answer += (
+            " По дням недели модель не различает: для конкретного дня загрузите журнал электронной "
+            "очереди — он покажет нагрузку по часам."
+        )
+    return answer
+
+
+def _overdue(plan: Plan, today: Any = None) -> str:
+    """Просроченные и близкие осмотры — по датам из паспортов объектов."""
+    from datetime import date
+
+    today = today or date.today()
+    overdue, soon = [], []
+    for item in plan.equipment:
+        raw = item.inventory.next_inspection if item.inventory else None
+        if not raw:
+            continue
+        try:
+            due = date.fromisoformat(str(raw))
+        except ValueError:
+            continue
+        days = (due - today).days
+        title = f"{item.label or _label(plan, item.type)} ({_address(plan, item.id)})"
+        if days < 0:
+            overdue.append(f"{title} — просрочен на {_days(-days)}")
+        elif days <= 30:
+            soon.append(f"{title} — через {_days(days)}")
+    if not overdue and not soon:
+        return "Просроченных осмотров нет, в ближайшие 30 дней сроков тоже нет."
+    text = ""
+    if overdue:
+        text += "Просрочено: " + "; ".join(overdue) + ". "
+    if soon:
+        text += "В ближайшие 30 дней: " + "; ".join(soon) + "."
+    return text.strip()
+
+
+def _broken(plan: Plan, incidents: "list[dict] | None") -> str:
+    """Что сейчас неисправно — по открытым обращениям сотрудников."""
+    if incidents is None:
+        return (
+            "Неисправности отмечают сотрудники в обращениях (QR-бирка на оборудовании или паспорт "
+            "объекта); для этого плана обращений сервис не получил."
+        )
+    open_ones = [i for i in incidents if i.get("status") != "resolved"]
+    if not open_ones:
+        return "Открытых обращений о неисправностях нет."
+    names = {e.id: e.label or _label(plan, e.type) for e in plan.equipment}
+    lines = [
+        f"{names.get(i.get('object_id'), i.get('object_id'))}: {i.get('text') or 'неисправность'}"
+        + (" (не работает)" if i.get("out_of_service") else "")
+        for i in open_ones[:6]
+    ]
+    return f"Открытых обращений: {len(open_ones)}. " + "; ".join(lines) + "."
+
+
+def _cost(plan: Plan) -> str:
+    return (
+        "Стоимость сервис не считает по выдуманным ценам: цен на оборудование и работы в "
+        "справочнике нет. Количество и перечень оборудования — во вкладке «Инвентарь»."
+    )
 
 
 QUESTION_WORDS = {
@@ -1297,6 +1463,11 @@ QUESTION_WORDS = {
     "where": "вопрос: где стоит",
     "area": "вопрос: какая площадь",
     "state": "вопрос: что с планом",
+    "who": "вопрос: кто работает",
+    "enough": "вопрос: хватит ли окон",
+    "overdue": "вопрос: сроки осмотра",
+    "broken": "вопрос: что неисправно",
+    "cost": "вопрос: сколько стоит",
 }
 
 
@@ -1477,7 +1648,7 @@ def _move_recommendation(plan: Plan, action: language.Action) -> Recommendation 
     )
 
 
-def run_command(plan: Plan, text: str) -> CommandResult:
+def run_command(plan: Plan, text: str, incidents: list[dict] | None = None) -> CommandResult:
     """Выполняет команду словами: разбирает фразу и готовит рекомендации с предпросмотром.
 
     Фразу разбирает языковая модель, если она подключена (см. `llm.py`), иначе — словарный
@@ -1488,11 +1659,17 @@ def run_command(plan: Plan, text: str) -> CommandResult:
     understanding = llm.understand(text, plan) or language.understand(text, plan)
 
     result = CommandResult(understood=[], unknown=list(understanding.unknown), source=understanding.source)
+    for fragment in getattr(understanding, "ignored", []):
+        # Сказать вслух, что часть фразы не учтена, честнее, чем молча её выбросить.
+        result.answers.append(
+            f"«{fragment}» — такой параметр при подборе места пока не учитывается: место ищется "
+            f"по нормам и габаритам предмета."
+        )
     current = plan
     for action in understanding.actions:
         result.understood.append(_action_words(action, plan))
         if action.kind == "question":
-            result.answers.append(_answer(action, current))
+            result.answers.append(_answer(action, current, incidents))
         elif action.kind == "check":
             result.answers.append(_answer(language.Action(kind="question", question="state"), current))
         elif action.kind == "add" and action.equipment_type:

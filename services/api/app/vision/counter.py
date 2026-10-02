@@ -420,7 +420,7 @@ def _summary(loads: list[ZoneLoad], people: list[int], duration: float) -> list[
     lines: list[str] = []
     if people:
         lines.append(
-            f"За {duration:g} с записи в зале в среднем {np.mean(people):.1f} посетителя, "
+            f"За {duration:g} с записи в зале в среднем {f'{np.mean(people):.1f}'.replace('.', ',')} посетителя, "
             f"в пике {max(people)}."
         )
     for load in loads:

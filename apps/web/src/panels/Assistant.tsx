@@ -70,6 +70,7 @@ export function Assistant({ book, types, onFocusObject, onNotice }: AssistantPro
 
   const [job, setJob] = useState<Job>(null);
   const [error, setError] = useState<string | null>(null);
+  const report = useWorkspace((s) => s.report);
   const [recommendations, setRecommendations] = useState<Recommendation[] | null>(null);
   // Откуда список: ответ на команду показывается прямо под полем ввода, подбор — ниже кнопок.
   const [recsFrom, setRecsFrom] = useState<'command' | 'advise'>('advise');
@@ -141,7 +142,8 @@ export function Assistant({ book, types, onFocusObject, onNotice }: AssistantPro
     void run('command', () => api.command(doc!, text), (result) => {
       setCommandResult(result);
       // Рекомендации команды показываются тем же списком: у них та же карточка и то же «Принять».
-      setRecommendations(result.recommendations);
+      // Если фраза была вопросом, списка нет вовсе: пустой список читался бы как «всё в порядке».
+      setRecommendations(result.recommendations.length ? result.recommendations : null);
       setRecsFrom('command');
       setImprovement(null);
       setPartial(false);
@@ -197,7 +199,11 @@ export function Assistant({ book, types, onFocusObject, onNotice }: AssistantPro
             </p>
           )}
           {recommendations.length === 0 ? (
-            <p className="assistant__empty">Рекомендаций нет: ошибок проверки нет, комплектность и пропускная способность в норме.</p>
+            <p className="assistant__empty">
+              {(report?.errors ?? 0) > 0
+                ? 'Перестановкой оставшиеся нарушения не снимаются: они связаны с окнами кассы или требуют перепланировки. Разбор каждого — во вкладке «Проверка».'
+                : 'Рекомендаций нет: нарушений нет, комплектность и пропускная способность в норме.'}
+            </p>
           ) : (
             <ol className="recs">
               {recommendations.map((rec, index) => {

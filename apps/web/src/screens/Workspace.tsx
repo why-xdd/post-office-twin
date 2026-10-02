@@ -224,6 +224,24 @@ export function Workspace({ planId }: WorkspaceProps) {
   const [addressError, setAddressError] = useState<string | null>(null);
   const [versions, setVersions] = useState<PlanVersion[] | null>(null);
   const [versionsOpen, setVersionsOpen] = useState(false);
+  const versionsRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  // Выбрали другой объект или вкладку — панель открывается с начала: иначе на телефоне имя
+  // объекта оставалось за верхним краем после прошлой прокрутки.
+  useEffect(() => {
+    panelRef.current?.scrollTo({ top: 0 });
+  }, [selection?.id, panel]);
+
+  // Список версий закрывается, как любой выпадающий список: щелчком мимо него.
+  useEffect(() => {
+    if (!versionsOpen) return;
+    const onPointer = (event: PointerEvent) => {
+      if (!versionsRef.current?.contains(event.target as Node)) setVersionsOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointer);
+    return () => document.removeEventListener('pointerdown', onPointer);
+  }, [versionsOpen]);
   const [leaving, setLeaving] = useState(false);
   const [draft, setDraft] = useState<{ savedAt: number } | null>(null);
   const [hotkeys, setHotkeys] = useState(false);
@@ -508,6 +526,7 @@ export function Workspace({ planId }: WorkspaceProps) {
       }
       if (event.key === 'Escape') {
         setHotkeys(false);
+        setVersionsOpen(false);
         setMoreOpen(false);
         setLeaving(false);
         state.setActiveFinding(null);
@@ -712,7 +731,7 @@ export function Workspace({ planId }: WorkspaceProps) {
           <Mark size={22} />
         </button>
 
-        <div className="ws-rail__title">
+        <div className="ws-rail__title" ref={versionsRef}>
           <span className="ws-rail__name" title={doc.ops.name || title}>
             {doc.ops.name || title}
           </span>
@@ -1155,7 +1174,7 @@ export function Workspace({ planId }: WorkspaceProps) {
             ))}
           </div>
         )}
-        <div className="ws-panel" role={review ? 'region' : 'tabpanel'} aria-label={review ? 'Обзор плана' : undefined}>
+        <div ref={panelRef} className="ws-panel" role={review ? 'region' : 'tabpanel'} aria-label={review ? 'Обзор плана' : undefined}>
           {panel === 'review' && (
             <Review
               book={book}

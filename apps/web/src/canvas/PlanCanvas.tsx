@@ -44,7 +44,7 @@ import {
   snapToSlantedWall,
   type Guide,
 } from '../lib/room';
-import { zoneLabelPoints } from '../lib/zoneLabels';
+import { labelLines, zoneLabelPoints } from '../lib/zoneLabels';
 import { inspectionState } from '../lib/inspections';
 import { isOpen, useIncidents } from '../state/incidents';
 import { narrowestGap, type Gap } from '../lib/gap';
@@ -767,9 +767,11 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
   // Во время перетаскивания подписи зон не двигаются: точки считаются по плану до начала жеста.
   const transientBase = useWorkspace((s) => s.transientBase);
   const labelSource = transientBase ?? doc;
+  // Масштаб округляется до ступеней в 15 %: подписи не пересчитываются на каждом щелчке колеса.
+  const labelScale = Math.round(Math.log(Math.max(view.scale, 1)) / Math.log(1.15));
   const labelPoints = useMemo(
-    () => (labelSource ? zoneLabelPoints(labelSource) : new Map<string, Point>()),
-    [labelSource],
+    () => (labelSource ? zoneLabelPoints(labelSource, 1.15 ** labelScale) : new Map<string, Point>()),
+    [labelSource, labelScale],
   );
 
   if (!doc) return <div ref={container} className="plan-canvas" />;
@@ -1121,7 +1123,11 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
                   <AddressTag x={-18} y={-10} text={book.byId.get(key('zone', zone.id)) ?? ''} tone="steel" />
                 )}
                 <text x={0} y={zoneTagsVisible ? 18 : 4} textAnchor="middle">
-                  {zone.label ?? zone.type}
+                  {labelLines(zone.label ?? zone.type).map((line, index, lines) => (
+                    <tspan key={index} x={0} dy={index === 0 ? (lines.length > 1 ? -7 : 0) : 15}>
+                      {line}
+                    </tspan>
+                  ))}
                 </text>
               </g>
             );

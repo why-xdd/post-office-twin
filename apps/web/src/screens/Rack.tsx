@@ -10,6 +10,7 @@ import { Mark } from '../components/Mark';
 import { PlanThumb } from '../components/PlanThumb';
 import { ServerBadge } from '../components/ServerBadge';
 import { Account } from '../components/Account';
+import { uniqueTitle } from '../lib/titles';
 import { ApiError, api, type PlanSummary } from '../lib/api';
 import type { Plan, ValidationReport } from '../lib/plan';
 import { formatNumber, planArea, plural } from '../lib/planFacts';
@@ -137,7 +138,9 @@ export function Rack() {
     try {
       const text = await file.text();
       const document = JSON.parse(text) as Plan;
-      const title = document?.ops?.name || file.name.replace(/\.json$/i, '');
+      const base = document?.ops?.name || file.name.replace(/\.json$/i, '');
+      // Тот же файл, загруженный ещё раз, получает номер копии: иначе карточки на стеллаже не различить.
+      const title = uniqueTitle(base, (plans ?? []).map((plan) => plan.title));
       const ref = await api.createPlan(title, document, `Загружен из файла ${file.name}`);
       navigate({ name: 'plan', id: ref.id });
     } catch (error) {

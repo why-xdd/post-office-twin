@@ -1338,7 +1338,11 @@ export function Workspace({ planId }: WorkspaceProps) {
                 type="button"
                 className="ws-dock__item"
                 aria-current={drawer === 'panel' && panel === tab.id}
-                onClick={() => openPanel(tab.id)}
+                onClick={(event) => {
+                  openPanel(tab.id);
+                  // Планка прокручивается: нажатая кнопка не должна остаться под затуханием края.
+                  event.currentTarget.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+                }}
               >
                 {DOCK_ICONS[tab.id]}
                 <span className="ws-dock__label">{tab.label}</span>

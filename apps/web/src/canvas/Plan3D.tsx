@@ -301,6 +301,39 @@ export function Plan3D({ types }: Props) {
     }
   }, [scene, quality]);
 
+  // Рамка выбора: латунный контур вокруг объекта и метка на полу. Свечение материала ниже не
+  // видно у моделей из Blender — они заменяют брусок, — поэтому выбор показывает отдельная рамка.
+  useEffect(() => {
+    const parts = engine.current;
+    if (!parts?.content || !scene || selection?.kind !== 'equipment') return;
+    const prism = scene.prisms.find((p) => p.id === selection.id && p.kind === 'equipment');
+    if (!prism) return;
+    const pad = 0.06;
+    const [w, d] = [prism.size[0] + pad * 2, prism.size[1] + pad * 2];
+    const marker = new THREE.Group();
+    marker.position.set(prism.centre[0], 0, -prism.centre[1]);
+    marker.rotation.y = (-prism.rotationDeg * Math.PI) / 180;
+    const outline = new THREE.EdgesGeometry(new THREE.BoxGeometry(w, prism.height + pad, d));
+    const lineMaterial = new THREE.LineBasicMaterial({ color: 0xd0a453, depthTest: false, transparent: true, opacity: 0.95 });
+    const frame = new THREE.LineSegments(outline, lineMaterial);
+    frame.position.y = prism.base + prism.height / 2;
+    frame.renderOrder = 10;
+    const floorGeometry = new THREE.PlaneGeometry(w + 0.2, d + 0.2);
+    const floorMaterial = new THREE.MeshBasicMaterial({ color: 0xd0a453, transparent: true, opacity: 0.28, depthWrite: false });
+    const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.y = 0.012;
+    marker.add(frame, floor);
+    parts.scene.add(marker);
+    return () => {
+      parts.scene.remove(marker);
+      outline.dispose();
+      floorGeometry.dispose();
+      lineMaterial.dispose();
+      floorMaterial.dispose();
+    };
+  }, [selection, scene, quality]);
+
   // Выбранный объект подсвечивается тем же способом, что и на плане.
   useEffect(() => {
     const parts = engine.current;
@@ -310,9 +343,14 @@ export function Plan3D({ types }: Props) {
       if (!mesh.isMesh || !mesh.userData?.id) return;
       const chosen = selection?.id === mesh.userData.id;
       const material = mesh.material as THREE.MeshStandardMaterial;
-      if (!('emissive' in material)) return;
-      material.emissive?.setHex(chosen ? 0x8e6621 : 0x000000);
-      material.emissiveIntensity = chosen ? 0.55 : 0;
+      if (!('emissive' in material) || !material.emissive) return;
+      // Свои свечения (экраны табло) запоминаются до первой подсветки и возвращаются после неё.
+      if (material.userData.glow === undefined) {
+        material.userData.glow = { hex: material.emissive.getHex(), intensity: material.emissiveIntensity };
+      }
+      const own = material.userData.glow as { hex: number; intensity: number };
+      material.emissive.setHex(chosen ? 0x8e6621 : own.hex);
+      material.emissiveIntensity = chosen ? 0.55 : own.intensity;
     });
   }, [selection, scene, quality]);
 

@@ -757,11 +757,25 @@
   .ws-dock {
     display: grid;
     grid-auto-flow: column;
-    grid-auto-columns: 1fr;
+    /* Кнопок бывает восемь: уже 66 px «Обращения» и «Инвентарь» не читается — тогда планка прокручивается. */
+    grid-auto-columns: minmax(66px, 1fr);
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
     z-index: 7;
     padding: 4px 2px calc(4px + env(safe-area-inset-bottom));
     background: var(--steel-950);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  }
+
+  .ws-dock::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* В «Эксплуатации» кнопок больше, чем помещается: край затухает, подсказывая прокрутку. */
+  .workspace--operate .ws-dock {
+    padding-right: 24px;
+    mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
   }
 
   .ws-dock__label {

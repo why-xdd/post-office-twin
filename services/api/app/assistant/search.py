@@ -22,7 +22,7 @@ from typing import Callable
 import numpy as np
 import shapely
 from shapely.geometry import LinearRing, LineString, Point, Polygon, box
-from shapely.ops import nearest_points, unary_union
+from shapely.ops import nearest_points, substring, unary_union
 from shapely.strtree import STRtree
 
 from app.dictionaries import EquipmentType, equipment_types, zone_types
@@ -396,6 +396,34 @@ ROUTE_BAND_M = 0.9
 ZONE_KINDS = ("waiting", "queue_accumulator", "vestibule", "back_office", "staff_room")
 
 
+# Половина ширины коридора, который остаётся свободным вдоль маршрута посетителя (1,2 м — путь с
+# карманами для разъезда по СП 59), и конец маршрута у самой цели, который не охраняется: там
+# стоит сам объект, к которому идут.
+ROUTE_CLEAR_M = 0.6
+ROUTE_TARGET_TAIL_M = 0.8
+
+
+def _visitor_corridors(plan: Plan, entrance: tuple[float, float] | None):
+    """Линии, вдоль которых ходят посетители: маршруты из плана, а без них — от входа к окнам.
+
+    Последние 0,8 м маршрута у цели не входят в коридор: там стоит сам объект, к которому идут.
+    """
+    lines: list[LineString] = []
+    if plan.flow_hints is not None and plan.flow_hints.typical_paths:
+        lines = [LineString(p.waypoints) for p in plan.flow_hints.typical_paths if len(p.waypoints) >= 2]
+    elif entrance is not None:
+        for item in core.equipment_by_type(plan, *SERVICE_WINDOW_TYPES):
+            access = passability.client_access_point(plan, item)
+            if math.dist(access, entrance) > 1e-6:
+                lines.append(LineString([entrance, access]))
+    trimmed = []
+    for line in lines:
+        keep = line.length - ROUTE_TARGET_TAIL_M
+        if keep > 0.2:
+            trimmed.append(substring(line, 0, keep))
+    return unary_union(trimmed) if trimmed else None
+
+
 def _flow_context(plan: Plan, entrance: tuple[float, float] | None, exclude: set[str]) -> tuple[list[LineString], list[Point]]:
     """Линии движения посетителей и точки, где они стоят у объектов обслуживания."""
     routes: list[LineString] = []
@@ -597,11 +625,15 @@ def generate(
     ]
     door_squares = _door_squares(plan)
     door_passages = [core.door_clear_area(d.wall) for d in plan.doors]
+    # Зона открывания двери по обе стороны: туда не ставится ничего (ППР п. 27 «б»).
+    door_swings = [core.door_swing_zone(d.wall, d.width_m) for d in plan.doors]
     windows = [core.equipment_polygon(i) for i in floor if i.type in SERVICE_WINDOW_TYPES]
     passage = rules_by_id()["passage_between_workplaces"].value or 1.0
     is_window = type_code in SERVICE_WINDOW_TYPES
     kiosk_limit = rules_by_id()["queue_terminal_near_entrance"].value or 3.0
     entrance = passability.entrance_point(plan)
+    # Коридор вдоль маршрутов посетителей: расстановка не ставит предметы на пути от входа к окнам.
+    corridors = _visitor_corridors(plan, entrance)
     walls = _walls(plan)
     tree = STRtree(obstacles) if obstacles else None
     fitness = _fitness_for(type_code, type_def)
@@ -677,6 +709,10 @@ def generate(
             if any(sq.intersection(poly).area > 1e-3 for sq in door_squares):
                 return None
             if any(dp.intersection(poly).area > 0.02 for dp in door_passages):
+                return None
+            if any(zone.intersection(poly).area > 0.02 for zone in door_swings):
+                return None
+            if corridors is not None and corridors.distance(poly) < ROUTE_CLEAR_M:
                 return None
             if is_window and any(0 <= w.distance(poly) < passage for w in windows):
                 return None

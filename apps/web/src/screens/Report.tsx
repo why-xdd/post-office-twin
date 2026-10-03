@@ -50,9 +50,9 @@ export function Report({ planId }: { planId: string }) {
   const drawing = useMemo(() => (data ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(planToSvg(data.plan))}` : null), [data]);
 
   return (
-    <main className="report">
-      <header className="report__bar">
-        <a href={hashOf({ name: 'plan', id: planId })} className="report__back">
+    <main className="print-report">
+      <header className="print-report__bar">
+        <a href={hashOf({ name: 'plan', id: planId })} className="print-report__back">
           <ArrowLeft size={16} aria-hidden="true" /> К плану
         </a>
         <button type="button" className="btn btn--label" onClick={() => window.print()} disabled={!data}>
@@ -60,16 +60,16 @@ export function Report({ planId }: { planId: string }) {
         </button>
       </header>
 
-      {error && <p className="report__error">{error}</p>}
+      {error && <p className="print-report__error">{error}</p>}
       {!data && !error && (
-        <p className="report__note">
+        <p className="print-report__note">
           <LoaderCircle size={15} className="spin" aria-hidden="true" /> Собираем отчёт…
         </p>
       )}
 
       {data && (
-        <article className="report__sheet">
-          <header className="report__title">
+        <article className="print-report__sheet">
+          <header className="print-report__title">
             <p>Отчёт о планировке отделения · {formatDate(localDay())}</p>
             <h1>{data.plan.ops.name ?? data.plan.ops.id}</h1>
             <dl>
@@ -92,12 +92,12 @@ export function Report({ planId }: { planId: string }) {
             </dl>
           </header>
 
-          {drawing && <img className="report__drawing" src={drawing} alt="Чертёж отделения" />}
+          {drawing && <img className="print-report__drawing" src={drawing} alt="Чертёж отделения" />}
 
           {data.conclusion && (
             <section>
               <h2>Заключение</h2>
-              <p className="report__text">{data.conclusion.text}</p>
+              <p className="print-report__text">{data.conclusion.text}</p>
             </section>
           )}
 
@@ -106,7 +106,7 @@ export function Report({ planId }: { planId: string }) {
             {data.check.findings.length === 0 ? (
               <p>Нарушений и замечаний нет.</p>
             ) : (
-              <table className="report__table">
+              <table className="print-report__table">
                 <thead>
                   <tr>
                     <th scope="col">Что</th>
@@ -138,7 +138,7 @@ export function Report({ planId }: { planId: string }) {
           {data.today && data.today.windows.length > 0 && (
             <section>
               <h2>Окна в час пик</h2>
-              <table className="report__table">
+              <table className="print-report__table">
                 <thead>
                   <tr>
                     <th scope="col">Группа</th>
@@ -160,7 +160,7 @@ export function Report({ planId }: { planId: string }) {
                   ))}
                 </tbody>
               </table>
-              {data.today.target_wait_min != null && <p className="report__small">Цель — ожидание не дольше {formatNumber(data.today.target_wait_min)} мин.</p>}
+              {data.today.target_wait_min != null && <p className="print-report__small">Цель — ожидание не дольше {formatNumber(data.today.target_wait_min)} мин.</p>}
             </section>
           )}
 
@@ -205,7 +205,7 @@ export function Report({ planId }: { planId: string }) {
             </section>
           )}
 
-          <footer className="report__foot">
+          <footer className="print-report__foot">
             Нормы: ВНТП 311-98, СП 59.13330.2020, СП 1.13130.2020, ПП РФ № 1479, Приказ Минцифры № 538. Расчёт
             очереди — модель M/M/c. Сформировано сервисом «План ОПС».
           </footer>

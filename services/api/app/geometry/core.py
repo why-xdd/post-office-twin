@@ -344,6 +344,19 @@ def door_clear_area(wall: tuple[float, float, float, float]) -> Polygon:
     return Polygon([(x1 + nx, y1 + ny), (x2 + nx, y2 + ny), (x2 - nx, y2 - ny), (x1 - nx, y1 - ny)])
 
 
+def door_swing_zone(wall: tuple[float, float, float, float], width_m: float) -> Polygon:
+    """Где ходит полотно двери: проём вглубь на ширину двери по обе стороны стены.
+
+    В какую сторону открывается дверь и где петли, план не хранит, поэтому зона берётся с обеих
+    сторон и во всю ширину проёма — четверть круга с любой стороны в неё укладывается.
+    """
+    x1, y1, x2, y2 = wall
+    length = max(((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5, 1e-9)
+    depth = max(width_m, DOOR_CLEAR_DEPTH_M)
+    nx, ny = -(y2 - y1) / length * depth, (x2 - x1) / length * depth
+    return Polygon([(x1 + nx, y1 + ny), (x2 + nx, y2 + ny), (x2 - nx, y2 - ny), (x1 - nx, y1 - ny)])
+
+
 def seat_in_door_swing(door_wall: tuple[float, float, float, float], width_m: float, seat: tuple[float, float]) -> bool:
     """Место оператора в зоне открывания двери.
 

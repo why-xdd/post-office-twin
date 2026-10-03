@@ -151,3 +151,23 @@ def test_peak_queue_on_evacuation_path_is_reported(demo: Plan) -> None:
     assert report.evacuation_with_queue_m is not None
     assert report.evacuation_with_queue_m < (report.evacuation_required_m or 0)
     assert any("пути эвакуации" in line for line in report.advice)
+
+
+def test_objects_in_a_door_swing_are_found_and_auto_fix_clears_doors_and_routes() -> None:
+    """Файл заказчика: банкомат и скамья в зоне открывания входа. Автоисправление их убирает и
+    не ставит ничего ни в зону дверей, ни в коридор вдоль маршрутов посетителей."""
+    from app.assistant import recommend, search
+    from app.geometry import core, passability
+
+    plan = load("example_plan.json")
+    swing = [f for f in validate(plan).findings if f.rule_id == "door_swing_clear"]
+    assert {"eq_atm", "eq_bench_1"} <= {o for f in swing for o in f.objects}
+    after = Plan.model_validate(recommend.improve(plan, fixes_only=True).improved_plan)
+    assert not [f for f in validate(after).findings if f.rule_id == "door_swing_clear"]
+    corridors = search._visitor_corridors(after, passability.entrance_point(after))
+    old = {e.id: e for e in plan.equipment}
+    for item in core.floor_equipment(after):
+        before = old.get(item.id)
+        if before is not None and before.position == item.position and before.rotation_deg == item.rotation_deg:
+            continue
+        assert corridors.distance(core.equipment_polygon(item)) >= 0.6, item.id

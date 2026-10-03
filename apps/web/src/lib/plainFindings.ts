@@ -62,6 +62,10 @@ const WORDING: Record<string, Wording> = {
     title: 'Узкий путь эвакуации',
     impact: 'При пожаре людям из этой части зала не выйти наружу быстро и без давки.',
   },
+  door_swing_clear: {
+    title: 'Дверь загорожена',
+    impact: 'Полотно не откроется полностью: при пожаре люди упрутся в предмет у самой двери.',
+  },
   vestibule_storage: {
     title: 'Хранение в тамбуре выхода',
     impact: 'Тамбур — путь эвакуации; стеллаж в нём запрещён правилами противопожарного режима.',
@@ -202,6 +206,7 @@ const RULE_ORDER = [
   'door_maneuver_space',
   'doors_not_blocked',
   'evacuation_path_width',
+  'door_swing_clear',
   'vestibule_storage',
   'counter_front_width',
   'counter_height',

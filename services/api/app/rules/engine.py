@@ -484,6 +484,37 @@ def _check_evacuation(plan: Plan, rule: Rule, explain: bool = True) -> list[Find
     return findings
 
 
+DOOR_NAMES = {"entrance": "главного входа", "service": "служебного выхода"}
+
+
+def _check_door_swing(plan: Plan, rule: Rule) -> list[Finding]:
+    """Мебель и оборудование в зоне открывания двери (ППР п. 27 «б»).
+
+    Объекты, которые перекрывают сам проём, уже названы проверкой целостности «Проём двери не
+    загорожен» — здесь они не повторяются.
+    """
+    in_doorway = {blocker for _door, blockers in core.blocked_doors(plan) for blocker in blockers}
+    floor = core.floor_equipment(plan)
+    findings = []
+    for door in plan.doors:
+        zone = core.door_swing_zone(door.wall, door.width_m)
+        name = DOOR_NAMES.get(door.type, f"двери «{door.label or door.id}»")
+        for item in floor:
+            if item.id in in_doorway:
+                continue
+            if core.equipment_polygon(item).intersection(zone).area > 0.02:
+                findings.append(
+                    _finding(
+                        rule,
+                        f"«{item.label or item.id}» стоит в зоне открывания {name}: полотно не откроется "
+                        f"полностью, а у дверей на путях эвакуации предметы ставить нельзя.",
+                        [item.id],
+                        None,
+                    )
+                )
+    return findings
+
+
 STORAGE_TYPES = ("storage_rack", "goods_rack")
 
 
@@ -589,6 +620,7 @@ CHECKS = {
     "workplace_area": _check_workplace_area,
     "evacuation_path_width": _check_evacuation,
     "vestibule_storage": _check_vestibule_storage,
+    "door_swing_clear": _check_door_swing,
     "fire_extinguishers": _check_extinguishers,
     "parcel_storage_capacity": _check_parcel_storage,
 }

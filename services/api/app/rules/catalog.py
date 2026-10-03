@@ -213,6 +213,17 @@ DEFAULT_RULES: list[Rule] = [
         "сохранить (ПП РФ № 1479, пп. 27 «б», 28).",
     ),
     Rule(
+        id="door_swing_clear",
+        title="Дверь загорожена",
+        category=Category.FIRE,
+        severity=Severity.ERROR,
+        source=PPR,
+        clause="п. 27 «б»",
+        rationale="У дверей эвакуационных выходов и на путях эвакуации нельзя размещать мебель и "
+        "оборудование: полотно двери должно открываться свободно. Зона двери — проём вглубь на "
+        "ширину двери с обеих сторон: куда она открывается, план не хранит.",
+    ),
+    Rule(
         id="vestibule_storage",
         title="Хранение в тамбуре выхода",
         category=Category.FIRE,

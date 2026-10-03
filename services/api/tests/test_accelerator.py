@@ -149,7 +149,10 @@ def test_model_puts_suitable_places_first(plan: Plan) -> None:
 
             with_model = accepted(search._prioritise(candidates)[:10])
             plain = accepted(candidates[:10])
-            assert with_model >= plain - 2, (current.ops.id, type_code, with_model, plain)
+            # Запреты на зону дверей и коридор маршрутов сужают выбор: в тесной служебной комнате
+            # места у стен, которые предпочитает модель, чаще упираются в эвакуацию. Сильный провал
+            # по типу всё равно ловится, а качество в целом держит сумма ниже.
+            assert with_model >= plain - 4, (current.ops.id, type_code, with_model, plain)
             total_model += with_model
             total_plain += plain
     assert total_model > total_plain

@@ -50,6 +50,10 @@ class Finding(BaseModel):
     measured: float | None = None
     required: float | None = None
     unit: str = ""
+    gap: tuple[tuple[float, float], tuple[float, float]] | None = Field(
+        default=None,
+        description="Где на плане замер: отрезок самого узкого просвета, если его удалось найти",
+    )
 
 
 class ValidationReport(BaseModel):
@@ -76,6 +80,7 @@ def _finding(
     measured: float | None,
     severity: Severity | None = None,
     required: float | None = None,
+    gap: tuple[tuple[float, float], tuple[float, float]] | None = None,
 ) -> Finding:
     return Finding(
         rule_id=rule.id,
@@ -89,6 +94,7 @@ def _finding(
         measured=measured,
         required=required if required is not None else rule.value,
         unit=rule.unit,
+        gap=gap,
     )
 
 
@@ -302,6 +308,25 @@ def _check_path_width(plan: Plan, rule: Rule, explain: bool = True) -> list[Find
                 f" Даже без них путь к {', '.join(f'«{t}»' for t in stuck)} остаётся уже {limit} м: "
                 f"тесно между самими этими объектами."
             )
+        # Где именно самое узкое место. Если оно между двумя самими целями — окнами, к которым
+        # идёт посетитель, — это не «лишний предмет», а слишком тесно поставленные окна, и сказать
+        # нужно именно так, а не обещать, что перестановка мебели всё решит.
+        gap = None
+        if explain:
+            start_point = passability.entrance_point(plan)
+            probe = next((t for t in sorted(group) if group[t] == width), None)
+            item = next((e for e in plan.equipment if e.id == probe), None)
+            cache = passability.erosion(plan)
+            if start_point is not None and item is not None and cache is not None:
+                goal = passability.client_access_point(plan, item)
+                found = passability.pinch(plan, cache, ShapelyPoint(start_point), ShapelyPoint(goal), width)
+                if found is not None:
+                    gap = (found.a, found.b)
+                    targets = {e.id for e in core.equipment_by_type(plan, *VISITOR_TARGET_TYPES)}
+                    crowded = [o for o in found.objects if o in targets]
+                    if len(crowded) == 2 and not stuck:
+                        cause += f" Тесно между самими объектами: {', '.join(f'«{t}»' for t in crowded)}."
+                        stuck = [t for t in crowded if t not in culprits]
         if severity is Severity.ERROR:
             message = (
                 f"Путь от входа сужается до {width} м — к {names}. Норма {rule.value} м, даже с "
@@ -313,7 +338,9 @@ def _check_path_width(plan: Plan, rule: Rule, explain: bool = True) -> list[Find
                 f"Путь от входа сужается до {width} м — к {names}. Это допустимо только при "
                 f"карманах для разъезда длиной не менее 2 м.{cause}"
             )
-        findings.append(_finding(rule, message, [*culprits, *stuck] or sorted(group), width, severity=severity))
+        findings.append(
+            _finding(rule, message, [*culprits, *stuck] or sorted(group), width, severity=severity, gap=gap)
+        )
     return findings
 
 
@@ -416,19 +443,36 @@ def _check_workplace_area(plan: Plan, rule: Rule) -> list[Finding]:
     ]
 
 
-def _check_evacuation(plan: Plan, rule: Rule) -> list[Finding]:
-    """Ширина путей эвакуации по СП 1.13130.2020 п. 4.3.3."""
+def _check_evacuation(plan: Plan, rule: Rule, explain: bool = True) -> list[Finding]:
+    """Ширина путей эвакуации по СП 1.13130.2020 п. 4.3.3 и сам выход наружу."""
+    if not evacuation.exits(plan):
+        return [
+            _finding(
+                rule,
+                "На плане нет выхода наружу: ни главного входа, ни служебного выхода — эвакуироваться "
+                "некуда. Отметьте дверь наружу на плане.",
+                [],
+                0.0,
+            )
+        ]
     findings = []
-    for neck in evacuation.bottlenecks(plan):
+    for neck in evacuation.bottlenecks(plan, explain=explain):
         if neck.measured_m <= 0.01:
             how = "пути к выходу нет совсем: проход перекрыт оборудованием"
         else:
-            how = f"путь к выходу сужается до {neck.measured_m:g} м"
-        cause = f" Сужение создают: {', '.join(f'«{c}»' for c in neck.culprits)}." if neck.culprits else ""
-        message = (
-            f"Из зоны «{neck.zone_label}» {how} при норме {neck.required_m:g} м.{cause}"
+            via = f" — через {neck.exit_label}" if neck.exit_label else ""
+            how = f"самый широкий путь наружу{via} — сужается до {neck.measured_m:g} м"
+        if neck.culprits:
+            cause = f" Сужение создают: {', '.join(f'«{c}»' for c in neck.culprits)}."
+        elif neck.gap is not None:
+            cause = " Сужают проход стены помещения: снять сужение можно только перепланировкой."
+        else:
+            cause = ""
+        message = f"Из зоны «{neck.zone_label}» {how} при норме {neck.required_m:g} м.{cause}"
+        objects = neck.culprits or ([neck.zone_id] if neck.zone_id else [])
+        findings.append(
+            _finding(rule, message, objects, neck.measured_m, required=neck.required_m, gap=neck.gap)
         )
-        findings.append(_finding(rule, message, neck.culprits or [neck.zone_id], neck.measured_m, required=neck.required_m))
     return findings
 
 
@@ -476,14 +520,28 @@ def _check_extinguishers(plan: Plan, rule: Rule) -> list[Finding]:
             )
         )
     reach = evacuation.extinguisher_reach(plan)
-    if reach is not None and reach[0] > (rule.value or evacuation.EXTINGUISHER_REACH_M):
+    limit = rule.value or evacuation.EXTINGUISHER_REACH_M
+    if reach is not None and reach.farthest_m is not None and reach.farthest_m > limit:
+        x, y = reach.farthest_point
         findings.append(
             _finding(
                 rule,
-                f"От точки X {reach[1][0]:g} · Y {reach[1][1]:g} м до ближайшего огнетушителя {reach[0]:g} м "
-                f"пути при норме не более {rule.value:g} м (п. 406).",
+                f"От точки X {x:g} · Y {y:g} м до ближайшего огнетушителя {reach.farthest_m:g} м "
+                f"пути при норме не более {limit:g} м (п. 406).",
                 [e.id for e in placed],
-                reach[0],
+                reach.farthest_m,
+                severity=Severity.ERROR,
+            )
+        )
+    if reach is not None and reach.unreachable_point is not None:
+        x, y = reach.unreachable_point
+        findings.append(
+            _finding(
+                rule,
+                f"Из части помещения около X {x:g} · Y {y:g} м (около {reach.unreachable_sqm:g} м²) к "
+                f"огнетушителю нет пути: он за глухой перегородкой или проход перекрыт (п. 406).",
+                [e.id for e in placed],
+                None,
                 severity=Severity.ERROR,
             )
         )
@@ -706,6 +764,8 @@ def validate(
         checked.append(rule.id)
         if check is _check_path_width:
             findings.extend(_check_path_width(plan, rule, explain=explain))
+        elif check is _check_evacuation:
+            findings.extend(_check_evacuation(plan, rule, explain=explain))
         else:
             findings.extend(check(plan, rule))
 

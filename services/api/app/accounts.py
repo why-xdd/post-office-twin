@@ -24,8 +24,14 @@ from pydantic import BaseModel
 
 HASH_ITERATIONS = 200_000
 SESSION_HOURS = 12
+# Неверные пароли считаются по паре «адрес + логин»: подбор с одного адреса останавливается, а
+# чужой вход так не заблокировать — у владельца учётки другой адрес.
 MAX_FAILURES = 5
+# С одного адреса по всем логинам вместе: перебор логинов из README упирается сюда.
+MAX_FAILURES_PER_ADDRESS = 30
 FAILURE_WINDOW_S = 300
+# Сколько разных пар держать в памяти, прежде чем выбросить устаревшие.
+FAILURE_TABLE_LIMIT = 10_000
 
 ROLES = {
     "head": "Начальник отделения",
@@ -100,42 +106,78 @@ class Accounts:
         self._lock = threading.Lock()
 
     def ensure_demo_users(self) -> None:
-        if not demo_enabled():
-            return
-        for person in DEMO_USERS:
-            if self.store.get_record("user", person["login"]) is None:
-                self.create_user(person["login"], person["name"], person["role"], demo_password())
+        """Демо-учётки соответствуют настройке при каждом запуске.
 
-    def create_user(self, login: str, name: str, role: str, password: str) -> User:
+        Выключили демо-входы — учётки удаляются, и прежний пароль из README больше не пускает.
+        Сменили пароль — учётки перехешируются новым. Иначе база, пережившая выкладку, хранила бы
+        старые учётки с паролем из открытого README.
+        """
+        for person in DEMO_USERS:
+            record = self.store.get_record("user", person["login"])
+            if not demo_enabled():
+                if record is not None and record.get("demo"):
+                    self.store.delete_record("user", person["login"])
+                continue
+            current = record is not None and hmac.compare_digest(
+                record["hash"], _hash(demo_password(), bytes.fromhex(record["salt"]))
+            )
+            if not current:
+                self.create_user(person["login"], person["name"], person["role"], demo_password(), demo=True)
+
+    def create_user(self, login: str, name: str, role: str, password: str, demo: bool = False) -> User:
         if role not in ROLES:
             raise ValueError(f"Неизвестная роль: {role}")
         salt = secrets.token_bytes(16)
-        record = {"login": login, "name": name, "role": role, "salt": salt.hex(), "hash": _hash(password, salt)}
+        record = {
+            "login": login,
+            "name": name,
+            "role": role,
+            "salt": salt.hex(),
+            "hash": _hash(password, salt),
+            "demo": demo,
+        }
         self.store.put_record("user", login, record)
         return _public(record)
 
-    def _blocked(self, login: str) -> bool:
+    def _recent(self, key: str, now: float) -> list[float]:
+        recent = [t for t in self._failures.get(key, []) if now - t < FAILURE_WINDOW_S]
+        if recent:
+            self._failures[key] = recent
+        else:
+            self._failures.pop(key, None)
+        return recent
+
+    def _blocked(self, address: str, login: str) -> bool:
         now = time.monotonic()
         with self._lock:
-            recent = [t for t in self._failures.get(login, []) if now - t < FAILURE_WINDOW_S]
-            self._failures[login] = recent
-            return len(recent) >= MAX_FAILURES
+            return (
+                len(self._recent(f"{address}|{login}", now)) >= MAX_FAILURES
+                or len(self._recent(address, now)) >= MAX_FAILURES_PER_ADDRESS
+            )
 
-    def _fail(self, login: str) -> None:
+    def _fail(self, address: str, login: str) -> None:
+        now = time.monotonic()
         with self._lock:
-            self._failures.setdefault(login, []).append(time.monotonic())
+            if len(self._failures) > FAILURE_TABLE_LIMIT:
+                for key in list(self._failures):
+                    self._recent(key, now)
+            self._failures.setdefault(f"{address}|{login}", []).append(now)
+            self._failures.setdefault(address, []).append(now)
 
-    def login(self, login: str, password: str) -> Session:
-        """Вход по паролю. PermissionError — неверная пара, RuntimeError — слишком много попыток."""
+    def login(self, login: str, password: str, address: str = "") -> Session:
+        """Вход по паролю. PermissionError — неверная пара, RuntimeError — слишком много попыток.
+
+        address — откуда пришёл запрос: счёт неудачных попыток ведётся по нему вместе с логином.
+        """
         login = login.strip().lower()
-        if self._blocked(login):
+        if self._blocked(address, login):
             raise RuntimeError("Слишком много неудачных попыток. Подождите 5 минут.")
         record = self.store.get_record("user", login)
         expected = record["hash"] if record else _hash(password, b"0" * 16)
         actual = _hash(password, bytes.fromhex(record["salt"])) if record else ""
         # Сравнение за постоянное время: по задержке нельзя понять, совпало ли начало.
         if record is None or not hmac.compare_digest(expected, actual):
-            self._fail(login)
+            self._fail(address, login)
             raise PermissionError("Неверный логин или пароль.")
         return self._open(record)
 
@@ -146,8 +188,10 @@ class Accounts:
         person = next((p for p in DEMO_USERS if p["role"] == role), None)
         if person is None:
             raise PermissionError("Нет демо-сотрудника с такой ролью.")
-        self.ensure_demo_users()
         record = self.store.get_record("user", person["login"])
+        if record is None:
+            self.create_user(person["login"], person["name"], person["role"], demo_password(), demo=True)
+            record = self.store.get_record("user", person["login"])
         assert record is not None
         return self._open(record)
 

@@ -10,11 +10,12 @@
 
 from __future__ import annotations
 
+import os
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Literal, Protocol
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.accounts import User
 from app.assistant import peak
@@ -24,7 +25,11 @@ from app.rules.engine import Severity, validate
 
 Status = Literal["new", "in_progress", "resolved"]
 STATUS_LABELS = {"new": "Новое", "in_progress": "В работе", "resolved": "Решено"}
-SOON_DAYS = 14
+# Сколько дней вперёд срок осмотра считается близким — так же, как в списке сроков на клиенте.
+SOON_DAYS = 30
+# Пояс отделения, в котором наступает «сегодня»: сервер в контейнере живёт по UTC, и в первые
+# часы московских суток он показывал бы вчерашнюю дату.
+DEFAULT_TIMEZONE = "Europe/Moscow"
 WEEKDAYS = ("понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье")
 
 
@@ -39,6 +44,13 @@ class IncidentIn(BaseModel):
     text: str = Field(min_length=1, max_length=500, description="Что случилось, своими словами")
     out_of_service: bool = Field(default=False, description="Объект не работает совсем")
     reporter: str | None = Field(default=None, max_length=80, description="Имя, если сотрудник не вошёл")
+
+    @field_validator("text")
+    @classmethod
+    def _meaningful(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Опишите, что случилось: текст обращения пустой.")
+        return value.strip()
 
 
 class StatusChange(BaseModel):
@@ -65,6 +77,30 @@ class Incident(BaseModel):
     created_at: str
     created_by: str
     history: list[HistoryEntry]
+
+
+def local_today() -> date:
+    """Сегодняшняя дата в поясе отделения (OPS_TWIN_TZ, по умолчанию Москва)."""
+    name = os.environ.get("OPS_TWIN_TZ", DEFAULT_TIMEZONE)
+    try:
+        from zoneinfo import ZoneInfo
+
+        zone = ZoneInfo(name)
+    except Exception:  # noqa: BLE001 — в образе без базы поясов: Москва без перехода на летнее время
+        zone = timezone(timedelta(hours=3))
+    return datetime.now(zone).date()
+
+
+def plural(count: int, one: str, few: str, many: str) -> str:
+    """Форма слова для числа: 1 нарушение, 3 нарушения, 21 нарушение, 11 нарушений."""
+    tail = abs(count) % 100
+    if 11 <= tail <= 14:
+        return many
+    if tail % 10 == 1:
+        return one
+    if 2 <= tail % 10 <= 4:
+        return few
+    return many
 
 
 def _now() -> str:
@@ -123,10 +159,14 @@ def change_status(store: Records, plan_id: str, incident_id: str, change: Status
     if record is None or record.get("plan_id") != plan_id:
         raise KeyError(incident_id)
     incident = Incident.model_validate(record)
+    note = (change.note or "").strip() or None
+    # Тот же статус без комментария — повторное нажатие, а не новое событие: в журнал не пишется.
+    if change.status == incident.status and note is None:
+        return incident
     incident.status = change.status
     incident.status_label = STATUS_LABELS[change.status]
     incident.history.append(
-        HistoryEntry(at=_now(), status=change.status, by=_who(user, None), note=(change.note or "").strip() or None)
+        HistoryEntry(at=_now(), status=change.status, by=_who(user, None), note=note)
     )
     store.put_record("incident", incident.id, incident.model_dump(), plan_id)
     return incident
@@ -137,6 +177,9 @@ class InspectionDone(BaseModel):
     next_inspection: date | None = Field(
         default=None, description="Срок следующего осмотра; без него берётся прежний интервал"
     )
+    done_on: date | None = Field(
+        default=None, description="Когда выполнен осмотр — день по часам сотрудника; без него — сегодня в поясе отделения"
+    )
 
 
 def mark_inspected(document: dict[str, Any], payload: InspectionDone, today: date | None = None) -> tuple[dict[str, Any], str]:
@@ -144,7 +187,7 @@ def mark_inspected(document: dict[str, Any], payload: InspectionDone, today: dat
 
     ValueError — следующий срок не задан и прежнего интервала нет: выдумывать его сервис не будет.
     """
-    today = today or date.today()
+    today = today or payload.done_on or local_today()
     item = next((e for e in document.get("equipment", []) if e.get("id") == payload.object_id), None)
     if item is None:
         raise KeyError(payload.object_id)
@@ -230,7 +273,7 @@ def _days(n: int) -> str:
 
 
 def today_summary(plan: Plan, incidents: list[Incident], user: User | None, today: date | None = None) -> Today:
-    today = today or date.today()
+    today = today or local_today()
     broken_ids = sorted({i.object_id for i in incidents if i.out_of_service and i.status != "resolved"})
     labels = {e.id: e.label or e.type for e in plan.equipment}
     actions: list[Action] = []
@@ -293,7 +336,9 @@ def today_summary(plan: Plan, incidents: list[Incident], user: User | None, toda
     errors = sum(1 for f in findings if f.severity is Severity.ERROR)
     warnings = sum(1 for f in findings if f.severity is Severity.WARNING)
     if errors:
-        actions.append(Action(text=f"На плане {errors} нарушени{'е' if errors == 1 else 'я' if errors < 5 else 'й'} норм — откройте «Проверку»", kind="check"))
+        # Те же слова и тот же экран, что в «Обзоре»: там проблемы плана собраны с исправлением.
+        word = plural(errors, "проблема", "проблемы", "проблем")
+        actions.append(Action(text=f"На плане {errors} {word} — откройте «Обзор»", kind="check"))
 
     storage_report = parcel_storage.analyze(plan)
     storage_short = None

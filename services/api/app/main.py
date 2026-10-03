@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
+from datetime import date
 from pathlib import Path
 from typing import Any
 
+import threading
 import time
 import uuid
 from urllib.parse import quote
@@ -129,6 +132,25 @@ def require(request: Request, permission: str | None = None) -> User:
     return user
 
 
+def _client_address(request: Request) -> str:
+    """Адрес посетителя для счёта неудачных входов.
+
+    X-Forwarded-For принимается, только когда запрос пришёл от прокси с локального или частного
+    адреса: так работают nginx на том же сервере и хостинг с балансировщиком. Напрямую из
+    интернета заголовок подставит кто угодно, и счёт попыток по нему обходился бы подменой.
+    """
+    direct = request.client.host if request.client else ""
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded:
+        try:
+            trusted = ipaddress.ip_address(direct).is_private or ipaddress.ip_address(direct).is_loopback
+        except ValueError:
+            trusted = False
+        if trusted:
+            return forwarded.split(",")[0].strip()
+    return direct
+
+
 def _set_session(request: Request, response: Response, token: str) -> None:
     secure = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
     response.set_cookie(
@@ -164,7 +186,7 @@ def auth_me(request: Request) -> dict[str, Any]:
 @app.post("/api/auth/login", summary="Вход по логину и паролю")
 def auth_login(payload: LoginRequest, request: Request, response: Response) -> dict[str, Any]:
     try:
-        session = accounts.login(payload.login, payload.password)
+        session = accounts.login(payload.login, payload.password, _client_address(request))
     except RuntimeError as error:
         raise HTTPException(status_code=429, detail=str(error)) from error
     except PermissionError as error:
@@ -260,10 +282,35 @@ def list_plans() -> list[dict[str, Any]]:
     return store.list_plans()
 
 
+def _author(user: User | None) -> str:
+    """Подпись версии: кто сохранил. Пустая — сохранено без входа."""
+    return f"{user.name}, {user.role_label.lower()}" if user else ""
+
+
+INSPECTION_FIELDS = ("last_inspection", "next_inspection")
+
+
+def _inspection_dates(document: dict[str, Any]) -> dict[str, tuple[Any, ...]]:
+    result = {}
+    for item in document.get("equipment") or []:
+        inventory = item.get("inventory") or {}
+        result[str(item.get("id"))] = tuple(inventory.get(field) for field in INSPECTION_FIELDS)
+    return result
+
+
+def _changes_inspections(before: dict[str, Any], after: dict[str, Any]) -> bool:
+    """Меняет ли новая версия даты осмотров: правит существующие или вносит их новому объекту."""
+    old = _inspection_dates(before)
+    for object_id, dates in _inspection_dates(after).items():
+        if dates != old.get(object_id, (None, None)) and any(dates):
+            return True
+    return False
+
+
 @app.post("/api/plans", response_model=PlanRef, status_code=201, summary="Загрузить план")
-def create_plan(payload: CreatePlanRequest) -> PlanRef:
+def create_plan(payload: CreatePlanRequest, request: Request) -> PlanRef:
     _parse_plan(payload.document)
-    plan_id, version = store.create(payload.title, payload.document, payload.note)
+    plan_id, version = store.create(payload.title, payload.document, payload.note, _author(current_user(request)))
     return PlanRef(id=plan_id, version=version)
 
 
@@ -290,10 +337,22 @@ def get_plan(plan_id: str, version: int | None = None) -> dict[str, Any]:
 
 
 @app.put("/api/plans/{plan_id}", response_model=PlanRef, summary="Сохранить новую версию плана")
-def save_plan(plan_id: str, payload: SaveVersionRequest) -> PlanRef:
+def save_plan(plan_id: str, payload: SaveVersionRequest, request: Request) -> PlanRef:
+    """Планировку правят и без входа. Даты осмотров — нет: это отметка о работе конкретного
+    человека, и её ставят начальник отделения или инженер под своим именем."""
     _parse_plan(payload.document)
+    user = current_user(request)
     try:
-        version = store.save_version(plan_id, payload.document, payload.note, payload.title)
+        previous = store.get(plan_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"План {plan_id} не найден") from None
+    if _changes_inspections(previous, payload.document) and not allowed(user, "inspection.done"):
+        raise HTTPException(
+            status_code=403,
+            detail="Даты осмотров меняют начальник отделения и инженер: войдите под своей учётной записью.",
+        )
+    try:
+        version = store.save_version(plan_id, payload.document, payload.note, payload.title, _author(user))
     except KeyError:
         raise HTTPException(status_code=404, detail=f"План {plan_id} не найден") from None
     return PlanRef(id=plan_id, version=version)
@@ -355,17 +414,20 @@ def inspection_done(plan_id: str, payload: operations.InspectionDone, request: R
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     label = operations.object_label(plan, payload.object_id)
-    note = f"Осмотр «{label}» выполнен, следующий {following} — {user.name}"
-    version = store.save_version(plan_id, document, note)
+    note = f"Осмотр «{label}» выполнен, следующий {following}"
+    version = store.save_version(plan_id, document, note, author=_author(user))
     return PlanRef(id=plan_id, version=version)
 
 
 @app.get("/api/plans/{plan_id}/today", response_model=operations.Today, summary="Сводка на сегодня")
-def plan_today(plan_id: str, request: Request) -> operations.Today:
-    """Что сломано, какие осмотры подошли, сколько окон нужно в пик с учётом неисправных."""
+def plan_today(plan_id: str, request: Request, day: date | None = None) -> operations.Today:
+    """Что сломано, какие осмотры подошли, сколько окон нужно в пик с учётом неисправных.
+
+    day — сегодняшний день по часам сотрудника; без него — в поясе отделения.
+    """
     _, plan = _latest(plan_id)
     incidents = operations.list_incidents(store, plan_id)
-    return operations.today_summary(plan, incidents, current_user(request))
+    return operations.today_summary(plan, incidents, current_user(request), day)
 
 
 @app.get("/api/network", response_model=network.NetworkReport, summary="Сеть отделений: очередь на ремонт")
@@ -385,22 +447,30 @@ def network_priorities() -> network.NetworkReport:
     return network.build(plans, load, incidents)
 
 
+_network_demo_lock = threading.Lock()
+
+
 @app.post("/api/network/demo", summary="Загрузить демонстрационную сеть")
 def network_demo() -> dict[str, Any]:
-    """Добавляет условные отделения, которых ещё нет среди сохранённых планов (по названию)."""
+    """Добавляет условные отделения, которых ещё нет среди сохранённых планов (по названию).
+
+    Проверка и вставка — под одной блокировкой: два одновременных нажатия иначе добавляли сеть дважды.
+    """
     folder = _network_sample_dir()
     if not folder.exists():
         raise HTTPException(status_code=404, detail="Демонстрационная сеть не входит в эту поставку")
-    present = {p["title"] for p in store.list_plans()}
-    added = 0
-    for path in sorted(folder.glob("*.json")):
-        document = json.loads(path.read_text(encoding="utf-8"))
-        title = document["ops"]["name"]
-        if title in present:
-            continue
-        _parse_plan(document)
-        store.create(title, document, "Демонстрационная сеть")
-        added += 1
+    with _network_demo_lock:
+        present = {p["title"] for p in store.list_plans()}
+        added = 0
+        for path in sorted(folder.glob("*.json")):
+            document = json.loads(path.read_text(encoding="utf-8"))
+            title = document["ops"]["name"]
+            if title in present:
+                continue
+            _parse_plan(document)
+            store.create(title, document, "Демонстрационная сеть")
+            present.add(title)
+            added += 1
     return {"added": added}
 
 
@@ -413,7 +483,10 @@ def plan_versions(plan_id: str) -> list[dict[str, Any]]:
 
 
 @app.delete("/api/plans/{plan_id}", status_code=204, summary="Удалить план")
-def delete_plan(plan_id: str) -> Response:
+def delete_plan(plan_id: str, request: Request) -> Response:
+    """Удаление необратимо, поэтому только после входа: на общем сервере чужой план иначе исчезнет
+    от одного случайного нажатия."""
+    require(request)
     try:
         store.delete(plan_id)
     except KeyError:

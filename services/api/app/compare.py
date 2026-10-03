@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 import math
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, Field
 
@@ -23,12 +23,17 @@ MOVE_TOLERANCE_M = 0.05
 ROTATE_TOLERANCE_DEG = 1.0
 
 
+# Цена — неотрицательное конечное число: отрицательная превращала смету в доход, а «inf» — в мусор.
+Price = Annotated[float, Field(ge=0, le=1e10, allow_inf_nan=False)]
+
+
 class Prices(BaseModel):
-    move: float | None = Field(default=None, ge=0, description="Перестановка одного объекта, ₽")
-    remove: float | None = Field(default=None, ge=0, description="Демонтаж одного объекта, ₽")
-    install: float | None = Field(default=None, ge=0, description="Монтаж нового объекта, ₽ за штуку")
-    wall_per_m: float | None = Field(default=None, ge=0, description="Новая или перенесённая перегородка, ₽ за метр")
-    equipment: dict[str, float] = Field(default_factory=dict, description="Цена нового оборудования по коду типа, ₽")
+    move: Price | None = Field(default=None, description="Перестановка одного объекта, ₽")
+    remove: Price | None = Field(default=None, description="Демонтаж одного объекта, ₽")
+    install: Price | None = Field(default=None, description="Монтаж нового объекта, ₽ за штуку")
+    wall_per_m: Price | None = Field(default=None, description="Новая или перенесённая перегородка, ₽ за метр")
+    wall_removal_per_m: Price | None = Field(default=None, description="Демонтаж перегородки, ₽ за метр")
+    equipment: dict[str, Price] = Field(default_factory=dict, description="Цена нового оборудования по коду типа, ₽")
 
 
 class Item(BaseModel):
@@ -60,6 +65,7 @@ class Comparison(BaseModel):
     removed: list[Item]
     moved: list[Item]
     walls_changed_m: float
+    walls_removed_m: float = Field(default=0.0, description="Метры перегородок, которых в новом варианте нет")
     metrics: list[Metric]
     lines: list[Line]
     total: float
@@ -84,12 +90,22 @@ def _wall_key(wall: Any) -> tuple:
     return tuple(ends)
 
 
-def _walls_changed(before: Plan, after: Plan) -> float:
+def _walls_new(before: Plan, after: Plan) -> float:
     """Метры стен, которых в прежнем варианте не было (новые и перенесённые)."""
     old = {_wall_key(w) for w in before.walls}
     length = 0.0
     for wall in after.walls:
         if _wall_key(wall) not in old:
+            length += math.dist(wall.from_, wall.to)
+    return round(length, 2)
+
+
+def _walls_gone(before: Plan, after: Plan) -> float:
+    """Метры перегородок, которых в новом варианте нет: их демонтируют. Наружные стены не сносят."""
+    kept = {_wall_key(w) for w in after.walls}
+    length = 0.0
+    for wall in before.walls:
+        if wall.type != "outer" and _wall_key(wall) not in kept:
             length += math.dist(wall.from_, wall.to)
     return round(length, 2)
 
@@ -148,7 +164,8 @@ def compare(before: Plan, after: Plan, prices: Prices) -> Comparison:
         for e in after.equipment
         if e.id in old and _moved(old[e.id], e)
     ]
-    walls = _walls_changed(before, after)
+    walls = _walls_new(before, after)
+    removed_walls = _walls_gone(before, after)
 
     lines: list[Line] = []
     if moved:
@@ -166,6 +183,10 @@ def compare(before: Plan, after: Plan, prices: Prices) -> Comparison:
             lines.append(
                 _line(f"Покупка: {name}", len(items), "шт.", prices.equipment.get(type_code), f"equipment:{type_code}")
             )
+    if removed_walls > 0:
+        lines.append(
+            _line("Демонтаж перегородок", removed_walls, "м", prices.wall_removal_per_m, "wall_removal_per_m")
+        )
     if walls > 0:
         lines.append(_line("Новые и перенесённые перегородки", walls, "м", prices.wall_per_m, "wall_per_m"))
 
@@ -175,6 +196,7 @@ def compare(before: Plan, after: Plan, prices: Prices) -> Comparison:
         removed=removed,
         moved=moved,
         walls_changed_m=walls,
+        walls_removed_m=removed_walls,
         metrics=_metrics(before, after),
         lines=lines,
         total=round(sum(line.total or 0 for line in lines), 2),

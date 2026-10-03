@@ -99,12 +99,12 @@ def test_fully_blocked_target_is_unreachable() -> None:
 
 
 def test_sample_plan_entrance_is_narrow() -> None:
-    """В примере заказчика банкомат и скамья оставляют у входа проход около 0,65 м."""
+    """В примере заказчика скамья у входа оставляет до стены с дверью проход около 0,75 м."""
     plan = Plan.model_validate(json.loads(SAMPLE.read_text(encoding="utf-8")))
     routes = passability.client_route_widths(plan, ("cashier_window", "pvz_counter"))
     assert routes
     assert all(r.reachable for r in routes)
-    assert max(r.width_m for r in routes) < 0.7
+    assert max(r.width_m for r in routes) < 0.8
 
 
 def test_largest_clear_circle_in_open_room() -> None:

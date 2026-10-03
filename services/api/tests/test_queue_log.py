@@ -142,3 +142,8 @@ def test_undated_log_has_no_weekdays() -> None:
     plan = Plan.model_validate(json.loads((Path(__file__).resolve().parents[3] / "data" / "demo_plan.json").read_text(encoding="utf-8")))
     source, records, skipped = _ql.read("Час;Посетителей\n10;40\n11;55\n")
     assert _ql.analyze(plan, source, records, skipped).weekdays == []
+
+
+def test_counter_rows_with_nan_or_inf_are_skipped() -> None:
+    source, records, skipped = queue_log.read("Час;Посетителей\n10;40\n11;nan\n12;inf\n13;-5\n")
+    assert [r["hour"] for r in records] == [10] and skipped == 3

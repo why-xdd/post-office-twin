@@ -42,3 +42,15 @@ def test_rule_only_applies_when_volumes_are_known() -> None:
     short = demo(parcels_in_per_day=200)
     finding = next(f for f in validate(short).findings if f.rule_id == "parcel_storage_capacity")
     assert finding.clause == "п. 3.10" and finding.measured < finding.required
+
+
+def test_infinite_capacity_in_a_passport_does_not_break_the_check() -> None:
+    """«inf» в атрибуте — опечатка, а не повод для ошибки 500: место считается по габариту."""
+    document = json.loads((DATA / "demo_plan.json").read_text(encoding="utf-8"))
+    rack = next(e for e in document["equipment"] if e["type"] == "storage_rack" and "посыл" in (e.get("label") or "").lower())
+    rack.setdefault("attributes", {})["places"] = "inf"
+    plan = Plan.model_validate(document)
+    report = storage.analyze(plan)
+    item = next(i for i in report.items if i.id == rack["id"])
+    assert item.estimated and item.places < 1000
+    validate(plan)

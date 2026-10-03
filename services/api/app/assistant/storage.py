@@ -53,12 +53,19 @@ class StorageReport(BaseModel):
     assumptions: list[str] = Field(default_factory=list)
 
 
+# Больше мест на одном объекте в отделении не бывает: такое число — опечатка в паспорте.
+MAX_PLACES = 100_000
+
+
 def _int(value: object) -> int | None:
+    """Целое число мест из атрибута или None, если там не число, бесконечность или чепуха."""
     try:
-        number = int(float(value))  # type: ignore[arg-type]
-    except (TypeError, ValueError):
+        number = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError, OverflowError):
         return None
-    return number if number >= 0 else None
+    if not math.isfinite(number) or number < 0 or number > MAX_PLACES:
+        return None
+    return int(number)
 
 
 def places_of(item: Equipment) -> tuple[int, bool] | None:

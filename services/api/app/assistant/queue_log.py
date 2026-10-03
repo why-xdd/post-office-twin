@@ -223,7 +223,8 @@ def read(text: str) -> tuple[str, list[dict], int]:
                 count = float(re.sub(r"\s", "", cell(row, "count") or "").replace(",", "."))
             except ValueError:
                 count = -1
-            if hour is None or count < 0:
+            # «nan» и «inf» Python читает как числа: такие строки — испорченные данные, а не поток.
+            if hour is None or not math.isfinite(count) or count < 0:
                 skipped += 1
                 continue
             records.append({"day": day if day and _day(day) else UNDATED, "hour": hour, "count": count})

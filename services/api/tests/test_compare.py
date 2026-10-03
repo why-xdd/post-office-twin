@@ -63,3 +63,22 @@ def test_moved_partition_is_measured(pair: tuple[Plan, Plan]) -> None:
     assert result.walls_changed_m > 0
     line = next(l for l in result.lines if l.key == "wall_per_m")
     assert line.total == pytest.approx(4000 * result.walls_changed_m)
+
+
+def test_demolished_partitions_are_priced(pair: tuple[Plan, Plan]) -> None:
+    before, _ = pair
+    document = before.model_dump(by_alias=True, exclude_none=True)
+    document["walls"] = [w for w in document["walls"] if w.get("type") != "partition"]
+    after = Plan.model_validate(document)
+    result = compare.compare(before, after, compare.Prices(wall_removal_per_m=1000))
+    assert result.walls_removed_m > 0
+    line = next(l for l in result.lines if l.key == "wall_removal_per_m")
+    assert line.total == pytest.approx(1000 * result.walls_removed_m)
+
+
+def test_prices_must_be_finite_and_not_negative() -> None:
+    from pydantic import ValidationError
+
+    for bad in ({"move": -1}, {"equipment": {"atm": -49000}}, {"install": float("inf")}):
+        with pytest.raises(ValidationError):
+            compare.Prices.model_validate(bad)

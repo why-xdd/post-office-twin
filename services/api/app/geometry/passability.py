@@ -202,7 +202,13 @@ class Region:
 
 
 def _eroded(space: Polygon | MultiPolygon, width: float) -> Polygon | MultiPolygon:
-    return space.buffer(-width / 2.0, join_style="mitre")
+    """Где может стоять центр круга диаметром width, не задевая препятствий.
+
+    Углы скругляются: человек и кресло-коляска огибают угол объекта по дуге. С острыми углами
+    проход наискось между углами двух объектов выходил уже настоящего — до 30 % — и давал
+    ложные нарушения там, где на чертеже видно, что места хватает.
+    """
+    return space.buffer(-width / 2.0, quad_segs=8)
 
 
 class ErosionCache:
@@ -247,6 +253,120 @@ def _width_between(cache: ErosionCache, start: Point, goal: Point) -> tuple[floa
         else:
             high = mid
     return round(low / 100.0, 2), True
+
+
+@dataclass(frozen=True)
+class Pinch:
+    """Самое узкое место пути: отрезок между двумя препятствиями и объекты на его концах."""
+
+    a: tuple[float, float]
+    b: tuple[float, float]
+    width_m: float
+    objects: tuple[str, ...]
+
+
+# Насколько отрезок между препятствиями может расходиться с замером ширины, чтобы считаться им.
+PINCH_MATCH_M = 0.04
+
+
+def obstacle_shapes(plan: Plan) -> list[tuple[str | None, object]]:
+    """Препятствия поштучно: оборудование с его id, перегородки и участки наружной стены.
+
+    Поштучно, а не одним целым: шкаф, прижатый к стене, иначе сливается со стеной, и просвет
+    между ним и соседним объектом не отличить от просвета внутри одного препятствия.
+    """
+    shapes: list[tuple[str | None, object]] = [
+        (item.id, core.equipment_polygon(item)) for item in core.floor_equipment(plan)
+    ]
+    shapes.extend((None, _wall_obstacle(plan, wall.id)) for wall in plan.walls if wall.type != "outer")
+    outline = core.outline(plan)
+    if outline is not None:
+        ring = list(outline.exterior.coords)
+        shapes.extend((None, LineString([ring[k], ring[k + 1]])) for k in range(len(ring) - 1))
+    return [(owner, shape) for owner, shape in shapes if shape is not None and not shape.is_empty]
+
+
+def _gap_near(shapes: list[tuple[str | None, object]], zone, width_m: float) -> Pinch | None:
+    """Кратчайший просвет между двумя разными препятствиями рядом с zone."""
+    reach = width_m / 2 + 0.06
+    area = zone.buffer(reach)
+    local = []
+    for owner, shape in shapes:
+        if shape.distance(zone) <= reach:
+            clipped = shape.intersection(area)
+            if not clipped.is_empty:
+                local.append((owner, clipped))
+    best: Pinch | None = None
+    for i in range(len(local)):
+        for j in range(i + 1, len(local)):
+            a, b = nearest_points(local[i][1], local[j][1])
+            distance = a.distance(b)
+            # Касающиеся препятствия — одно целое для прохода: просвета между ними нет.
+            if distance < 0.05 or (best is not None and distance >= best.width_m):
+                continue
+            owners = tuple(o for o in (local[i][0], local[j][0]) if o is not None)
+            best = Pinch((round(a.x, 3), round(a.y, 3)), (round(b.x, 3), round(b.y, 3)), round(distance, 3), owners)
+    return best
+
+
+def pinch(plan: Plan, cache: "ErosionCache", start: Point, goal: Point, width_m: float) -> Pinch | None:
+    """Где именно путь от start к goal сужается до width_m.
+
+    На ширине width_m точки ещё связаны, на сантиметр шире — уже нет. Значит, узкое место — там,
+    где связь рвётся: либо у самой цели или начала (к ним не подойти шире), либо на перемычке,
+    без которой части свободного пола расходятся. Возле этого места ищется кратчайший просвет
+    между двумя разными препятствиями, и он должен совпасть с замером — иначе места нет вовсе:
+    например, когда к точке у стены не подойти из-за угла, а не из-за прохода.
+    """
+    w = int(round(width_m * 100))
+    if w < 2:
+        return None
+    low, high = cache.at(w), cache.at(w + 1)
+    s_low, g_low = low.reach(start, w / 200.0), low.reach(goal, w / 200.0)
+    if s_low is None or g_low is None:
+        return None
+    index = low.component(s_low)
+    if index is None:
+        return None
+    corridor = low.parts[index]
+
+    def part_of(point: Point):
+        position = high.reach(point, (w + 1) / 200.0)
+        if position is None:
+            return None
+        found = high.component(position)
+        return None if found is None else high.parts[found]
+
+    a, b = part_of(start), part_of(goal)
+    zones = []
+    if b is None:
+        zones.append(g_low.buffer(0.01))
+    if a is None:
+        zones.append(s_low.buffer(0.01))
+    if a is not None and b is not None:
+        inside = [part for part in high.parts if part.intersects(corridor)]
+        rest = corridor.difference(unary_union(inside).buffer(0.01)) if inside else corridor
+        pieces = [g for g in getattr(rest, "geoms", [rest]) if not g.is_empty and g.area > 0]
+        # Перемычка соединяет две части, которые на большей ширине уже не связаны.
+        necks = [q for q in pieces if sum(1 for part in inside if q.distance(part) < 0.02) >= 2]
+
+        def separates(neck) -> bool:
+            cut = corridor.difference(neck.buffer(0.03))
+            parts = [g for g in getattr(cut, "geoms", [cut]) if not g.is_empty]
+            first = next((g for g in parts if g.distance(s_low) < 1e-6), None)
+            return first is None or first.distance(g_low) > 1e-6
+
+        zones.extend(q for q in necks if separates(q))
+        pa, pb = nearest_points(a, b)
+        middle = Point((pa.x + pb.x) / 2, (pa.y + pb.y) / 2)
+        if corridor.buffer(0.02).contains(middle):
+            zones.append(middle.buffer(0.01))
+    shapes = obstacle_shapes(plan)
+    for zone in zones:
+        gap = _gap_near(shapes, zone, width_m)
+        if gap is not None and abs(gap.width_m - width_m) <= PINCH_MATCH_M:
+            return gap
+    return None
 
 
 def route_width(

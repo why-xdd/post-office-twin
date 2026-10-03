@@ -97,6 +97,10 @@ class PlanStore(_SqliteRecords):
         self._write_lock = threading.Lock()
         with self._connect() as conn:
             conn.executescript(SCHEMA)
+            # Автор версии появился позже первых баз: старая база получает колонку на месте.
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(versions)")}
+            if "author" not in columns:
+                conn.execute("ALTER TABLE versions ADD COLUMN author TEXT NOT NULL DEFAULT ''")
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path, timeout=BUSY_TIMEOUT_S)
@@ -107,7 +111,7 @@ class PlanStore(_SqliteRecords):
         conn.execute("PRAGMA synchronous = NORMAL")
         return conn
 
-    def create(self, title: str, document: dict[str, Any], note: str = "") -> tuple[str, int]:
+    def create(self, title: str, document: dict[str, Any], note: str = "", author: str = "") -> tuple[str, int]:
         plan_id = uuid.uuid4().hex
         with self._write_lock, self._connect() as conn:
             conn.execute(
@@ -115,16 +119,19 @@ class PlanStore(_SqliteRecords):
                 (plan_id, title, _now()),
             )
             conn.execute(
-                "INSERT INTO versions (plan_id, version, document, note, created_at) "
-                "VALUES (?, 1, ?, ?, ?)",
-                (plan_id, json.dumps(document, ensure_ascii=False), note, _now()),
+                "INSERT INTO versions (plan_id, version, document, note, created_at, author) "
+                "VALUES (?, 1, ?, ?, ?, ?)",
+                (plan_id, json.dumps(document, ensure_ascii=False), note, _now(), author),
             )
         return plan_id, 1
 
     def save_version(
-        self, plan_id: str, document: dict[str, Any], note: str = "", title: str | None = None
+        self, plan_id: str, document: dict[str, Any], note: str = "", title: str | None = None, author: str = ""
     ) -> int:
-        """Новая версия плана. title обновляет название плана в списке, если оно изменилось."""
+        """Новая версия плана. title обновляет название плана в списке, если оно изменилось.
+
+        author записывает сервер по сеансу, а не клиент: подпись в журнале версий не подделать.
+        """
         with self._write_lock, self._connect() as conn:
             row = conn.execute(
                 "SELECT COALESCE(MAX(version), 0) AS v FROM versions WHERE plan_id = ?",
@@ -134,9 +141,9 @@ class PlanStore(_SqliteRecords):
                 raise KeyError(plan_id)
             version = int(row["v"]) + 1
             conn.execute(
-                "INSERT INTO versions (plan_id, version, document, note, created_at) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (plan_id, version, json.dumps(document, ensure_ascii=False), note, _now()),
+                "INSERT INTO versions (plan_id, version, document, note, created_at, author) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (plan_id, version, json.dumps(document, ensure_ascii=False), note, _now(), author),
             )
             if title:
                 conn.execute("UPDATE plans SET title = ? WHERE id = ?", (title, plan_id))
@@ -171,7 +178,7 @@ class PlanStore(_SqliteRecords):
     def list_versions(self, plan_id: str) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT version, note, created_at FROM versions WHERE plan_id = ? "
+                "SELECT version, note, created_at, author FROM versions WHERE plan_id = ? "
                 "ORDER BY version",
                 (plan_id,),
             ).fetchall()
@@ -180,10 +187,12 @@ class PlanStore(_SqliteRecords):
         return [dict(row) for row in rows]
 
     def delete(self, plan_id: str) -> None:
+        """Удаляет план с версиями и всё, что к нему привязано: обращения о неисправностях."""
         with self._write_lock, self._connect() as conn:
             cur = conn.execute("DELETE FROM plans WHERE id = ?", (plan_id,))
             if cur.rowcount == 0:
                 raise KeyError(plan_id)
+            conn.execute("DELETE FROM records WHERE scope = ?", (plan_id,))
 
 
 PG_SCHEMA = (
@@ -215,6 +224,7 @@ PG_SCHEMA = (
     )
     """,
     "CREATE INDEX IF NOT EXISTS records_scope ON records (kind, scope)",
+    "ALTER TABLE versions ADD COLUMN IF NOT EXISTS author TEXT NOT NULL DEFAULT ''",
 )
 
 
@@ -284,18 +294,19 @@ class PostgresPlanStore:
         finally:
             conn.close()
 
-    def create(self, title: str, document: dict[str, Any], note: str = "") -> tuple[str, int]:
+    def create(self, title: str, document: dict[str, Any], note: str = "", author: str = "") -> tuple[str, int]:
         plan_id = uuid.uuid4().hex
 
         def work(conn) -> None:
             conn.run("INSERT INTO plans (id, title, created_at) VALUES (:id, :title, :at)", id=plan_id, title=title, at=_now())
             conn.run(
-                "INSERT INTO versions (plan_id, version, document, note, created_at) "
-                "VALUES (:id, 1, :doc, :note, :at)",
+                "INSERT INTO versions (plan_id, version, document, note, created_at, author) "
+                "VALUES (:id, 1, :doc, :note, :at, :author)",
                 id=plan_id,
                 doc=json.dumps(document, ensure_ascii=False),
                 note=note,
                 at=_now(),
+                author=author,
             )
 
         with self._write_lock:
@@ -303,7 +314,7 @@ class PostgresPlanStore:
         return plan_id, 1
 
     def save_version(
-        self, plan_id: str, document: dict[str, Any], note: str = "", title: str | None = None
+        self, plan_id: str, document: dict[str, Any], note: str = "", title: str | None = None, author: str = ""
     ) -> int:
         def work(conn) -> int:
             if not conn.run("SELECT 1 FROM plans WHERE id = :id FOR UPDATE", id=plan_id):
@@ -311,13 +322,14 @@ class PostgresPlanStore:
             current = conn.run("SELECT COALESCE(MAX(version), 0) FROM versions WHERE plan_id = :id", id=plan_id)
             version = int(current[0][0]) + 1
             conn.run(
-                "INSERT INTO versions (plan_id, version, document, note, created_at) "
-                "VALUES (:id, :v, :doc, :note, :at)",
+                "INSERT INTO versions (plan_id, version, document, note, created_at, author) "
+                "VALUES (:id, :v, :doc, :note, :at, :author)",
                 id=plan_id,
                 v=version,
                 doc=json.dumps(document, ensure_ascii=False),
                 note=note,
                 at=_now(),
+                author=author,
             )
             if title:
                 conn.run("UPDATE plans SET title = :title WHERE id = :id", title=title, id=plan_id)
@@ -360,7 +372,7 @@ class PostgresPlanStore:
         try:
             rows = self._rows(
                 conn,
-                "SELECT version, note, created_at FROM versions WHERE plan_id = :id ORDER BY version",
+                "SELECT version, note, created_at, author FROM versions WHERE plan_id = :id ORDER BY version",
                 id=plan_id,
             )
         finally:
@@ -374,6 +386,7 @@ class PostgresPlanStore:
             conn.run("DELETE FROM plans WHERE id = :id", id=plan_id)
             if conn.row_count == 0:
                 raise KeyError(plan_id)
+            conn.run("DELETE FROM records WHERE scope = :id", id=plan_id)
 
         with self._write_lock:
             self._transaction(work)

@@ -132,6 +132,9 @@ def test_broken_document_explains_what_is_wrong(client: TestClient) -> None:
 
 def test_delete_removes_plan(client: TestClient, document: dict) -> None:
     plan_id = client.post("/api/plans", json={"title": "ОПС", "document": document}).json()["id"]
+    # Удаление необратимо: без входа сервер его не делает.
+    assert client.delete(f"/api/plans/{plan_id}").status_code == 401
+    client.post("/api/auth/demo", json={"role": "designer"})
     assert client.delete(f"/api/plans/{plan_id}").status_code == 204
     assert client.get(f"/api/plans/{plan_id}").status_code == 404
 

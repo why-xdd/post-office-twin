@@ -102,7 +102,7 @@ def test_path_rule_names_the_windows_when_they_hold_the_narrowing(improvement: r
     improved = Plan.model_validate(improvement.improved_plan)
     path = next(f for f in validate(improved).findings if f.rule_id == "movement_path_width" and f.severity is Severity.ERROR)
     assert {"eq_cashier_1", "eq_cashier_2"} <= set(path.objects)
-    assert "Даже без них" in path.message
+    assert "между самими" in path.message
 
 
 def test_command_does_not_move_a_cashier_window(plan: Plan) -> None:

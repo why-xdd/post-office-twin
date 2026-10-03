@@ -119,7 +119,8 @@ def test_inspection_done_needs_role_and_saves_version(client: TestClient, plan_i
     saved = client.post(url, json={"object_id": item, "next_inspection": "2099-01-01"})
     assert saved.status_code == 200
     versions = client.get(f"/api/plans/{plan_id}/versions").json()
-    assert any("Морозова" in (v.get("note") or "") for v in versions)
+    # Подпись ставит сервер по сеансу — в поле автора, а не в тексте примечания от клиента.
+    assert any("Морозова" in (v.get("author") or "") for v in versions)
     updated = client.get(f"/api/plans/{plan_id}").json()
     inventory = next(e for e in updated["equipment"] if e["id"] == item)["inventory"]
     assert inventory["next_inspection"] == "2099-01-01"
@@ -132,3 +133,99 @@ def test_inspection_keeps_previous_interval_or_asks() -> None:
     bare = {"equipment": [{"id": "b"}]}
     with pytest.raises(ValueError):
         operations.mark_inspected(bare, operations.InspectionDone(object_id="b"), date(2026, 5, 1))
+
+
+def test_guest_cannot_forge_inspection_dates_but_can_edit_layout(client: TestClient, plan_id: str) -> None:
+    document = client.get(f"/api/plans/{plan_id}").json()
+    moved = json.loads(json.dumps(document))
+    moved["equipment"][0]["position"] = [moved["equipment"][0]["position"][0] + 0.1, moved["equipment"][0]["position"][1]]
+    assert client.put(f"/api/plans/{plan_id}", json={"document": moved, "note": "сдвиг"}).status_code == 200
+    forged = json.loads(json.dumps(moved))
+    forged["equipment"][0].setdefault("inventory", {})["last_inspection"] = "2026-10-01"
+    forged["equipment"][0]["inventory"]["next_inspection"] = "2099-01-01"
+    assert client.put(f"/api/plans/{plan_id}", json={"document": forged, "note": "Осмотр выполнен — Морозова"}).status_code == 403
+    client.post("/api/auth/demo", json={"role": "engineer"})
+    assert client.put(f"/api/plans/{plan_id}", json={"document": forged, "note": "осмотр"}).status_code == 200
+    versions = client.get(f"/api/plans/{plan_id}/versions").json()
+    assert versions[-1]["author"].startswith("Ковалёв") and versions[-2]["author"] == ""
+
+
+def test_deleting_a_plan_removes_its_incidents(client: TestClient, plan_id: str) -> None:
+    import app.main as main
+
+    client.post(f"/api/plans/{plan_id}/incidents", json={"object_id": window_id(client, plan_id), "text": "Сломан"})
+    assert main.store.list_records("incident", plan_id)
+    client.post("/api/auth/demo", json={"role": "head"})
+    assert client.delete(f"/api/plans/{plan_id}").status_code == 204
+    assert main.store.list_records("incident", plan_id) == []
+
+
+def test_empty_incident_text_is_rejected(client: TestClient, plan_id: str) -> None:
+    response = client.post(f"/api/plans/{plan_id}/incidents", json={"object_id": window_id(client, plan_id), "text": "   "})
+    assert response.status_code == 422
+
+
+def test_repeating_the_same_status_does_not_grow_history(client: TestClient, plan_id: str) -> None:
+    incident = client.post(
+        f"/api/plans/{plan_id}/incidents", json={"object_id": window_id(client, plan_id), "text": "Нет связи"}
+    ).json()
+    client.post("/api/auth/demo", json={"role": "engineer"})
+    url = f"/api/plans/{plan_id}/incidents/{incident['id']}"
+    client.patch(url, json={"status": "in_progress"})
+    again = client.patch(url, json={"status": "in_progress"}).json()
+    assert len(again["history"]) == 2
+
+
+def test_today_counts_problems_with_correct_wording(client: TestClient, plan_id: str) -> None:
+    actions = client.get(f"/api/plans/{plan_id}/today", params={"day": "2026-10-03"}).json()["actions"]
+    check = next(a for a in actions if a["kind"] == "check")
+    assert "откройте «Обзор»" in check["text"] and "нарушений" not in check["text"]
+    assert operations.plural(21, "проблема", "проблемы", "проблем") == "проблема"
+    assert operations.plural(12, "проблема", "проблемы", "проблем") == "проблем"
+
+
+def test_today_uses_the_day_the_employee_lives_in(client: TestClient, plan_id: str) -> None:
+    assert client.get(f"/api/plans/{plan_id}/today", params={"day": "2026-10-03"}).json()["date"] == "2026-10-03"
+    assert client.get(f"/api/plans/{plan_id}/today").json()["date"] == operations.local_today().isoformat()
+
+
+def test_lockout_is_per_address(client: TestClient) -> None:
+    """Пять неверных паролей с одного адреса не запирают учётку для владельца с другого адреса."""
+    import app.main as main
+
+    for _ in range(5):
+        try:
+            main.accounts.login("inzhener", "wrong", "203.0.113.7")
+        except PermissionError:
+            pass
+    with pytest.raises(RuntimeError):
+        main.accounts.login("inzhener", "test-only-password", "203.0.113.7")
+    assert main.accounts.login("inzhener", "test-only-password", "198.51.100.2").user.role == "engineer"
+
+
+def test_demo_accounts_follow_the_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.accounts import Accounts
+    from app.storage import PlanStore
+
+    store = PlanStore(tmp_path / "accounts.sqlite")
+    monkeypatch.setenv("OPS_TWIN_DEMO_PASSWORD", "first-password")
+    Accounts(store).ensure_demo_users()
+    monkeypatch.setenv("OPS_TWIN_DEMO_PASSWORD", "second-password")
+    accounts = Accounts(store)
+    accounts.ensure_demo_users()
+    with pytest.raises(PermissionError):
+        accounts.login("nachalnik", "first-password")
+    assert accounts.login("nachalnik", "second-password").user.role == "head"
+    monkeypatch.setenv("OPS_TWIN_DEMO_USERS", "0")
+    accounts = Accounts(store)
+    accounts.ensure_demo_users()
+    with pytest.raises(PermissionError):
+        accounts.login("nachalnik", "second-password")
+
+
+def test_concurrent_demo_network_is_added_once(client: TestClient) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _: client.post("/api/network/demo").json()["added"], range(2)))
+    assert sorted(results) == [0, 8]

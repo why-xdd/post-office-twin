@@ -1,0 +1,39 @@
+# Служба сервиса на своём сервере (без Docker). Ставится скриптом deploy/vps.sh.
+[Unit]
+Description=План ОПС — цифровой двойник отделения
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Отдельный безымянный пользователь без прав: пишет только в свою базу в /var/lib/ops-twin.
+DynamicUser=yes
+StateDirectory=ops-twin
+WorkingDirectory=/opt/ops-twin/services/api
+Environment=PYTHONUNBUFFERED=1
+Environment=OPS_TWIN_DB=/var/lib/ops-twin/plans.sqlite
+EnvironmentFile=-/etc/ops-twin.env
+# Пустой адрес — слушать и IPv4, и IPv6: часть мобильных сетей доходит до сервера только по IPv6.
+# «::» не годится: asyncio открывает такой сокет только для IPv6.
+ExecStart=/opt/ops-twin/services/api/.venv/bin/python -m uvicorn app.main:app --host "" --port 8080
+Restart=on-failure
+RestartSec=3
+
+# Сервер общий: проверка и автоисправление не должны отнимать процессор и память у других служб.
+Nice=10
+CPUWeight=20
+MemoryHigh=500M
+MemoryMax=700M
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target

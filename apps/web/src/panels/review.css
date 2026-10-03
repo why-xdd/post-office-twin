@@ -349,9 +349,17 @@
   line-height: 1.45;
 }
 
+/* Кнопки решения прилипают к низу панели: начало предпросмотра и «Применить» видны одновременно. */
 .proposal__actions {
+  position: sticky;
+  bottom: calc(-1 * var(--s-5));
+  z-index: 1;
   display: flex;
   gap: var(--s-2);
+  margin: 0 calc(-1 * var(--s-5)) calc(-1 * var(--s-5));
+  padding: var(--s-3) var(--s-5) var(--s-5);
+  background: var(--label);
+  box-shadow: 0 -1px 0 var(--label-edge);
 }
 
 .proposal__actions .btn--brass {
@@ -448,4 +456,11 @@
   height: 7px;
   border-radius: 50%;
   background: var(--caution);
+}
+
+/* Телефон: лист предпросмотра ниже, чем на экране компьютера, — панель исправления в него помещается. */
+@media (max-width: 720px) {
+  .review__fix {
+    max-height: 38vh;
+  }
 }

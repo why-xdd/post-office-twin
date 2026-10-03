@@ -69,6 +69,10 @@ MOVE_PRIORITY = {
 FIX_TOP_K = 10
 FIX_WIDE_TOP_K = 40
 MAX_FIX_OBJECTS = 6
+# Замечания, которые перестановкой не снять: их решают покупкой, площадью или данными паспорта.
+UNMOVABLE_RULES = {"fire_extinguishers", "parcel_storage_capacity", "coverage_per_service_window"}
+# Сколько секунд автоисправление ищет лучший итог: два прохода, бережный и широкий.
+FIX_BUDGET_S = 15.0
 LOW_RESERVE_PERCENT = 25.0
 
 
@@ -421,6 +425,8 @@ def recommend_fixes(
     before: dict[str, Any],
     limit: int | None = None,
     deadline: "Deadline | None" = None,
+    severity: Severity = Severity.ERROR,
+    wide: bool = False,
 ) -> list[Recommendation]:
     """Для объектов, участвующих в ошибках, ищется перенос, который уменьшает число ошибок.
 
@@ -428,11 +434,11 @@ def recommend_fixes(
     применяется одна, и перебирать остальные незачем. deadline прекращает перебор объектов,
     когда отведённое на подбор время кончилось.
     """
-    path_fix = recommend_path_fix(plan, before)
+    path_fix = recommend_path_fix(plan, before) if severity is Severity.ERROR else None
     if path_fix is not None and limit == 1:
         return [path_fix]
     report = validate(plan)
-    errors = [f for f in report.findings if f.severity is Severity.ERROR]
+    errors = [f for f in report.findings if f.severity is severity and f.rule_id not in UNMOVABLE_RULES]
     involved: dict[str, list[Any]] = {}
     for finding in errors:
         for object_id in finding.objects:
@@ -450,14 +456,15 @@ def recommend_fixes(
             break
         if results and deadline is not None and deadline.spent():
             break
+        # Бережный проход ищет рядом с прежним местом, широкий — по всей зоне без этой тяги.
         found = search.place(
             plan,
             item.type,
             new_id=item.id,
             template=item,
-            top_k=FIX_TOP_K,
+            top_k=FIX_WIDE_TOP_K if wide else FIX_TOP_K,
             keep=2,
-            prefer_near=item.position,
+            prefer_near=None if wide else item.position,
         )
         # Вариант принимается, если план в целом становится лучше и ошибок не прибавилось:
         # расширение прохода с 0,64 до 0,9 м ошибку пока не снимает, но уже полезно.
@@ -471,6 +478,9 @@ def recommend_fixes(
         )
 
         def better(options: list[search.Evaluated]) -> list[search.Evaluated]:
+            if severity is Severity.WARNING:
+                # Замечание снимается, только если нарушений не прибавилось, а замечаний стало меньше.
+                return [e for e in options if e.errors <= before["errors"] and e.warnings < before["warnings"]]
             return [
                 e
                 for e in options
@@ -487,7 +497,7 @@ def recommend_fixes(
         best = improving[0]
         after = summarize(best.plan)
         fixed = before["errors"] - after["errors"]
-        problems, remaining = _resolved(plan, best.plan, item.id)
+        problems, remaining = _resolved(plan, best.plan, item.id, severity)
         if not problems:
             continue
         moved = ((best.candidate.position[0] - item.position[0]) ** 2 + (best.candidate.position[1] - item.position[1]) ** 2) ** 0.5
@@ -573,10 +583,12 @@ def _finding_key(finding: Any) -> tuple[str, frozenset[str]]:
     return finding.rule_id, frozenset(finding.objects)
 
 
-def _resolved(before_plan: Plan, after_plan: Plan, object_id: str) -> tuple[list[Any], list[Any]]:
-    """Ошибки с участием объекта, которые изменение устранило, и которые остались."""
-    before = [f for f in validate(before_plan).findings if f.severity is Severity.ERROR and object_id in f.objects]
-    after_keys = {_finding_key(f) for f in validate(after_plan).findings if f.severity is Severity.ERROR}
+def _resolved(
+    before_plan: Plan, after_plan: Plan, object_id: str, severity: Severity = Severity.ERROR
+) -> tuple[list[Any], list[Any]]:
+    """Находки с участием объекта, которые изменение устранило, и которые остались."""
+    before = [f for f in validate(before_plan).findings if f.severity is severity and object_id in f.objects]
+    after_keys = {_finding_key(f) for f in validate(after_plan).findings if f.severity is severity}
     resolved = [f for f in before if _finding_key(f) not in after_keys]
     remaining = [f for f in before if _finding_key(f) in after_keys]
     return resolved, remaining
@@ -966,7 +978,11 @@ def _step_key(rec: Recommendation) -> str:
 
 
 def improve(
-    plan: Plan, max_steps: int = 12, fixes_only: bool = False, deadline: Deadline | None = None
+    plan: Plan,
+    max_steps: int = 16,
+    fixes_only: bool = False,
+    deadline: Deadline | None = None,
+    wide: bool = False,
 ) -> ImprovementReport:
     """Последовательное улучшение плана.
 
@@ -992,9 +1008,21 @@ def improve(
         capacity = capacity_model.analyze(current)
         candidates = [
             r
-            for r in recommend_fixes(current, state, limit=1, deadline=deadline)
+            for r in recommend_fixes(current, state, limit=1, deadline=deadline, wide=wide)
             if _step_key(r) not in applied
         ]
+        # Нарушения сняты — дальше замечания, которые снимаются перестановкой: стеллаж не в своей
+        # зоне, киоск далеко от входа, проход уже рекомендованного.
+        warning_step = False
+        if not candidates:
+            candidates = [
+                r
+                for r in recommend_fixes(
+                    current, state, limit=1, deadline=deadline, severity=Severity.WARNING, wide=wide
+                )
+                if _step_key(r) not in applied
+            ]
+            warning_step = bool(candidates)
         if not candidates and not fixes_only:
             candidates = [
                 r
@@ -1020,7 +1048,8 @@ def improve(
         repeated = chosen.id in touched
         if next_state["errors"] > state["errors"]:
             continue
-        if not there.better_than(here, margin=0.5) and not (next_state["errors"] < state["errors"]):
+        fewer_warnings = warning_step and next_state["warnings"] < state["warnings"]
+        if not there.better_than(here, margin=0.5) and not (next_state["errors"] < state["errors"]) and not fewer_warnings:
             continue
         if repeated and next_state["errors"] >= state["errors"] and not there.better_than(here, margin=2.0):
             continue
@@ -1050,6 +1079,47 @@ def improve(
         partial=deadline.reached,
         notes=[BUILT_IN_LEFT] if _errors_hold_built_in(current) else [],
     )
+
+
+def improve_best(plan: Plan, fixes_only: bool = True, budget_s: float = FIX_BUDGET_S) -> ImprovementReport:
+    """Автоисправление с выбором лучшего итога за отведённое время.
+
+    Сначала бережный проход: объекты ищут место рядом с прежним. Если после него что-то
+    осталось и время есть — широкий проход по всей зоне. Берётся итог, где меньше нарушений,
+    затем меньше замечаний, затем шире свободный путь от входа.
+    """
+    started = time.perf_counter()
+    first = improve(plan, fixes_only=fixes_only, deadline=Deadline(budget_s * 0.45))
+    best = first
+    # Шаг, начатый до отсечки, доделывается: запас в 2 с держит общее время в бюджете.
+    left = budget_s - (time.perf_counter() - started) - 2.0
+    if _fixable_left(Plan.model_validate(first.improved_plan)) and left > 2.0:
+        second = improve(plan, fixes_only=fixes_only, deadline=Deadline(left), wide=True)
+
+        def rank(report: ImprovementReport) -> tuple[float, float, float]:
+            return (
+                report.final["errors"],
+                report.final["warnings"],
+                -(report.final.get("entrance_route_width") or 0.0),
+            )
+
+        if rank(second) < rank(first):
+            best = second
+    best.elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
+    return best
+
+
+def _fixable_left(plan: Plan) -> bool:
+    """Осталось ли что-то, что в принципе снимается перестановкой: находка с подвижным объектом,
+    а не про огнетушители, площадь или окна кассы в перегородке."""
+    built_in = {e.id for e in plan.equipment if e.type in BUILT_IN_TYPES}
+    floor = {e.id for e in core.floor_equipment(plan)}
+    for finding in validate(plan, explain=False).findings:
+        if finding.severity is Severity.INFO or finding.rule_id in UNMOVABLE_RULES:
+            continue
+        if any(o in floor and o not in built_in for o in finding.objects):
+            return True
+    return False
 
 
 def _errors_hold_built_in(plan: Plan) -> bool:

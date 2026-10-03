@@ -254,3 +254,19 @@ def test_assistant_answers_within_its_time_budget(plan: Plan) -> None:
 def test_full_report_is_not_marked_partial(plan: Plan) -> None:
     """Обычный ответ не должен помечаться неполным: иначе предупреждение теряет смысл."""
     assert recommend.advise(plan).partial is False
+
+
+def test_auto_fix_also_clears_warnings_that_moving_can_fix() -> None:
+    """После нарушений исправление берётся за замечания: на демо-плане остаётся только то, что
+    перестановкой не снять (огнетушителей на плане нет), и укладывается в бюджет времени."""
+    import time as _time
+
+    demo = Plan.model_validate(json.loads((SAMPLE.parent / "demo_plan.json").read_text(encoding="utf-8")))
+    started = _time.perf_counter()
+    report = recommend.improve_best(demo)
+    spent = _time.perf_counter() - started
+    after = validate(Plan.model_validate(report.improved_plan))
+    assert after.errors == 0
+    left = {f.rule_id for f in after.findings if f.severity is Severity.WARNING}
+    assert left <= recommend.UNMOVABLE_RULES
+    assert spent < recommend.FIX_BUDGET_S + 5

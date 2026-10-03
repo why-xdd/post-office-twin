@@ -742,7 +742,7 @@ def assistant_improve(payload: SaveVersionRequest, fixes_only: bool = False) -> 
         key,
         lambda: _with_slot(
             "подбор расстановки",
-            lambda: recommend.improve(_parse_plan(payload.document), fixes_only=fixes_only),
+            lambda: recommend.improve_best(_parse_plan(payload.document), fixes_only=fixes_only),
         ),
     )
 

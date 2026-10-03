@@ -184,6 +184,8 @@ export interface Finding {
   measured?: number | null;
   required?: number | null;
   unit: string;
+  /** Где на плане замер: отрезок самого узкого просвета, если сервер его нашёл. */
+  gap?: [Point, Point] | null;
 }
 
 export interface ValidationReport {
@@ -694,6 +696,7 @@ export interface Prices {
   remove?: number | null;
   install?: number | null;
   wall_per_m?: number | null;
+  wall_removal_per_m?: number | null;
   equipment: Record<string, number>;
 }
 
@@ -702,6 +705,7 @@ export interface Comparison {
   removed: { id: string; label: string; type: string }[];
   moved: { id: string; label: string; type: string }[];
   walls_changed_m: number;
+  walls_removed_m?: number;
   metrics: { key: string; label: string; before: number | null; after: number | null; unit: string; better: boolean | null }[];
   lines: { text: string; quantity: number; unit: string; price: number | null; total: number | null; key: string }[];
   total: number;

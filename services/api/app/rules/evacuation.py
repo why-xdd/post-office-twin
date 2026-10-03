@@ -52,6 +52,12 @@ BODY_RADIUS_M = 0.15
 EXTINGUISHER_SEED_M = 1.0
 # Клеток без пути к огнетушителю должно набраться хотя бы на столько, чтобы это было место, а не щель.
 UNREACHABLE_MIN_SQM = 1.0
+# Окна кассы встроены в перегородку: переставить их нельзя, поэтому виновниками они не называются.
+BUILT_IN_TYPES = ("cashier_window",)
+# Сколько ближайших объектов пробовать убрать и сколько раз подряд — поиск виновников ограничен,
+# чтобы проверка плана оставалась быстрой.
+CULPRIT_CANDIDATES = 6
+CULPRIT_ROUNDS = 2
 
 
 @dataclass
@@ -64,6 +70,8 @@ class Bottleneck:
     point: tuple[float, float] | None = None
     gap: tuple[tuple[float, float], tuple[float, float]] | None = None
     exit_label: str | None = None
+    # Объекты на концах самого узкого просвета — где именно узко.
+    pinch_objects: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -181,15 +189,50 @@ def bottlenecks(
                 # Выход называется, только когда их несколько: иначе и так ясно, о каком речь.
                 exit_label=labels.get(best_exit) if len(exit_points) > 1 else None,
             )
-            # Место и виновники — по точной геометрии: объекты на концах самого узкого просвета.
-            # Стены и перегородки виновниками не бывают — их не переставишь.
-            if explain and space is None and measured > 0:
-                gap = passability.pinch(plan, cache, probe, Point(best_exit), measured)
+            # Где узко — по точной геометрии самого узкого просвета. Что переставить — по причине:
+            # объекты, без которых путь наружу становится шире. Это разные вещи: узко бывает у окна,
+            # встроенного в перегородку, а освободить путь можно, убрав скамью с другого прохода.
+            if explain and space is None:
+                gap = passability.pinch(plan, cache, probe, Point(best_exit), measured) if measured > 0 else None
                 if gap is not None:
                     neck.gap = (gap.a, gap.b)
-                    neck.culprits = list(gap.objects)
+                    neck.pinch_objects = list(gap.objects)
+                near = inside if gap is None else inside.union(LineString([gap.a, gap.b]))
+                neck.culprits = _culprits(plan, probe, exit_points, measured, need, near)
             found.append(neck)
     return found
+
+
+def _culprits(
+    plan: Plan, probe: Point, exit_points: list[tuple[float, float]], measured: float, need: float, near
+) -> list[str]:
+    """Объекты, убрав которые, путь наружу из этой части зоны становится шире.
+
+    Жадно: убирается объект, дающий наибольший прирост ширины, и так не больше двух раз. Встроенные
+    окна не пробуются — их не переставить.
+    """
+    movable = [item for item in core.floor_equipment(plan) if item.type not in BUILT_IN_TYPES]
+    candidates = sorted(movable, key=lambda item: core.equipment_polygon(item).distance(near))[:CULPRIT_CANDIDATES]
+    removed: list[str] = []
+    current = measured
+    for _ in range(CULPRIT_ROUNDS):
+        best_id, best_width = None, current
+        for item in candidates:
+            if item.id in removed:
+                continue
+            cache = passability.erosion(plan, exclude={*removed, item.id})
+            if cache is None:
+                continue
+            width = max(cache.width(probe, Point(e))[0] for e in exit_points)
+            if width > best_width + 0.04:
+                best_id, best_width = item.id, width
+        if best_id is None:
+            break
+        removed.append(best_id)
+        current = best_width
+        if current >= need:
+            break
+    return removed
 
 
 def extinguisher_reach(plan: Plan) -> ExtinguisherReach | None:

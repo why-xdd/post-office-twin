@@ -168,7 +168,7 @@ export function Compare({ before, after, beforeLabel, onClose }: CompareProps) {
 
             <section aria-labelledby="compare-changes">
               <h3 id="compare-changes">Что меняется</h3>
-              {changes === 0 && result.walls_changed_m === 0 ? (
+              {changes === 0 && result.walls_changed_m === 0 && !result.walls_removed_m ? (
                 <p className="compare__note">Варианты совпадают: ни один объект не поставлен, не убран и не переставлен.</p>
               ) : (
                 <ul className="compare__changes">
@@ -178,6 +178,11 @@ export function Compare({ before, after, beforeLabel, onClose }: CompareProps) {
                   {result.walls_changed_m > 0 && (
                     <li>
                       <b>Перегородки:</b> {formatNumber(result.walls_changed_m, 1)} м новых или перенесённых
+                    </li>
+                  )}
+                  {(result.walls_removed_m ?? 0) > 0 && (
+                    <li>
+                      <b>Снести перегородки:</b> {formatNumber(result.walls_removed_m ?? 0, 1)} м
                     </li>
                   )}
                 </ul>

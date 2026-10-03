@@ -462,14 +462,22 @@ def _check_evacuation(plan: Plan, rule: Rule, explain: bool = True) -> list[Find
         else:
             via = f" — через {neck.exit_label}" if neck.exit_label else ""
             how = f"самый широкий путь наружу{via} — сужается до {neck.measured_m:g} м"
+        where = ""
+        if neck.gap is not None:
+            if len(neck.pinch_objects) >= 2:
+                where = f" Самое узкое место — между {' и '.join(f'«{o}»' for o in neck.pinch_objects)}."
+            elif neck.pinch_objects:
+                where = f" Самое узкое место — между «{neck.pinch_objects[0]}» и стеной."
+            else:
+                where = " Самое узкое место — между стенами помещения."
         if neck.culprits:
-            cause = f" Сужение создают: {', '.join(f'«{c}»' for c in neck.culprits)}."
-        elif neck.gap is not None:
-            cause = " Сужают проход стены помещения: снять сужение можно только перепланировкой."
+            cause = f" Освободить путь: переставить {', '.join(f'«{c}»' for c in neck.culprits)}."
+        elif explain and neck.measured_m > 0:
+            cause = " Перестановкой мебели путь не расширить — нужна перепланировка."
         else:
             cause = ""
-        message = f"Из зоны «{neck.zone_label}» {how} при норме {neck.required_m:g} м.{cause}"
-        objects = neck.culprits or ([neck.zone_id] if neck.zone_id else [])
+        message = f"Из зоны «{neck.zone_label}» {how} при норме {neck.required_m:g} м.{where}{cause}"
+        objects = list(dict.fromkeys([*neck.culprits, *neck.pinch_objects])) or ([neck.zone_id] if neck.zone_id else [])
         findings.append(
             _finding(rule, message, objects, neck.measured_m, required=neck.required_m, gap=neck.gap)
         )

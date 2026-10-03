@@ -90,6 +90,10 @@ interface WorkspaceState {
   preview: Change[] | null;
   /** Объекты, только что вставшие на место по рекомендации: для движения «защёлкивания». */
   latched: string[];
+  /** Где переставленные объекты стояли до исправления: пунктир до сохранения или следующей правки. */
+  ghosts: Equipment[];
+  /** Сколько было нарушений перед групповой правкой: если после неё станет больше, человек об этом узнает. */
+  regressionBase: number | null;
   /**
    * Закреплённое нарушение — индекс в отчёте. Метка на плане крупнее, объекты подсвечены, пока
    * нарушение не снимут щелчком или Esc или пока его не исправят.
@@ -130,6 +134,9 @@ interface WorkspaceState {
   setReport: (report: ValidationReport | null, state: WorkspaceState['reportState']) => void;
   setPreview: (changes: Change[] | null) => void;
   latch: (ids: string[]) => void;
+  showGhosts: (items: Equipment[]) => void;
+  watchRegression: () => void;
+  clearRegression: () => void;
   setActiveFinding: (index: number | null) => void;
 
   updateEquipment: (id: string, patch: Partial<Equipment>) => void;
@@ -164,6 +171,8 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   reportState: 'idle',
   preview: null,
   latched: [],
+  ghosts: [],
+  regressionBase: null,
   activeFinding: null,
   heatmap: null,
   peak: null,
@@ -188,13 +197,16 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       reportState: 'idle',
       mode: 'review',
       panel: 'review',
+      // Новый план открывается на чертеже: в «Обзоре» метки нарушений и стрелки есть только там.
+      view: '2d',
       activeFinding: null,
       heatmap: null,
       peak: null,
+      ghosts: [],
     }),
 
   adoptSaved: (version, doc) =>
-    set({ version, doc: clone(doc), savedSnapshot: JSON.stringify(doc), past: [], future: [], transientBase: null, report: null, reportState: 'idle' }),
+    set({ version, doc: clone(doc), savedSnapshot: JSON.stringify(doc), past: [], future: [], transientBase: null, report: null, reportState: 'idle', ghosts: [] }),
 
   close: () => set({ doc: null, planId: null, title: '', past: [], future: [], preview: null }),
 
@@ -203,7 +215,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     if (!doc) return;
     const next = clone(doc);
     mutate(next);
-    set({ doc: next, past: [...past, doc].slice(-HISTORY_LIMIT), future: [], preview: null });
+    set({ doc: next, past: [...past, doc].slice(-HISTORY_LIMIT), future: [], preview: null, ghosts: [] });
   },
 
   beginTransient: () => {
@@ -243,25 +255,25 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     const { past, future, doc } = get();
     if (!doc || past.length === 0) return;
     const previous = past[past.length - 1];
-    set({ doc: previous, past: past.slice(0, -1), future: [doc, ...future], preview: null });
+    set({ doc: previous, past: past.slice(0, -1), future: [doc, ...future], preview: null, ghosts: [] });
   },
 
   redo: () => {
     const { past, future, doc } = get();
     if (!doc || future.length === 0) return;
     const [next, ...rest] = future;
-    set({ doc: next, past: [...past, doc], future: rest, preview: null });
+    set({ doc: next, past: [...past, doc], future: rest, preview: null, ghosts: [] });
   },
 
   markSaved: (planId, version) => {
     const { doc } = get();
-    set({ planId, version, savedSnapshot: JSON.stringify(doc) });
+    set({ planId, version, savedSnapshot: JSON.stringify(doc), ghosts: [] });
   },
 
   restoreVersion: (doc) => {
     const { doc: current, past } = get();
     if (!current) return;
-    set({ doc: clone(doc), past: [...past, current].slice(-HISTORY_LIMIT), future: [], preview: null, selection: null, group: [] });
+    set({ doc: clone(doc), past: [...past, current].slice(-HISTORY_LIMIT), future: [], preview: null, selection: null, group: [], ghosts: [] });
   },
 
   select: (selection) => set({ selection, group: [] }),
@@ -319,6 +331,9 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     set({ latched: ids });
     window.setTimeout(() => set({ latched: [] }), 700);
   },
+  showGhosts: (items) => set({ ghosts: items.map((item) => clone(item)) }),
+  watchRegression: () => set({ regressionBase: get().report?.errors ?? null }),
+  clearRegression: () => set({ regressionBase: null }),
 
   updateEquipment: (id, patch) =>
     get().commit((draft) => {

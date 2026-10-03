@@ -14,9 +14,19 @@ const ID = '([A-Za-z0-9_-]+)';
 // Идентификатор объекта задаёт заказчик: в нём бывают точки и другие знаки, поэтому он кодируется.
 const OBJECT = '([^/?#]+)';
 
+/** Идентификатор объекта из ссылки. Повреждённая ссылка (обрезанный %-код) не роняет страницу:
+ * объект просто не найдётся, и бирка скажет об этом. */
+function decodeObject(raw: string): string {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
 export function parse(hash: string): Route {
   let match = hash.match(new RegExp(`^#/tag/${ID}/${OBJECT}`));
-  if (match) return { name: 'tag', id: match[1], object: decodeURIComponent(match[2]) };
+  if (match) return { name: 'tag', id: match[1], object: decodeObject(match[2]) };
   match = hash.match(new RegExp(`^#/plan/${ID}/report/?$`));
   if (match) return { name: 'report', id: match[1] };
   match = hash.match(new RegExp(`^#/plan/${ID}/tags/?$`));

@@ -9,7 +9,7 @@ import { useEffect, useRef } from 'react';
 import type { AddressBook } from '../lib/addresses';
 import { formatAddress, key } from '../lib/addresses';
 import type { Finding, Severity } from '../lib/plan';
-import { isNormFinding, plainFinding } from '../lib/plainFindings';
+import { isNormFinding, objectName, plainFinding } from '../lib/plainFindings';
 import { formatNumber, plural } from '../lib/planFacts';
 import { humanize } from '../lib/humanize';
 import { useWorkspace } from '../state/store';
@@ -92,7 +92,8 @@ export function Checks({ book, onFocusObject }: ChecksProps) {
           <SummaryCount severity="error" count={dataErrors} words={['ошибка в данных', 'ошибки в данных', 'ошибок в данных']} />
         )}
         <SummaryCount severity="warning" count={report.warnings} words={['замечание', 'замечания', 'замечаний']} />
-        <SummaryCount severity="info" count={report.infos} words={['сведение', 'сведения', 'сведений']} />
+        {/* «0 сведений» ничего не сообщает: счётчик сведений появляется, только когда они есть. */}
+        {report.infos > 0 && <SummaryCount severity="info" count={report.infos} words={['сведение', 'сведения', 'сведений']} />}
         {state === 'checking' && (
           <span className="checks__rechecking">
             <LoaderCircle size={14} className="spin" aria-hidden="true" />
@@ -187,6 +188,7 @@ function FindingRow({
   onToggle: () => void;
   onObject: (id: string) => void;
 }) {
+  const planDoc = useWorkspace((s) => s.doc);
   const Icon = SEVERITY_ICON[finding.severity];
   const hasMeasure = finding.measured !== null && finding.measured !== undefined && finding.required !== null && finding.required !== undefined;
   return (
@@ -246,9 +248,12 @@ function FindingRow({
                 book.byId.get(key('door', id)) ??
                 book.byId.get(key('window', id)) ??
                 id;
+              // Код и имя рядом: «О-07» само по себе приходится держать в памяти, «О-07 скамья у окон» — нет.
+              const name = objectName(planDoc, id);
               return (
-                <button key={id} type="button" className="chip" onClick={() => onObject(id)} title={`Показать ${objectAddress} на плане`}>
-                  {objectAddress}
+                <button key={id} type="button" className="chip chip--named" onClick={() => onObject(id)} title={`Показать ${objectAddress} на плане`}>
+                  <span className="chip__code">{objectAddress}</span>
+                  {name && <span className="chip__name">{name}</span>}
                 </button>
               );
             })}

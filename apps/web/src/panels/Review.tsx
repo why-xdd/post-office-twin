@@ -12,7 +12,7 @@ import { formatAddress } from '../lib/addresses';
 import { ApiError } from '../lib/api';
 import { precomputeFix, proposeFix, type FixProposal, type Shift } from '../lib/fixProposal';
 import { humanize } from '../lib/humanize';
-import type { Finding } from '../lib/plan';
+import type { Finding, Point } from '../lib/plan';
 import { isNormFinding, objectName, plainFinding } from '../lib/plainFindings';
 import { formatNumber, plural } from '../lib/planFacts';
 import { useWorkspace } from '../state/store';
@@ -22,7 +22,7 @@ interface ReviewProps {
   book: AddressBook;
   saving: boolean;
   onSave: () => void;
-  onFocusObject: (id: string) => void;
+  onFocusObject: (target: string | string[], points?: Point[]) => void;
   /** Вписать весь план в экран: предпросмотр исправления должен быть виден целиком. */
   onFit: () => void;
   onNotice: (text: string) => void;
@@ -49,6 +49,7 @@ export function Review({ book, saving, onSave, onFocusObject, onFit, onNotice }:
   const setPreview = useWorkspace((s) => s.setPreview);
   const applyChanges = useWorkspace((s) => s.applyChanges);
   const latch = useWorkspace((s) => s.latch);
+  const showGhosts = useWorkspace((s) => s.showGhosts);
   const undo = useWorkspace((s) => s.undo);
   const dirty = useWorkspace((s) => s.doc !== null && JSON.stringify(s.doc) !== s.savedSnapshot);
 
@@ -57,6 +58,7 @@ export function Review({ book, saving, onSave, onFocusObject, onFit, onNotice }:
   const [ready, setReady] = useState<FixProposal | null>(null);
   const requested = useRef(false);
   const listRef = useRef<HTMLOListElement>(null);
+  const fixRef = useRef<HTMLElement>(null);
 
   const errors = useMemo(() => (report?.findings ?? []).filter((f) => f.severity === 'error'), [report]);
   // Нормы и данные плана — разное: пересечение объектов не нарушает ВНТП, это ошибка расстановки.
@@ -138,6 +140,14 @@ export function Review({ book, saving, onSave, onFocusObject, onFit, onNotice }:
     }
   };
 
+  // Предпросмотр открылся — его начало («Проблем 4 → 0») должно быть перед глазами, а не кнопка внизу:
+  // на телефоне лист иначе оставался прокрученным к «Применить».
+  useEffect(() => {
+    if (fix.kind !== 'shown' || !fixRef.current) return;
+    fixRef.current.scrollTop = 0;
+    if (window.matchMedia?.('(max-width: 720px)').matches) fixRef.current.scrollIntoView({ block: 'start' });
+  }, [fix.kind]);
+
   const cancelFix = () => {
     requested.current = false;
     setPreview(null);
@@ -145,7 +155,10 @@ export function Review({ book, saving, onSave, onFocusObject, onFit, onNotice }:
   };
 
   const applyFix = (proposal: FixProposal) => {
+    // Где объекты стояли до исправления: пунктир остаётся на плане до сохранения или следующей правки.
+    const before = (doc?.equipment ?? []).filter((item) => proposal.movedObjects.includes(item.id));
     applyChanges(proposal.changes);
+    showGhosts(before);
     latch(proposal.movedObjects);
     setPreview(null);
     setFix({ kind: 'idle' });
@@ -162,8 +175,9 @@ export function Review({ book, saving, onSave, onFocusObject, onFit, onNotice }:
     }
     setActive(index);
     highlight(finding.objects);
-    const first = finding.objects.find((id) => doc?.equipment?.some((e) => e.id === id) || doc?.zones?.some((z) => z.id === id));
-    if (first) onFocusObject(first);
+    // В кадр — все объекты нарушения и сама мерка, а не первый из виновников.
+    const onPlan = finding.objects.filter((id) => doc?.equipment?.some((e) => e.id === id) || doc?.zones?.some((z) => z.id === id));
+    if (onPlan.length || finding.gap) onFocusObject(onPlan, finding.gap ?? undefined);
   };
 
   if (!report) {
@@ -200,7 +214,7 @@ export function Review({ book, saving, onSave, onFocusObject, onFit, onNotice }:
                       ? `Свободный путь от входа ${formatNumber(fixed.entrance.before)} м → ${formatNumber(fixed.entrance.after)} м. `
                       : '') +
                     (fixed.narrowest
-                      ? `Узкое место на пути к окнам ${formatNumber(fixed.narrowest.before)} м → ${formatNumber(fixed.narrowest.after)} м. `
+                      ? `Самый узкий подход к окну ${formatNumber(fixed.narrowest.before)} м → ${formatNumber(fixed.narrowest.after)} м. `
                       : '')
                   : `План проверен по ${report.checked_rules.length} ${plural(report.checked_rules.length, 'правилу', 'правилам', 'правилам')}. `}
                 {notes.length
@@ -209,6 +223,31 @@ export function Review({ book, saving, onSave, onFocusObject, onFit, onNotice }:
               </p>
             </div>
           </>
+        ) : fixed ? (
+          // После частичного исправления первым идёт то, что получилось, а остаток — спокойно ниже:
+          // финал запоминается сильнее всего, и он не должен звучать как неудача.
+          <div>
+            <h2 className="review__gain">
+              Исправлено <span className="review__count review__count--ok">{fixed.before - fixed.after}</span> из {fixed.before}
+            </h2>
+            {fixed.entrance && (
+              <p className="review__metric">
+                Свободный путь от входа{' '}
+                <b>
+                  {formatNumber(fixed.entrance.before)} → {formatNumber(fixed.entrance.after)} м
+                </b>
+              </p>
+            )}
+            {fixed.narrowest && (
+              <p className="review__metric review__metric--minor">
+                Самый узкий подход к окну {formatNumber(fixed.narrowest.before)} → {formatNumber(fixed.narrowest.after)} м
+              </p>
+            )}
+            <p className="review__left">
+              {fixed.after} {plural(fixed.after, 'нарушение осталось', 'нарушения остались', 'нарушений осталось')}: перестановкой их не
+              снять — нужна перепланировка, она в «Редакторе». Список ниже.
+            </p>
+          </div>
         ) : (
           <div>
             <h2>
@@ -246,16 +285,6 @@ export function Review({ book, saving, onSave, onFocusObject, onFit, onNotice }:
       {/* Итог и откат — и после частичного исправления: откатить его так же важно, как полное. */}
       {((clean && dirty) || fixed) && (
         <div className="review__done">
-          {fixed && !clean && (
-            <p className="review__partial">
-              Исправлено {fixed.before - fixed.after} из {fixed.before}.
-              {fixed.entrance &&
-                ` Свободный путь от входа ${formatNumber(fixed.entrance.before)} м → ${formatNumber(fixed.entrance.after)} м.`}
-              {fixed.narrowest &&
-                ` Узкое место на пути к окнам ${formatNumber(fixed.narrowest.before)} м → ${formatNumber(fixed.narrowest.after)} м.`}{' '}
-              Оставшееся перестановкой не снимается — нужна перепланировка, она в редакторе.
-            </p>
-          )}
           <button type="button" className="btn btn--label" onClick={onSave} disabled={saving || !dirty}>
             {saving ? <LoaderCircle size={16} className="spin" aria-hidden="true" /> : <Save size={16} aria-hidden="true" />}
             {dirty ? 'Сохранить версию' : 'Сохранено'}
@@ -331,7 +360,7 @@ export function Review({ book, saving, onSave, onFocusObject, onFit, onNotice }:
         </section>
       )}
       {!clean && !fixed && (
-        <section className={`review__fix${fix.kind === 'shown' ? ' review__fix--shown' : ''}`} aria-live="polite">
+        <section ref={fixRef} className={`review__fix${fix.kind === 'shown' ? ' review__fix--shown' : ''}`} aria-live="polite">
           {fix.kind === 'shown' ? (
             <ProposalCard proposal={fix.proposal} onApply={() => applyFix(fix.proposal)} onCancel={cancelFix} />
           ) : (
@@ -436,7 +465,7 @@ function ProposalCard({ proposal, onApply, onCancel }: { proposal: FixProposal; 
         <ShiftRow label="Проблем" shift={{ before: proposal.errorsBefore, after: proposal.errorsAfter }} better="down" />
         {/* Две разные меры прохода подписаны по-разному: иначе 1,85 м здесь и 0,69 м в списке выглядят противоречием. */}
         {proposal.entrance && <ShiftRow label="Свободный путь от входа" shift={proposal.entrance} unit="м" better="up" />}
-        {proposal.narrowest && <ShiftRow label="Узкое место на пути к окнам" shift={proposal.narrowest} unit="м" better="up" />}
+        {proposal.narrowest && <ShiftRow label="Самый узкий подход к окну" shift={proposal.narrowest} unit="м" better="up" />}
         {proposal.waiting && <ShiftRow label="Мест в зоне ожидания" shift={proposal.waiting} better="up" />}
         {proposal.warnings && <ShiftRow label="Замечаний" shift={proposal.warnings} better="down" />}
       </dl>

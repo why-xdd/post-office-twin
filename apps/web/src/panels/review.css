@@ -244,6 +244,8 @@
   gap: var(--s-2);
   margin-top: auto;
   padding: var(--s-4) var(--s-5) var(--s-5);
+  max-height: 46vh;
+  overflow-y: auto;
   background: var(--label);
   box-shadow: 0 -1px 0 var(--label-edge), 0 -10px 18px -8px rgba(40, 36, 26, 0.18);
 }
@@ -402,4 +404,48 @@
   font-size: var(--text-12);
   font-weight: 620;
   letter-spacing: 0.04em;
+}
+
+/* Итог частичного исправления: успех крупно, остаток спокойно — янтарём, не красным */
+.review__gain {
+  color: var(--ok);
+}
+
+.review__count--ok {
+  color: var(--ok);
+}
+
+.review__metric {
+  margin-top: 4px;
+  font-size: var(--text-14);
+}
+
+.review__metric b {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.review__metric--minor {
+  color: var(--ink-2);
+  font-size: var(--text-13);
+}
+
+.review__left {
+  position: relative;
+  margin-top: var(--s-2);
+  padding-left: 14px;
+  color: var(--ink-2);
+  font-size: var(--text-13);
+  line-height: 1.45;
+}
+
+.review__left::before {
+  content: '';
+  position: absolute;
+  top: 0.5em;
+  left: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--caution);
 }

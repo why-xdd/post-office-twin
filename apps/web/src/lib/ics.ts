@@ -14,7 +14,7 @@ export interface InspectionEvent {
 
 /** Экранирование текста по RFC 5545: обратная косая, точка с запятой, запятая, перевод строки. */
 export function escapeText(text: string): string {
-  return text.replace(/\\/g, '\\\\').replace(/;/g, '\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+  return text.replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
 }
 
 /** Строки длиннее 75 октетов переносятся: продолжение начинается с пробела. */

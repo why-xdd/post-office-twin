@@ -3,7 +3,9 @@ import { buildCalendar, escapeText, fold } from './ics';
 
 describe('ics', () => {
   it('escapes special characters', () => {
-    expect(escapeText('a, b; c\\d\nе')).toBe('a\\, b\; c\\\\d\\nе');
+    // Ожидание записано посимвольно, чтобы ошибка экранирования в тесте не повторяла ошибку в коде.
+    expect(escapeText('a, b; c\\d\nе')).toBe(['a', '\\', ', b', '\\', '; c', '\\', '\\', 'd', '\\', 'nе'].join(''));
+    expect(escapeText(';')).toHaveLength(2);
   });
 
   it('folds long lines by bytes, not characters', () => {

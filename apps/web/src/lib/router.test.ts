@@ -12,6 +12,10 @@ describe('router', () => {
     expect(parse(hashOf(route))).toEqual(route);
   });
 
+  it('survives a damaged tag link', () => {
+    expect(parse('#/tag/abc/eq_win_1%E0%A4%A')).toEqual({ name: 'tag', id: 'abc', object: 'eq_win_1%E0%A4%A' });
+  });
+
   it('opens the printable report', () => {
     expect(parse('#/plan/abc/report')).toEqual({ name: 'report', id: 'abc' });
   });

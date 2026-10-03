@@ -344,3 +344,8 @@
 .peak__storage--short b:last-of-type {
   color: var(--signal);
 }
+
+.peak__camera {
+  padding-top: var(--s-3);
+  border-top: 1px dashed var(--label-edge);
+}

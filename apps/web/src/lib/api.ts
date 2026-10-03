@@ -34,7 +34,21 @@ import type {
   Prices,
 } from './plan';
 
-const BASE_URL = (import.meta.env.VITE_API_URL ?? 'http://localhost:8000').replace(/\/$/, '');
+// Собранный клиент отдаёт сам сервер API, поэтому по умолчанию запросы идут на тот же адрес.
+// Отдельный адрес нужен только при разработке, когда клиент крутится на своём порту.
+const BASE_URL = (import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? 'http://localhost:8000' : '')).replace(/\/$/, '');
+
+/** Кто должен узнать, что сеанс кончился: состояние входа подписывается и сбрасывает пользователя. */
+let unauthorized: (() => void) | null = null;
+export function onUnauthorized(handler: () => void): void {
+  unauthorized = handler;
+}
+
+/** Сегодняшняя дата по часам человека у экрана, в формате ГГГГ-ММ-ДД. */
+export function localDay(now: Date = new Date()): string {
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
 
 export class ApiError extends Error {
   readonly status: number;
@@ -113,6 +127,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     );
   }
   if (!response.ok) {
+    // Сеанс кончился или его завершили в другой вкладке: интерфейс не должен считать человека вошедшим.
+    if (response.status === 401) unauthorized?.();
     throw await toError(response);
   }
   if (response.status === 204) {
@@ -137,6 +153,8 @@ export interface PlanVersion {
   version: number;
   note: string;
   created_at: string;
+  /** Кто сохранил — по сеансу на сервере; пусто — без входа. */
+  author?: string;
 }
 
 export const api = {
@@ -292,7 +310,7 @@ export const api = {
   inspectionDone: (planId: string, objectId: string, nextInspection?: string) =>
     request<PlanRef>(`/api/plans/${planId}/inspections`, {
       method: 'POST',
-      body: JSON.stringify({ object_id: objectId, next_inspection: nextInspection || null }),
+      body: JSON.stringify({ object_id: objectId, next_inspection: nextInspection || null, done_on: localDay() }),
     }),
 
   compare: (before: Plan, after: Plan, prices: Prices, signal?: AbortSignal) =>
@@ -302,7 +320,8 @@ export const api = {
 
   networkDemo: () => request<{ added: number }>('/api/network/demo', { method: 'POST' }),
 
-  today: (planId: string, signal?: AbortSignal) => request<TodayReport>(`/api/plans/${planId}/today`, { signal }),
+  today: (planId: string, signal?: AbortSignal) =>
+    request<TodayReport>(`/api/plans/${planId}/today?day=${localDay()}`, { signal }),
 
   conclusion: (document: Plan) =>
     request<Conclusion>('/api/assistant/conclusion', {

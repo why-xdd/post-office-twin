@@ -36,6 +36,7 @@ export function Passport({ book, types }: PassportProps) {
   const selection = useWorkspace((s) => s.selection);
   const commit = useWorkspace((s) => s.commit);
   const [editing, setEditing] = useState(false);
+  const manage = canManage(useSession((s) => s.user));
 
   const item = selection?.kind === 'equipment' ? doc?.equipment?.find((e) => e.id === selection.id) : undefined;
 
@@ -124,8 +125,15 @@ export function Passport({ book, types }: PassportProps) {
             <TextField label="Серийный номер" wide value={item.inventory?.serial_number} onCommit={(v) => update((t) => { t.inventory = { ...(t.inventory ?? {}), serial_number: v || undefined }; })} />
             <TextField label="Производитель" value={item.inventory?.vendor} onCommit={(v) => update((t) => { t.inventory = { ...(t.inventory ?? {}), vendor: v || undefined }; })} />
             <TextField label="Модель" value={item.inventory?.model} onCommit={(v) => update((t) => { t.inventory = { ...(t.inventory ?? {}), model: v || undefined }; })} />
-            <TextField label="Последний осмотр" type="date" value={item.inventory?.last_inspection} onCommit={(v) => update((t) => { t.inventory = { ...(t.inventory ?? {}), last_inspection: v || undefined }; })} />
-            <TextField label="Следующий осмотр" type="date" value={item.inventory?.next_inspection} onCommit={(v) => update((t) => { t.inventory = { ...(t.inventory ?? {}), next_inspection: v || undefined }; })} />
+            {/* Даты осмотров — отметка о работе конкретного человека: правят их начальник и инженер после входа. */}
+            {manage ? (
+              <>
+                <TextField label="Последний осмотр" type="date" value={item.inventory?.last_inspection} onCommit={(v) => update((t) => { t.inventory = { ...(t.inventory ?? {}), last_inspection: v || undefined }; })} />
+                <TextField label="Следующий осмотр" type="date" value={item.inventory?.next_inspection} onCommit={(v) => update((t) => { t.inventory = { ...(t.inventory ?? {}), next_inspection: v || undefined }; })} />
+              </>
+            ) : (
+              <p className="passport__none passport__wide">Даты осмотров меняют начальник отделения и инженер после входа.</p>
+            )}
           </div>
         ) : item.inventory ? (
           <dl className="passport__facts">

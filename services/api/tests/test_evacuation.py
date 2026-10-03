@@ -109,20 +109,27 @@ def test_plan_without_zones_is_still_checked() -> None:
     assert findings and "Помещение" in findings[0].message
 
 
-def test_evacuation_culprits_are_the_objects_at_the_measured_gap(demo: Plan) -> None:
-    """Виновники и мерка — одно место: объекты стоят на концах отрезка самого узкого просвета."""
-    from app.geometry import core
+def test_evacuation_names_where_it_is_narrow_and_what_to_move(demo: Plan) -> None:
+    """Где узко — объекты на концах мерки; что переставить — то, без чего путь наружу шире."""
+    from shapely.geometry import Point
 
-    finding = next(f for f in validate(demo).findings if f.rule_id == "evacuation_path_width")
-    assert finding.gap is not None
-    (ax, ay), (bx, by) = finding.gap
-    assert abs(((ax - bx) ** 2 + (ay - by) ** 2) ** 0.5 - finding.measured) <= 0.05
-    for culprit in finding.objects:
-        item = next(e for e in demo.equipment if e.id == culprit)
-        shape = core.equipment_polygon(item)
-        from shapely.geometry import Point
+    from app.geometry import core, passability
 
+    neck = evacuation.bottlenecks(demo)[0]
+    assert neck.gap is not None
+    (ax, ay), (bx, by) = neck.gap
+    assert abs(((ax - bx) ** 2 + (ay - by) ** 2) ** 0.5 - neck.measured_m) <= 0.05
+    for owner in neck.pinch_objects:
+        shape = core.equipment_polygon(next(e for e in demo.equipment if e.id == owner))
         assert min(shape.distance(Point(ax, ay)), shape.distance(Point(bx, by))) < 0.02
+    assert neck.culprits, "у демо-плана путь освобождается перестановкой"
+    assert all(next(e for e in demo.equipment if e.id == c).type not in evacuation.BUILT_IN_TYPES for c in neck.culprits)
+    probe = Point(neck.point)
+    cache = passability.erosion(demo, exclude=set(neck.culprits))
+    wider = max(cache.width(probe, Point(e))[0] for e in evacuation.exits(demo))
+    assert wider > neck.measured_m
+    finding = next(f for f in validate(demo).findings if f.rule_id == "evacuation_path_width")
+    assert "Самое узкое место" in finding.message and "Освободить путь" in finding.message
 
 
 def test_storage_in_vestibule_is_forbidden(demo: Plan) -> None:

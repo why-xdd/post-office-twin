@@ -135,7 +135,7 @@ def _metrics(before: Plan, after: Plan) -> list[Metric]:
         metric("accessibility", "— из них доступность для МГН", ca["accessibility"], cb["accessibility"]),
         metric("warnings", "Замечаний", a["warnings"], b["warnings"]),
         metric("entrance", "Свободный путь от входа", a["entrance_route_width"], b["entrance_route_width"], "м", False),
-        metric("narrowest", "Узкое место на пути к окнам", a["min_route_width"], b["min_route_width"], "м", False),
+        metric("narrowest", "Самый узкий подход к окну", a["min_route_width"], b["min_route_width"], "м", False),
         metric("waiting", "Мест в зоне ожидания", a["waiting_capacity"], b["waiting_capacity"], "чел.", False),
         metric("free", "Свободная площадь", a["free_area"], b["free_area"], "м²", None),
     ]

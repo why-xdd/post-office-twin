@@ -4,7 +4,7 @@
  */
 
 import { create } from 'zustand';
-import { api } from '../lib/api';
+import { api, onUnauthorized } from '../lib/api';
 import type { User } from '../lib/plan';
 
 interface SessionState {
@@ -45,6 +45,12 @@ export const useSession = create<SessionState>((set) => ({
     set({ user: null });
   },
 }));
+
+// Сервер ответил 401 — значит, сеанса нет, что бы ни помнил интерфейс. Шапка и кнопки по роли
+// должны это увидеть сразу, а не после перезагрузки.
+onUnauthorized(() => {
+  if (useSession.getState().user) useSession.setState({ user: null });
+});
 
 /** Может ли человек брать обращения в работу и отмечать осмотры. */
 export function canManage(user: User | null): boolean {

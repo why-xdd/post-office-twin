@@ -174,25 +174,7 @@ export function Today({ onFocusObject, onOpenPanel, onReview }: TodayProps) {
             )}
           </section>
 
-          <section className="today__block" aria-labelledby="today-inspections">
-            <h3 id="today-inspections">Осмотры на ближайшие две недели</h3>
-            {report.inspections.length === 0 ? (
-              <p className="today__note">Сроков нет.</p>
-            ) : (
-              <ul className="today__list">
-                {report.inspections.map((due) => (
-                  <li key={due.object_id}>
-                    <button type="button" onClick={() => onFocusObject(due.object_id)}>
-                      <b>{due.label}</b> — {formatDate(due.due)}
-                      <small className={due.days < 0 ? 'today__late' : undefined}>
-                        {due.days < 0 ? `просрочен на ${-due.days} дн.` : due.days === 0 ? 'сегодня' : `через ${due.days} дн.`}
-                      </small>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
+          {/* Сроки осмотров уже стоят в «Что сделать сегодня» и в списке слева — третий раз их не повторяем. */}
 
           <p className="today__small">
             Нарушений норм на плане: {report.errors}, замечаний: {report.warnings}

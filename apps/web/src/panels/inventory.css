@@ -413,3 +413,7 @@ button.ledger__row:hover {
 .passport__tag a {
   color: var(--notice);
 }
+
+.passport__wide {
+  grid-column: 1 / -1;
+}

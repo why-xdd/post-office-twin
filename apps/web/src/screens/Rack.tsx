@@ -127,7 +127,12 @@ export function Rack() {
       setRemoving(null);
       setPlans((current) => (current ?? []).filter((p) => p.id !== id));
     } catch (error) {
-      setProblem(describeError(error, 'Не удалось удалить план.'));
+      // Удаление необратимо, поэтому сервер просит войти: сказать это прямо и показать, где вход.
+      setProblem(
+        error instanceof ApiError && error.status === 401
+          ? { title: 'Удалить план можно после входа: кнопка «Войти» вверху справа.', details: [] }
+          : describeError(error, 'Не удалось удалить план.'),
+      );
       setRemoving(null);
     }
   };
@@ -140,7 +145,9 @@ export function Rack() {
       const document = JSON.parse(text) as Plan;
       const base = document?.ops?.name || file.name.replace(/\.json$/i, '');
       // Тот же файл, загруженный ещё раз, получает номер копии: иначе карточки на стеллаже не различить.
+      // Номер пишется и в название внутри плана — его показывает шапка редактора и сохраняет «Сохранить».
       const title = uniqueTitle(base, (plans ?? []).map((plan) => plan.title));
+      if (title !== base && document?.ops) document.ops.name = title;
       const ref = await api.createPlan(title, document, `Загружен из файла ${file.name}`);
       navigate({ name: 'plan', id: ref.id });
     } catch (error) {

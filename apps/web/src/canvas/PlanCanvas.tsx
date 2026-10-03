@@ -70,7 +70,7 @@ interface PlanCanvasProps {
   book: AddressBook;
   layers: Layers;
   fitSignal: number;
-  focus: { id: string; nonce: number } | null;
+  focus: PlanFocus | null;
   onViewChange: (view: View) => void;
   onCursor: (point: Point | null) => void;
   onNotice?: (text: string) => void;
@@ -146,6 +146,7 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
   const tool = useWorkspace((s) => s.tool);
   const placingType = useWorkspace((s) => s.placingType);
   const preview = useWorkspace((s) => s.preview);
+  const ghosts = useWorkspace((s) => s.ghosts);
   const latched = useWorkspace((s) => s.latched);
   const mode = useWorkspace((s) => s.mode);
   const incidents = useIncidents((s) => s.items);
@@ -203,6 +204,8 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
   const container = useRef<HTMLDivElement>(null);
   const svg = useRef<SVGSVGElement>(null);
   const [size, setSize] = useState({ width: 800, height: 600 });
+  const sizeRef = useRef(size);
+  sizeRef.current = size;
   const [view, setView] = useState<View>({ scale: 60, originX: 60, originY: 540 });
   const [cursor, setCursor] = useState<Point | null>(null);
   const [hoverId, setHoverId] = useState<string | null>(null);
@@ -247,16 +250,73 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fitSignal]);
 
+  // Перелёт камеры: центр по плану и масштаб меняются плавно, без рывка; при «уменьшить движение» — сразу.
+  const viewRef = useRef(view);
+  viewRef.current = view;
+  const flight = useRef<number | null>(null);
+  const flyTo = useCallback((target: View) => {
+    if (flight.current !== null) cancelAnimationFrame(flight.current);
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    if (reduce) {
+      setView(target);
+      return;
+    }
+    const from = viewRef.current;
+    const width = sizeRef.current.width;
+    const height = sizeRef.current.height;
+    const centre = (v: View): Point => [(width / 2 - v.originX) / v.scale, (v.originY - height / 2) / v.scale];
+    const [ax, ay] = centre(from);
+    const [bx, by] = centre(target);
+    const started = performance.now();
+    const step = (now: number) => {
+      const share = Math.min(1, (now - started) / FLIGHT_MS);
+      const eased = 1 - Math.pow(1 - share, 3);
+      const scale = Math.exp(Math.log(from.scale) + (Math.log(target.scale) - Math.log(from.scale)) * eased);
+      const cx = ax + (bx - ax) * eased;
+      const cy = ay + (by - ay) * eased;
+      setView({ scale, originX: width / 2 - cx * scale, originY: height / 2 + cy * scale });
+      flight.current = share < 1 ? requestAnimationFrame(step) : null;
+    };
+    flight.current = requestAnimationFrame(step);
+  }, []);
+  useEffect(() => () => {
+    if (flight.current !== null) cancelAnimationFrame(flight.current);
+  }, []);
+
   useEffect(() => {
     if (!focus || !doc) return;
-    const item = doc.equipment?.find((e) => e.id === focus.id);
-    const zone = doc.zones?.find((z) => z.id === focus.id);
-    const target: Point | null = item ? item.position : zone ? polygonCentroid(zone.polygon) : null;
-    if (!target) return;
-    setView((v) => {
-      const scale = Math.max(v.scale, 70);
-      return { scale, originX: size.width / 2 - target[0] * scale, originY: size.height / 2 + target[1] * scale };
-    });
+    // В кадр попадают все объекты нарушения и место замера, а не первый из виновников.
+    const points: Point[] = [...(focus.points ?? [])];
+    for (const id of focus.ids) {
+      const item = doc.equipment?.find((e) => e.id === id);
+      if (item) {
+        points.push(...equipmentCorners(item));
+        continue;
+      }
+      const zone = doc.zones?.find((z) => z.id === id);
+      if (zone) {
+        points.push(...zone.polygon);
+        continue;
+      }
+      // Нового объекта ещё нет на плане — он есть в предпросмотре ассистента.
+      const proposed = preview?.find((change) => change.object_id === id && change.position);
+      if (proposed?.position) points.push(proposed.position);
+    }
+    if (!points.length) return;
+    const xs = points.map((p) => p[0]);
+    const ys = points.map((p) => p[1]);
+    const [minX, maxX, minY, maxY] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+    const current = viewRef.current;
+    const [left, top] = toScreen(current, [minX, maxY]);
+    const [right, bottom] = toScreen(current, [maxX, minY]);
+    const pad = FOCUS_PAD_PX;
+    // Всё уже видно — камера стоит: прыжок ради того, что и так перед глазами, только сбивает.
+    if (left >= pad && top >= pad && right <= size.width - pad && bottom <= size.height - pad) return;
+    const fit = Math.min((size.width - pad * 2) / Math.max(maxX - minX, 0.6), (size.height - pad * 2) / Math.max(maxY - minY, 0.6));
+    const scale = Math.min(Math.max(current.scale, FOCUS_MIN_SCALE), fit);
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    flyTo({ scale, originX: size.width / 2 - cx * scale, originY: size.height / 2 + cy * scale });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focus?.nonce]);
 
@@ -769,15 +829,29 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
   const labelSource = transientBase ?? doc;
   // Масштаб округляется до ступеней в 15 %: подписи не пересчитываются на каждом щелчке колеса.
   const labelScale = Math.round(Math.log(Math.max(view.scale, 1)) / Math.log(1.15));
+  // Подписи не видны на мелком масштабе или при выключенном слое — и считать их тогда незачем.
+  const labelsShown = layers.labels && layers.zones && view.scale >= LABELS_MIN_SCALE;
   const labelPoints = useMemo(
-    () => (labelSource ? zoneLabelPoints(labelSource, 1.15 ** labelScale) : new Map<string, Point>()),
-    [labelSource, labelScale],
+    () => (labelSource && labelsShown ? zoneLabelPoints(labelSource, 1.15 ** labelScale) : new Map<string, Point>()),
+    [labelSource, labelScale, labelsShown],
   );
+
+  const togglePin = (pin: Pin) => {
+    if (pin.active) {
+      setActiveFinding(null);
+      highlight([]);
+      return;
+    }
+    setActiveFinding(pin.index);
+    highlight(pin.objects);
+    // В редакторе подробности нарушения — в «Проверке»: там же закреплённая строка.
+    if (mode === 'design') setPanel('checks');
+  };
 
   if (!doc) return <div ref={container} className="plan-canvas" />;
 
   const highlightSet = new Set(highlighted);
-  const labelsVisible = layers.labels && view.scale >= 34;
+  const labelsVisible = layers.labels && view.scale >= LABELS_MIN_SCALE;
   // В обзоре коды-адреса не нужны: объекты узнаются по значкам, нарушения — по номерам меток.
   const review = mode === 'review';
   const addressesVisible = labelsVisible && !review;
@@ -785,15 +859,19 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
   const zoneTagsVisible = addressesVisible && view.scale >= ALL_TAGS_SCALE;
   const openFinding = activeFinding !== null && !preview ? report?.findings[activeFinding] : undefined;
   const gapMark = (() => {
-    if (!openFinding || openFinding.unit !== 'м' || openFinding.measured == null || !GAP_RULES.has(openFinding.rule_id)) return null;
+    if (!openFinding || openFinding.unit !== 'м' || openFinding.measured == null) return null;
+    const tone = openFinding.severity === 'error' ? ('signal' as const) : ('caution' as const);
+    const label = `${formatNumber(openFinding.measured)} м`;
+    // Сервер знает, где именно путь самый узкий: его отрезок рисуется как есть, без угадывания.
+    if (openFinding.gap) {
+      const [a, b] = openFinding.gap;
+      return { gap: { a, b, distance: Math.hypot(b[0] - a[0], b[1] - a[1]) }, label, tone };
+    }
+    if (!GAP_RULES.has(openFinding.rule_id)) return null;
     const gap = narrowestGap(doc, openFinding.objects, (item) => types.get(item.type)?.floor_object ?? true);
     // Рисуется, только если найденный просвет и есть замер проверки: иначе число стояло бы не там.
     if (!gap || Math.abs(gap.distance - openFinding.measured) > GAP_MATCH_M) return null;
-    return {
-      gap,
-      label: `${formatNumber(openFinding.measured)} м`,
-      tone: openFinding.severity === 'error' ? ('signal' as const) : ('caution' as const),
-    };
+    return { gap, label, tone };
   })();
   // Таблички адресов раскладываются так, чтобы не налезать друг на друга и на названия зон.
   const tags = placeTags(doc, view, book, {
@@ -848,6 +926,9 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
         onDoubleClick={onDoubleClick}
       >
         <defs>
+          <marker id="ghost-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0L8 4L0 8z" fill="var(--notice)" />
+          </marker>
           <pattern
             id="grid-minor"
             width={0.25 * view.scale}
@@ -1145,6 +1226,7 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
                 className={`plan-pin${pin.active ? ' plan-pin--active' : ''}${pin.note ? ' plan-pin--note' : ''}${design && !pin.active ? ' plan-pin--quiet' : ''}`}
                 transform={`translate(${pin.x} ${pin.y})`}
                 role="button"
+                tabIndex={0}
                 aria-pressed={pin.active}
                 aria-label={
                   design
@@ -1154,16 +1236,13 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
                       : `Нарушение ${pin.number}`
                 }
                 onPointerDown={(event) => event.stopPropagation()}
-                onClick={() => {
-                  if (pin.active) {
-                    setActiveFinding(null);
-                    highlight([]);
-                    return;
+                onClick={() => togglePin(pin)}
+                // С клавиатуры метка — обычная кнопка: Tab до неё, Enter или пробел — открыть.
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    togglePin(pin);
                   }
-                  setActiveFinding(pin.index);
-                  highlight(pin.objects);
-                  // В редакторе подробности нарушения — в «Проверке»: там же закреплённая строка.
-                  if (design) setPanel('checks');
                 }}
               >
                 <circle r={design && !pin.active ? 12 : 16} className="plan-pin__hit" />
@@ -1175,6 +1254,25 @@ function PlanCanvasInner({ types, book, layers, fitSignal, focus, onViewChange, 
                 </g>
               </g>
             ))}
+          </g>
+        )}
+
+        {/* Где объекты стояли до исправления: пунктир и стрелка к новому месту, пока не сохранили */}
+        {ghosts.length > 0 && !preview && (
+          <g className="plan-ghosts" pointerEvents="none" aria-hidden="true">
+            {ghosts.map((ghost) => {
+              const now = doc.equipment?.find((item) => item.id === ghost.id);
+              const [gx, gy] = toScreen(view, ghost.position);
+              const target = now ? toScreen(view, now.position) : null;
+              return (
+                <g key={ghost.id}>
+                  <path d={screenPath(view, equipmentCorners(ghost))} className="plan-ghost" />
+                  {target && Math.hypot(target[0] - gx, target[1] - gy) > 6 && (
+                    <line x1={gx} y1={gy} x2={target[0]} y2={target[1]} className="plan-ghost__move" markerEnd="url(#ghost-arrow)" />
+                  )}
+                </g>
+              );
+            })}
           </g>
         )}
 
@@ -1577,7 +1675,8 @@ function placePins(doc: Plan, report: ValidationReport, active: number | null, v
     const isError = finding.severity === 'error';
     if (isError) errorNumber += 1;
     if (!(isError && options.all) && index !== active) return;
-    const candidates = pinAnchors(doc, finding.objects, view, options);
+    // Есть точное место сужения — метка встаёт на сам проход, а не на объект: узкий объект она закрыла бы.
+    const candidates = finding.gap ? gapAnchors(finding.gap, view) : pinAnchors(doc, finding.objects, view, options);
     if (candidates.length === 0) return;
     const free = (point: Point) =>
       !pins.some((pin) => Math.hypot(pin.x - point[0], pin.y - point[1]) < PIN_GAP_PX) &&
@@ -1645,6 +1744,26 @@ function pinAnchors(doc: Plan, objects: string[], view: View, options: PinOption
   const step = PIN_CLEAR_PX * 1.6;
   const [x, y] = anchor;
   return [anchor, [x, y + step], [x, y - step], [x + step, y], [x - step, y]];
+}
+
+/**
+ * Места метки у мерки: по сторонам от середины отрезка, вдоль прохода. Подпись мерки стоит с одной
+ * стороны середины, поэтому первой пробуется другая.
+ */
+function gapAnchors([a, b]: [Point, Point], view: View): Point[] {
+  const [ax, ay] = toScreen(view, a);
+  const [bx, by] = toScreen(view, b);
+  const length = Math.hypot(bx - ax, by - ay) || 1;
+  const nx = -(by - ay) / length;
+  const ny = (bx - ax) / length;
+  const mx = (ax + bx) / 2;
+  const my = (ay + by) / 2;
+  const off = PIN_CLEAR_PX + 8;
+  return [
+    [mx - nx * off, my - ny * off],
+    [mx + nx * off * 2.2, my + ny * off * 2.2],
+    [mx - nx * off * 2, my - ny * off * 2],
+  ];
 }
 
 function pinAnchor(doc: Plan, objects: string[], view: View, options: PinOptions): Point | null {
@@ -1843,6 +1962,22 @@ function Rulers({ view, width, height, cursor }: { view: View; width: number; he
 /** Правила, у которых замер — просвет между объектами: для них рисуется размер. */
 /** Насколько просвет на плане может отличаться от замера проверки, чтобы размер был честным. */
 const GAP_MATCH_M = 0.1;
+
+/** Что показать в кадре: объекты и зоны по id и отдельные точки (например, концы мерки). */
+export interface PlanFocus {
+  ids: string[];
+  points?: Point[];
+  nonce: number;
+}
+
+const FLIGHT_MS = 320;
+/** Отступ кадра от края, в пикселях: объект у самого края читается плохо. */
+const FOCUS_PAD_PX = 72;
+/** Мельче этого масштаба (пикселей на метр) объект в фокусе не разглядеть — камера приближает. */
+const FOCUS_MIN_SCALE = 40;
+
+/** С какого масштаба (пикселей на метр) на плане видны подписи зон и таблички. */
+const LABELS_MIN_SCALE = 34;
 
 const GAP_RULES = new Set(['movement_path_width', 'passage_between_workplaces', 'clearance_from_wall', 'counter_front_width']);
 

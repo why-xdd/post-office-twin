@@ -390,7 +390,11 @@
   left: 50%;
   bottom: var(--s-4);
   z-index: 3;
-  padding: var(--s-2) var(--s-4);
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  max-width: calc(100% - 32px);
+  padding: var(--s-2) var(--s-2) var(--s-2) var(--s-4);
   border-radius: var(--radius-plate);
   color: var(--on-steel);
   background: var(--steel-900);
@@ -695,6 +699,11 @@
     transform: translateY(calc(101% + 56px + env(safe-area-inset-bottom)));
   }
 
+  /* Библиотека — выбрать предмет и поставить его на план: план над листом должен оставаться видимым. */
+  .library {
+    max-height: 56vh;
+  }
+
   .ws-column {
     display: flex;
   }
@@ -758,7 +767,7 @@
     display: grid;
     grid-auto-flow: column;
     /* Кнопок бывает восемь: уже 66 px «Обращения» и «Инвентарь» не читается — тогда планка прокручивается. */
-    grid-auto-columns: minmax(66px, 1fr);
+    grid-auto-columns: minmax(60px, 1fr);
     overflow-x: auto;
     overscroll-behavior-x: contain;
     scrollbar-width: none;
@@ -1214,4 +1223,36 @@ button.ws-rail__version:hover {
 
 .workspace--operate .ws-tab {
   flex: 1 1 calc(33.333% - 3px);
+}
+
+.ws-notice__undo {
+  flex: none;
+  min-height: 30px;
+  padding: 0 var(--s-3);
+  border: 0;
+  border-radius: var(--radius-plate);
+  color: var(--ink);
+  background: var(--label);
+  font: inherit;
+  font-size: var(--text-13);
+  font-weight: 640;
+  cursor: pointer;
+}
+
+.ws-notice__undo:hover {
+  background: var(--label-strong);
+}
+
+@media (pointer: coarse) {
+  .ws-notice__undo {
+    min-height: 44px;
+  }
+}
+
+/* Под палец кнопки шапки не меньше 44 px: 36 px промахиваются на телефоне. */
+@media (pointer: coarse) {
+  .ws-rail .icon-btn {
+    width: 44px;
+    height: 44px;
+  }
 }

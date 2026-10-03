@@ -9,6 +9,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, api } from '../lib/api';
 import type { Equipment, EquipmentTypeInfo, PeakReport, PeakScenario, StorageReport } from '../lib/plan';
 import { QueueLog } from './QueueLog';
+import { Camera } from './Camera';
 import './assistant.css';
 import { formatNumber, plural } from '../lib/planFacts';
 import { useWorkspace } from '../state/store';
@@ -286,6 +287,10 @@ export function Peak({ types, reportedBroken = [] }: PeakProps) {
       <ParcelStorage />
 
       {doc && <QueueLog doc={doc} />}
+
+      <section className="peak__camera" aria-label="Камера зала">
+        <Camera />
+      </section>
     </div>
   );
 }

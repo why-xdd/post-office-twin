@@ -324,8 +324,14 @@
   color: var(--ok);
 }
 
-.effects--better td:last-child::after {
+/* Стрелка — куда сдвинулось число, цвет — к лучшему ли: «проблем 4 → 3» идёт вниз и зелёным. */
+.effects--up td:last-child::after {
   content: ' ▲';
+  font-size: 9px;
+}
+
+.effects--down td:last-child::after {
+  content: ' ▼';
   font-size: 9px;
 }
 
@@ -333,10 +339,6 @@
   color: var(--signal);
 }
 
-.effects--worse td:last-child::after {
-  content: ' ▼';
-  font-size: 9px;
-}
 
 .capacity--hot {
   color: var(--signal);

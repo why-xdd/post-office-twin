@@ -304,15 +304,17 @@
   stroke-width: 1.5;
 }
 
+/* Ручка поворота — синяя, как ручка стены: это то, за что берут. Серый кружок рядом — место
+   оператора, его не тянут; одинаковые круги путались. */
 .plan-selection__stem {
-  stroke: var(--ink);
-  stroke-width: 1;
+  stroke: var(--notice);
+  stroke-width: 1.25;
 }
 
 .plan-selection__knob {
-  fill: var(--sheet);
-  stroke: var(--ink);
-  stroke-width: 1.5;
+  fill: var(--notice);
+  stroke: var(--sheet);
+  stroke-width: 2;
   cursor: grab;
 }
 
@@ -667,4 +669,29 @@
   font-size: 10px;
   font-weight: 760;
   pointer-events: none;
+}
+
+/* Было до исправления: тонкий пунктир на месте объекта и стрелка к новому месту */
+.plan-ghost {
+  fill: none;
+  stroke: var(--notice);
+  stroke-width: 1.25;
+  stroke-dasharray: 4 3;
+  opacity: 0.85;
+}
+
+.plan-ghost__move {
+  stroke: var(--notice);
+  stroke-width: 1.25;
+  stroke-dasharray: 2 3;
+}
+
+/* Метка в фокусе с клавиатуры: видно, где Tab, не путая с выбранной */
+.plan-pin:focus {
+  outline: none;
+}
+
+.plan-pin:focus-visible .plan-pin__disc {
+  stroke: var(--notice);
+  stroke-width: 3;
 }

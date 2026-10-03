@@ -5,7 +5,7 @@
 
 import { ArrowLeft, LoaderCircle, Printer } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { ApiError, api } from '../lib/api';
+import { ApiError, api, localDay } from '../lib/api';
 import { formatDate } from '../lib/inspections';
 import type { Conclusion, Plan, StorageReport, TodayReport, ValidationReport } from '../lib/plan';
 import { formatNumber, planArea } from '../lib/planFacts';
@@ -70,7 +70,7 @@ export function Report({ planId }: { planId: string }) {
       {data && (
         <article className="report__sheet">
           <header className="report__title">
-            <p>Отчёт о планировке отделения · {formatDate(new Date().toISOString().slice(0, 10))}</p>
+            <p>Отчёт о планировке отделения · {formatDate(localDay())}</p>
             <h1>{data.plan.ops.name ?? data.plan.ops.id}</h1>
             <dl>
               <div>

@@ -51,7 +51,7 @@ import {
   type FormEvent,
   type ReactNode,
 } from 'react';
-import { PlanCanvas, type Layers } from '../canvas/PlanCanvas';
+import { PlanCanvas, type Layers, type PlanFocus } from '../canvas/PlanCanvas';
 import { ErrorBoundary, isStaleChunk } from '../components/ErrorBoundary';
 import { Mark } from '../components/Mark';
 import { MoreMenu } from '../components/MoreMenu';
@@ -120,24 +120,61 @@ const HOTKEYS: [string, string][] = [
 
 const GUIDE_SEEN_KEY = 'plan-ops:editor-guide-seen';
 
-/** Четыре вещи, без которых редактор не начать: короче, чем справка, и по делу. */
-function EditorGuide({ touch, onClose }: { touch: boolean; onClose: () => void }) {
-  const steps: [string, string][] = touch
-    ? [
-        ['Поставить предмет', '«Библиотека» внизу → предмет → коснитесь места на плане.'],
-        ['Изменить объект', 'Коснитесь объекта: «Свойства» откроются снизу, тяните его пальцем.'],
-        ['Что не так', '«Проверка»: номер нарушения совпадает с меткой на плане.'],
-        ['Попросить словами', '«Ассистент»: например, «поставь почтовый ящик у входа».'],
-      ]
-    : [
-        ['Поставить предмет', 'Выберите его в библиотеке слева и щёлкните по плану. Esc — отмена.'],
-        ['Изменить объект', 'Щёлкните — справа «Свойства»; тяните мышью, R — поворот, Del — удалить. Shift — выделить несколько.'],
-        ['Что не так', '«Проверка» справа: номер нарушения совпадает с меткой на плане, щелчок закрепляет подсветку.'],
-        ['Попросить словами', '«Ассистент»: например, «поставь почтовый ящик у входа». Ctrl+Z отменит любое действие.'],
-      ];
+/** Четыре вещи, без которых режим не начать: короче, чем справка, и по делу. Своя для каждого режима. */
+const GUIDES: Record<Mode, { title: string; desk: [string, string][]; touch: [string, string][] }> = {
+  design: {
+    title: 'Редактор плана за минуту',
+    touch: [
+      ['Поставить предмет', '«Добавить» внизу → предмет → коснитесь места на плане.'],
+      ['Изменить объект', 'Коснитесь объекта: «Свойства» откроются снизу, тяните его пальцем.'],
+      ['Что не так', '«Проверка»: номер нарушения совпадает с меткой на плане.'],
+      ['Попросить словами', '«Ассистент»: например, «поставь почтовый ящик у входа».'],
+    ],
+    desk: [
+      ['Поставить предмет', 'Выберите его в библиотеке слева и щёлкните по плану. Esc — отмена.'],
+      ['Изменить объект', 'Щёлкните — справа «Свойства»; тяните мышью, R — поворот, Del — удалить. Shift — выделить несколько.'],
+      ['Что не так', '«Проверка» справа: номер нарушения совпадает с меткой на плане, щелчок закрепляет подсветку.'],
+      ['Попросить словами', '«Ассистент»: например, «поставь почтовый ящик у входа». Ctrl+Z отменит любое действие.'],
+    ],
+  },
+  review: {
+    title: 'Обзор за минуту',
+    touch: [
+      ['Что нарушено', 'Список внизу: номер совпадает с меткой на плане. Коснитесь пункта — план покажет объекты и мерку.'],
+      ['Исправить', '«Исправить автоматически» покажет пунктиром, что переставить. План меняется только после «Применить».'],
+      ['Передумали', '«Вернуть как было» или кнопка «Отменить» в сообщении внизу.'],
+      ['Дальше', '«Редактор» — править вручную, «Эксплуатация» — паспорта, обращения и очередь.'],
+    ],
+    desk: [
+      ['Что нарушено', 'Список справа: номер совпадает с меткой на плане. Щелчок по пункту показывает объекты и мерку.'],
+      ['Исправить', '«Исправить автоматически» покажет пунктиром, что переставить. План меняется только после «Применить».'],
+      ['Передумали', '«Вернуть как было» или Ctrl+Z.'],
+      ['Дальше', '«Редактор» — править вручную, «Эксплуатация» — паспорта, обращения и очередь.'],
+    ],
+  },
+  operate: {
+    title: 'Эксплуатация за минуту',
+    touch: [
+      ['Сегодня', 'Что сделать в первую очередь: обращения, осмотры, окна в пик. Лист печатается.'],
+      ['Паспорт', 'Коснитесь объекта: ответственный, учёт, QR-бирка и «Сообщить о неисправности».'],
+      ['Обращения', 'Новое → в работе → решено. Брать в работу могут начальник и инженер после входа.'],
+      ['Очередь', 'Поток в пик, журнал очереди, камера зала и место для посылок.'],
+    ],
+    desk: [
+      ['Сегодня', 'Что сделать в первую очередь: обращения, осмотры, окна в пик. Лист печатается.'],
+      ['Паспорт', 'Щёлкните объект: ответственный, учёт, QR-бирка и «Сообщить о неисправности».'],
+      ['Обращения', 'Новое → в работе → решено. Брать в работу могут начальник и инженер после входа.'],
+      ['Очередь', 'Поток в пик, журнал очереди, камера зала и место для посылок.'],
+    ],
+  },
+};
+
+function ModeGuide({ mode, touch, onClose }: { mode: Mode; touch: boolean; onClose: () => void }) {
+  const guide = GUIDES[mode];
+  const steps = touch ? guide.touch : guide.desk;
   return (
-    <div className="ws-guide" role="dialog" aria-label="Как пользоваться редактором">
-      <p className="ws-guide__title">Редактор плана за минуту</p>
+    <div className="ws-guide" role="dialog" aria-label={guide.title}>
+      <p className="ws-guide__title">{guide.title}</p>
       <ol>
         {steps.map(([head, text]) => (
           <li key={head}>
@@ -177,6 +214,33 @@ const DOCK_ICONS: Record<SidePanel, ReactNode> = {
   today: <Sun size={18} aria-hidden="true" />,
   incidents: <OctagonAlert size={18} aria-hidden="true" />,
 };
+
+/** Объект или зона по части названия: сначала начало названия, потом любое вхождение. */
+function findByName(
+  doc: Plan | null,
+  text: string,
+  types: Map<string, EquipmentTypeInfo>,
+): { kind: 'equipment' | 'zone'; id: string; address: string } | null {
+  const query = text.trim().toLowerCase().replace(/ё/g, 'е');
+  if (!doc || query.length < 2) return null;
+  const norm = (value: string) => value.toLowerCase().replace(/ё/g, 'е');
+  const candidates = [
+    ...(doc.equipment ?? []).map((item) => ({
+      kind: 'equipment' as const,
+      id: item.id,
+      names: [item.label ?? '', types.get(item.type)?.label ?? item.type].map(norm),
+    })),
+    ...(doc.zones ?? []).map((zone) => ({ kind: 'zone' as const, id: zone.id, names: [norm(zone.label ?? zone.type)] })),
+  ];
+  const found =
+    candidates.find((c) => c.names.some((name) => name.startsWith(query))) ??
+    candidates.find((c) => c.names.some((name) => name.includes(query)));
+  return found ? { kind: found.kind, id: found.id, address: '' } : null;
+}
+
+/** «… Отменить — Ctrl+Z» в конце сообщения: вместо подсказки показывается кнопка «Отменить». */
+const UNDO_HINT = /[.,]?\s*[Оо]тменить — Ctrl\+Z\.?$/;
+const undoable = (text: string) => UNDO_HINT.test(text);
 
 const MODES: { id: Mode; label: string; hint: string }[] = [
   { id: 'review', label: 'Обзор', hint: 'Нарушения и исправление в один шаг' },
@@ -224,7 +288,7 @@ export function Workspace({ planId }: WorkspaceProps) {
   const [rules, setRules] = useState<Rule[]>([]);
   const [layers, setLayers] = useState<Layers>({ zones: true, labels: true, routes: false, grid: true, heat: true, findings: true, rulers: true });
   const [fitSignal, setFitSignal] = useState(0);
-  const [focus, setFocus] = useState<{ id: string; nonce: number } | null>(null);
+  const [focus, setFocus] = useState<PlanFocus | null>(null);
   const [view, setView] = useState<View | null>(null);
   const [cursor, setCursor] = useState<Point | null>(null);
   // Что выдвинуто снизу на узком экране: панель вкладки, библиотека или ничего.
@@ -373,7 +437,12 @@ export function Workspace({ planId }: WorkspaceProps) {
     [doc, report, rules],
   );
 
-  const focusObject = useCallback((id: string) => setFocus({ id, nonce: Date.now() }), []);
+  // Показать на плане один объект или сразу несколько — например, все объекты нарушения и концы мерки.
+  const focusObject = useCallback(
+    (target: string | string[], points?: Point[]) =>
+      setFocus({ ids: Array.isArray(target) ? target : [target], points, nonce: Date.now() }),
+    [],
+  );
 
   const save = useCallback(async () => {
     const state = useWorkspace.getState();
@@ -393,9 +462,34 @@ export function Workspace({ planId }: WorkspaceProps) {
     }
   }, [markSaved, saving]);
 
+  // Групповая правка добавила нарушений — сказать об этом сразу и дать отменить, а не молча сменить счётчик.
+  const regressionBase = useWorkspace((s) => s.regressionBase);
+  const clearRegression = useWorkspace((s) => s.clearRegression);
+  const reportState = useWorkspace((s) => s.reportState);
+  // Сравнивать можно только с проверкой, начатой после правки: прежний отчёт ещё ничего о ней не знает.
+  const regressionChecking = useRef(false);
+  useEffect(() => {
+    if (regressionBase === null) {
+      regressionChecking.current = false;
+      return;
+    }
+    if (reportState === 'checking') {
+      regressionChecking.current = true;
+      return;
+    }
+    if (!regressionChecking.current || reportState !== 'ready' || !report) return;
+    regressionChecking.current = false;
+    clearRegression();
+    const added = report.errors - regressionBase;
+    if (added > 0) {
+      setNotice(`Выравнивание добавило ${added} ${plural(added, 'нарушение', 'нарушения', 'нарушений')}. Отменить — Ctrl+Z`);
+    }
+  }, [report, reportState, regressionBase, clearRegression]);
+
   useEffect(() => {
     if (!notice) return;
-    const timer = window.setTimeout(() => setNotice(null), 4000);
+    // С кнопкой отмены сообщение держится дольше: до неё нужно успеть дотянуться.
+    const timer = window.setTimeout(() => setNotice(null), undoable(notice) ? 7000 : 4000);
     return () => window.clearTimeout(timer);
   }, [notice]);
 
@@ -542,6 +636,7 @@ export function Workspace({ planId }: WorkspaceProps) {
       }
       if (event.key === 'Escape') {
         setHotkeys(false);
+        setGuide(false);
         setVersionsOpen(false);
         setMoreOpen(false);
         setLeaving(false);
@@ -628,13 +723,15 @@ export function Workspace({ planId }: WorkspaceProps) {
   const goToAddress = (event: FormEvent) => {
     event.preventDefault();
     const parsed = parseAddress(addressText);
-    if (!parsed) {
-      setAddressError('Адрес вида О-07, З-02, Н-03');
+    // Не код — значит, название: «банкомат», «скамья», «окно 2». Ищется среди объектов и зон.
+    const named = parsed ? null : findByName(doc, addressText, typeMap);
+    if (!parsed && !named) {
+      setAddressError(addressText.trim() ? `Не нашли «${addressText.trim()}». Введите адрес вида О-07 или часть названия` : 'Адрес вида О-07, З-02, Н-03 или название');
       return;
     }
-    const target = book.byAddress.get(parsed);
+    const target = parsed ? book.byAddress.get(parsed) : named;
     if (!target) {
-      setAddressError(`Ячейки ${parsed} на плане нет`);
+      setAddressError(`Ячейки ${parsed ?? addressText} на плане нет`);
       return;
     }
     setAddressError(null);
@@ -650,7 +747,7 @@ export function Workspace({ planId }: WorkspaceProps) {
       setPanel('checks');
       if (finding) {
         highlight(finding.objects);
-        if (finding.objects[0]) focusObject(finding.objects[0]);
+        if (finding.objects.length || finding.gap) focusObject(finding.objects, finding.gap ?? undefined);
       }
     } else if (target.kind === 'rule') {
       setPanel('checks');
@@ -727,8 +824,8 @@ export function Workspace({ planId }: WorkspaceProps) {
           { id: 'incidents', label: 'Обращения', count: openIncidents || undefined, tone: openIncidents ? 'signal' : undefined },
           { id: 'passport', label: 'Паспорт' },
           { id: 'inventory', label: 'Инвентарь' },
+          // Камера зала — источник данных об очереди, поэтому живёт во вкладке «Очередь».
           { id: 'peak', label: 'Очередь' },
-          { id: 'camera', label: 'Камера' },
         ];
 
   const area = planArea(doc);
@@ -785,6 +882,8 @@ export function Workspace({ planId }: WorkspaceProps) {
                     <span className="versions__date">
                       {new Date(item.created_at).toLocaleString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}
                       {item.note ? ` · ${item.note}` : ''}
+                      {/* Подпись ставит сервер по сеансу: кто сохранил, а для сохранённого без входа — так и сказано. */}
+                      {` · ${item.author || 'без входа'}`}
                     </span>
                     <button
                       type="button"
@@ -847,7 +946,7 @@ export function Workspace({ planId }: WorkspaceProps) {
               id="address-input"
               ref={addressInput}
               value={addressText}
-              placeholder="О-…"
+              placeholder="О-07 или название"
               autoComplete="off"
               spellCheck={false}
               aria-describedby={addressFocus && !addressError ? 'address-hint address-legend' : 'address-hint'}
@@ -1046,6 +1145,8 @@ export function Workspace({ planId }: WorkspaceProps) {
           onPick={(id) => {
             select({ kind: 'equipment', id });
             focusObject(id);
+            // Строка срока осмотра обещает паспорт — он и открывается, на какой бы вкладке ни стоял человек.
+            if (mode === 'operate') setPanel('passport');
             // На узком экране лист со списком уходит: объект и его паспорт должны быть видны.
             setDrawer(null);
           }}
@@ -1130,8 +1231,21 @@ export function Workspace({ planId }: WorkspaceProps) {
         )}
         {notice && (
           <div className="ws-notice" role="status">
-            {/* На телефоне клавиатуры нет: отмена — стрелкой в шапке, а не сочетанием клавиш. */}
-            {touch ? notice.replace('Ctrl+Z', 'стрелка ↶ вверху') : notice}
+            {/* Отмена — кнопкой в самом сообщении: на телефоне нет клавиатуры, а в «Обзоре» нет стрелок в шапке. */}
+            <span>{undoable(notice) ? notice.replace(UNDO_HINT, '') : notice}</span>
+            {undoable(notice) && (
+              <button
+                type="button"
+                className="ws-notice__undo"
+                onClick={() => {
+                  undo();
+                  setNotice(null);
+                }}
+                title={touch ? undefined : 'Ctrl+Z'}
+              >
+                Отменить
+              </button>
+            )}
           </div>
         )}
         {draft && (
@@ -1166,8 +1280,9 @@ export function Workspace({ planId }: WorkspaceProps) {
             </div>
           </div>
         )}
-        {guide && mode === 'design' && (
-          <EditorGuide
+        {guide && (
+          <ModeGuide
+            mode={mode}
             touch={touch}
             onClose={() => {
               setGuide(false);
@@ -1330,7 +1445,8 @@ export function Workspace({ planId }: WorkspaceProps) {
             >
               {/* В «Эксплуатации» в этом листе не оборудование, а сроки осмотра и слои. */}
               {mode === 'operate' ? <CalendarClock size={18} aria-hidden="true" /> : <Boxes size={18} aria-hidden="true" />}
-              <span className="ws-dock__label">{mode === 'operate' ? 'Сроки' : 'Библиотека'}</span>
+              {/* На планке — действие, а не название шкафа: «Библиотека» не помещалась в ширину кнопки. */}
+              <span className="ws-dock__label">{mode === 'operate' ? 'Сроки' : 'Добавить'}</span>
             </button>
             {tabs.map((tab) => (
               <button

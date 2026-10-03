@@ -47,7 +47,7 @@ import './assistant.css';
 interface AssistantProps {
   book: AddressBook;
   types: EquipmentTypeInfo[];
-  onFocusObject: (id: string) => void;
+  onFocusObject: (target: string | string[]) => void;
   onNotice: (text: string) => void;
 }
 
@@ -166,8 +166,9 @@ export function Assistant({ book, types, onFocusObject, onNotice }: AssistantPro
     }
     setPreview(changes);
     setPreviewId(id);
-    const first = changes.find((c) => c.position)?.object_id ?? changes[0]?.object_id;
-    if (first) onFocusObject(first);
+    // В кадр — всё, что меняет рекомендация: и новый объект из предпросмотра, и переставляемые.
+    const ids = changes.map((c) => c.object_id);
+    if (ids.length) onFocusObject(ids);
   };
 
   const accept = (address: string, changes: RecommendationChange[]) => {
@@ -572,7 +573,19 @@ function EffectTable({ effects }: { effects: Effect[] }) {
       </thead>
       <tbody>
         {shown.map((effect) => (
-          <tr key={effect.key} className={effect.improved === true ? 'effects--better' : effect.improved === false ? 'effects--worse' : ''}>
+          <tr
+            key={effect.key}
+            className={[
+              effect.improved === true ? 'effects--better' : effect.improved === false ? 'effects--worse' : '',
+              typeof effect.before === 'number' && typeof effect.after === 'number' && effect.after !== effect.before
+                ? effect.after > effect.before
+                  ? 'effects--up'
+                  : 'effects--down'
+                : '',
+            ]
+              .filter(Boolean)
+              .join(' ')}
+          >
             <th scope="row">{effect.label}</th>
             <td>{formatValue(effect.before, effect.unit)}</td>
             <td aria-hidden="true">

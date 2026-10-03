@@ -453,6 +453,9 @@ const ALIGN_ACTIONS: { mode: AlignMode; label: string; icon: LucideIcon }[] = [
   { mode: 'bottom', label: 'По нижнему краю', icon: AlignEndHorizontal },
 ];
 
+/** Окна кассы встроены в перегородку между залом и служебной зоной: двигать их — значит двигать стену. */
+const BUILT_IN_TYPES = new Set(['cashier_window']);
+
 const SPREAD_ACTIONS: { mode: AlignMode; label: string; icon: LucideIcon }[] = [
   { mode: 'spreadX', label: 'Равные промежутки слева направо', icon: AlignHorizontalSpaceBetween },
   { mode: 'spreadY', label: 'Равные промежутки сверху вниз', icon: AlignVerticalSpaceBetween },
@@ -467,7 +470,9 @@ function GroupProperties({ ids, book, types }: { ids: string[]; book: AddressBoo
   const commit = useWorkspace((s) => s.commit);
   const select = useWorkspace((s) => s.select);
   const removeSelection = useWorkspace((s) => s.removeSelection);
+  const watchRegression = useWorkspace((s) => s.watchRegression);
   const [problem, setProblem] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
   if (!doc) return null;
   const members = ids
     .map((id) => doc.equipment?.find((e) => e.id === id))
@@ -477,6 +482,14 @@ function GroupProperties({ ids, book, types }: { ids: string[]; book: AddressBoo
 
   const align = (mode: AlignMode) => {
     const moves = alignGroup(members, mode);
+    // Окна кассы встроены в перегородку: их положение задаёт стена, а не выравнивание группы.
+    const fixed = members.filter((member) => BUILT_IN_TYPES.has(member.type) && moves.has(member.id));
+    for (const member of fixed) moves.delete(member.id);
+    setNote(
+      fixed.length
+        ? `${fixed.map((member) => `«${name(member)}»`).join(', ')} ${fixed.length === 1 ? 'встроено' : 'встроены'} в перегородку и не ${fixed.length === 1 ? 'двигается' : 'двигаются'} — выровнены остальные`
+        : null,
+    );
     if (moves.size === 0) {
       setProblem(mode === 'spreadX' || mode === 'spreadY' ? 'Раздвигать некуда: объекты стоят вплотную или уже ровно' : 'Объекты уже стоят так');
       return;
@@ -490,6 +503,8 @@ function GroupProperties({ ids, book, types }: { ids: string[]; book: AddressBoo
       return;
     }
     setProblem(null);
+    // Выравнивание переставляет сразу несколько объектов: если оно добавит нарушений, это скажет сообщение с отменой.
+    watchRegression();
     commit((draft) => {
       for (const [id, position] of moves) {
         const target = draft.equipment?.find((e) => e.id === id);
@@ -537,6 +552,11 @@ function GroupProperties({ ids, book, types }: { ids: string[]; book: AddressBoo
         {problem && (
           <p className="props-group__problem" role="status">
             {problem}
+          </p>
+        )}
+        {note && !problem && (
+          <p className="props-group__note" role="status">
+            {note}
           </p>
         )}
       </section>

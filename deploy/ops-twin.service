@@ -11,6 +11,8 @@ StateDirectory=ops-twin
 WorkingDirectory=/opt/ops-twin/services/api
 Environment=PYTHONUNBUFFERED=1
 Environment=OPS_TWIN_DB=/var/lib/ops-twin/plans.sqlite
+# На показе «Открыть пример» открывает файл заказчика, а не наше условное «Заречное».
+Environment=OPS_TWIN_SAMPLE=/opt/ops-twin/data/example_plan.json
 EnvironmentFile=-/etc/ops-twin.env
 # Пустой адрес — слушать и IPv4, и IPv6: часть мобильных сетей доходит до сервера только по IPv6.
 # «::» не годится: asyncio открывает такой сокет только для IPv6.

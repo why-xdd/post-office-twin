@@ -34,7 +34,8 @@ interface Problem {
   details: string[];
 }
 
-const DEMO_TITLE = 'Демо: отделение «Заречное»';
+// Пример сохраняется под своим же названием: так кнопка находит копию, на которую уже ведут QR-бирки.
+const sampleTitle = (plan: Plan) => plan.ops?.name?.trim() || 'Пример плана';
 
 function describeError(error: unknown, fallback: string): Problem {
   if (error instanceof ApiError) return { title: error.message, details: error.details };
@@ -97,7 +98,8 @@ export function Rack() {
   const openDemo = async () => {
     if (!sample) return;
     // Нетронутая копия примера уже есть — открываем её, а не плодим одинаковые планы.
-    const untouched = plans?.find((plan) => plan.title === DEMO_TITLE && plan.versions === 1);
+    const title = sampleTitle(sample);
+    const untouched = plans?.find((plan) => plan.title === title && plan.versions === 1);
     if (untouched) {
       navigate({ name: 'plan', id: untouched.id });
       return;
@@ -105,7 +107,7 @@ export function Rack() {
     setBusy('demo');
     setProblem(null);
     try {
-      const ref = await api.createPlan(DEMO_TITLE, sample, 'Демонстрационный план');
+      const ref = await api.createPlan(title, sample, 'Демонстрационный план');
       navigate({ name: 'plan', id: ref.id });
     } catch (error) {
       setProblem(describeError(error, 'Не удалось открыть демо-план.'));

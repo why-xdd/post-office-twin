@@ -19,7 +19,7 @@ echo "Сборка клиента"
 echo "Отправка файлов"
 tar -C "$ROOT" --exclude=__pycache__ -czf - \
   services/api/app services/api/pyproject.toml services/api/uv.lock \
-  apps/web/dist data/demo_plan.json data/network deploy/ops-twin.service |
+  apps/web/dist data/demo_plan.json data/example_plan.json data/network deploy/ops-twin.service |
   remote 'rm -rf /opt/ops-twin.new && mkdir -p /opt/ops-twin.new && tar -xzf - -C /opt/ops-twin.new'
 
 if ! remote 'command -v uv >/dev/null'; then

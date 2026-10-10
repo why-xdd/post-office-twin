@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  server:
+    runs-on: ubuntu-latest
+    # Хранилище обязано вести себя одинаково на SQLite и на PostgreSQL: без базы эти проверки пропускаются.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: services/api
+    env:
+      OPS_TWIN_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: services/api/uv.lock
+
+      - name: Install
+        run: uv sync --frozen
+
+      - name: Test
+        run: uv run --frozen pytest -q -rs
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npx vitest run
+
+      - name: Typecheck and build
+        run: npm run build
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build image
+        run: docker build -t post-office-twin:ci .
+
+      - name: Boot and open the sample plan
+        run: |
+          docker run -d --name app -p 8000:8000 post-office-twin:ci
+          for i in $(seq 1 60); do
+            curl -sf localhost:8000/health && break || sleep 1
+          done
+          curl -sf localhost:8000/ | grep -q '<div id="root"'
+          curl -sf localhost:8000/api/sample-plan | grep -q '"walls"'
+          docker rm -f app
